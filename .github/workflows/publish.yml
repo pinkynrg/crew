@@ -1,14 +1,19 @@
 name: Publish to npm
 
-# Publishes crew to the public npm registry when a GitHub Release is published,
-# or on a pushed v* tag. Requires an NPM_TOKEN secret (Automation token) in the repo.
+# On every push to main: run checks, then publish to the public npm registry.
+# Version handling is automatic:
+#   - if package.json's version is NOT yet on npm -> publish it as-is (tag it);
+#   - if it IS already on npm -> auto-bump the patch version, commit + tag, publish.
+# The bump commit is pushed with GITHUB_TOKEN and marked [skip ci], so it does not
+# retrigger this workflow. Requires an NPM_TOKEN secret (npm Automation token).
 on:
-  release:
-    types: [published]
   push:
-    tags:
-      - 'v*'
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -28,8 +33,8 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write # for npm provenance
+      contents: write # push the auto-bump commit + tag
+      id-token: write # npm provenance
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,6 +42,21 @@ jobs:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
+      - name: Resolve version (publish as-is, or auto-bump patch)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION already on npm — bumping patch."
+            npm version patch -m "ci: release v%s [skip ci]"
+            git push origin "HEAD:${GITHUB_REF_NAME}" --follow-tags
+          else
+            echo "$NAME@$VERSION not on npm — publishing as-is."
+            git tag "v$VERSION" || true
+            git push origin "v$VERSION" || true
+          fi
       - name: Publish
         run: npm publish --provenance --access public
         env:
