@@ -1,0 +1,33 @@
+{
+  "name": "crew",
+  "version": "1.0.0",
+  "description": "Fan a named task across a group of local projects — run in parallel, open as one VSCode workspace, or hand the set to Claude Code. One persistent config, run via npx.",
+  "type": "module",
+  "bin": {
+    "crew": "bin/crew.js"
+  },
+  "files": [
+    "bin/crew.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node bin/crew.js"
+  },
+  "keywords": [
+    "cli",
+    "monorepo",
+    "workspace",
+    "concurrently",
+    "vscode",
+    "claude",
+    "dev",
+    "parallel"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "concurrently": "^9.2.0"
+  }
+}
