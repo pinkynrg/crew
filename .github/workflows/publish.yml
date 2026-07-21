@@ -42,10 +42,6 @@ jobs:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
-      - name: Who am I on npm (diagnostic)
-        run: npm whoami
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Resolve version (publish as-is, or auto-bump patch)
         run: |
           git config user.name "github-actions[bot]"

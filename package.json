@@ -27,6 +27,14 @@
     "parallel"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pinkynrg/crew.git"
+  },
+  "homepage": "https://github.com/pinkynrg/crew#readme",
+  "bugs": {
+    "url": "https://github.com/pinkynrg/crew/issues"
+  },
   "dependencies": {
     "concurrently": "^9.2.0"
   }
