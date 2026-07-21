@@ -11,22 +11,22 @@ lifecycle); the **project** owns task semantics.
 
 ## Install
 
-Run with no install (npx needs the full scoped package name):
+Run with no install:
 
 ```sh
-npx @pinkynrg/crew list
+npx crew list
 ```
 
-Or install globally — the command is `crew` once installed:
+Or install globally:
 
 ```sh
-npm i -g @pinkynrg/crew
+npm i -g crew
 crew list
 ```
 
 Requires Node >= 18 and macOS with `code` (VSCode CLI) and `claude` on your PATH.
 The only third-party dependency is [`concurrently`](https://www.npmjs.com/package/concurrently);
-`npx @pinkynrg/crew` pulls it in automatically.
+`npx crew` pulls it in automatically.
 
 ## The three-tab workflow
 
