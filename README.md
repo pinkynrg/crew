@@ -24,9 +24,9 @@ npm i -g @pinkynrg/crew
 crew list
 ```
 
-Requires Node >= 18 and macOS with `code` (VSCode CLI) and `claude` on your PATH.
-The only third-party dependency is [`concurrently`](https://www.npmjs.com/package/concurrently);
-`npx @pinkynrg/crew` pulls it in automatically.
+Requires Node >= 18 on a POSIX system (macOS or Linux), with `code` (VSCode CLI) and
+`claude` on your PATH. **Zero runtime dependencies** — crew is Node built-ins only,
+including its own parallel process runner.
 
 ## The three-tab workflow
 
@@ -149,15 +149,24 @@ crew hardcodes no task names or values beyond the `longRunning` list — no bake
 
 The mode is decided by whether the task is in `config.longRunning`:
 
-- **Long-running** (`start`, `dev`, `watch`, …): parallel via `concurrently
-  --kill-others`. Output is streamed and labelled; Ctrl-C — or any one process dying —
-  tears the whole group down. crew exits with concurrently's code and owns the terminal.
+- **Long-running** (`start`, `dev`, `watch`, …): parallel and streamed with labelled,
+  per-project-colored output. Ctrl-C — or any one process exiting — tears the whole group
+  down. crew owns the terminal and exits with an aggregate code.
 - **Run-to-completion** (`install`, `build`, `test`, …): parallel, but crew **waits for
-  all** to finish. It does **not** use `--kill-others` (one finishing must not kill the
-  others), then prints a per-project pass/fail summary and exits non-zero if any project
-  failed.
+  all** to finish (it does not kill the others when one finishes), then prints a
+  per-project pass/fail summary and exits non-zero if any project failed.
 
-crew owns supervision in both modes — it never hand-rolls process or signal handling.
+### How teardown works (and why it's reliable)
+
+crew runs each command via `/bin/sh -c` in **its own process group** (`spawn` detached).
+On teardown it signals the whole group by pgid (`kill(-pgid)`) — SIGTERM, then SIGKILL
+after a grace period (`CREW_KILL_GRACE_MS`, default 5000ms). A second Ctrl-C force-kills
+immediately.
+
+This is the key reason crew rolls its own runner instead of a ppid-walking tree-kill:
+**reparented grandchildren** — a dev server's autoreload child, a `supervisord`, anything
+that daemonizes — get orphaned to init and escape a ppid walk, leaving a port bound. A
+process-group signal reaches them regardless of reparenting. POSIX only (macOS + Linux).
 
 ## Commands
 

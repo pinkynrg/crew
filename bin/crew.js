@@ -2,8 +2,8 @@
 // crew — fan a named task out across a group of local projects, open them as one
 // VSCode workspace, or hand the set to Claude Code. Driven by one persistent config.
 //
-// Only third-party dependency: `concurrently` (the parallel-run engine). Everything
-// else is Node built-ins. See README for the full model.
+// Zero runtime dependencies — Node built-ins only, including a built-in process-group
+// runner for parallel tasks. POSIX (macOS + Linux). See README for the full model.
 
 import {
   readFileSync,
@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve, isAbsolute } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
@@ -69,11 +69,6 @@ function colorForIndex(i) {
   const [r, g, b] = rgbForIndex(i);
   return fgRGB(r, g, b);
 }
-function hexForIndex(i) {
-  const [r, g, b] = rgbForIndex(i);
-  const h = (v) => v.toString(16).padStart(2, '0');
-  return `#${h(r)}${h(g)}${h(b)}`;
-}
 // Assign every known project a stable rank (sorted name order) -> golden-angle color.
 // Same project set always yields the same color per name, and neighbours differ sharply.
 // Built once per command so list/groups/run all agree.
@@ -81,13 +76,6 @@ function projectColors(cfg) {
   const names = Object.keys(cfg.projects || {}).sort();
   const map = new Map();
   names.forEach((n, i) => map.set(n, colorForIndex(i)));
-  return map;
-}
-// Same rank -> the color as a #rrggbb string, for concurrently's prefixColor.
-function projectHexes(cfg) {
-  const names = Object.keys(cfg.projects || {}).sort();
-  const map = new Map();
-  names.forEach((n, i) => map.set(n, hexForIndex(i)));
   return map;
 }
 function tildify(p) {
@@ -384,34 +372,152 @@ function resolveRun(cfg, task, members, args) {
 }
 
 // ---------------------------------------------------------------------------
-// concurrently — resolved locally (dependency of this package), never via npx.
+// Process runner (POSIX: macOS + Linux). Own implementation, no dependency.
+//
+// Each command runs in its OWN process group (spawn detached), so teardown signals
+// the whole group by pgid — catching grandchildren that reparent away (e.g. a dev
+// server's autoreload child) which a ppid-walking tree-kill would miss. Two modes:
+// kill-others (long-running) and wait-all (run-to-completion), with SIGTERM -> grace
+// -> SIGKILL escalation and double-Ctrl-C force-kill. crew never forwards stdin, so
+// detaching the children (which removes them from the TTY foreground group) is safe;
+// we forward SIGINT/SIGTERM/SIGHUP to each group ourselves.
 // ---------------------------------------------------------------------------
-async function loadConcurrently() {
-  try {
-    const mod = await import('concurrently');
-    return mod.default || mod;
-  } catch {
-    fail("'concurrently' is not installed. Reinstall crew (npm i -g crew) or run via npx.");
-  }
-}
+const KILL_GRACE_MS = Number(process.env.CREW_KILL_GRACE_MS) || 5000;
 
+// exitCode is a number (normal exit) or a signal-name string (killed). Aggregate:
+// first non-zero numeric wins; else 130 if anything was signalled; else 0/1.
 function exitCodeFromEvents(events) {
   if (!Array.isArray(events)) return 1;
   let killedBySignal = false;
   for (const e of events) {
     const code = e && e.exitCode;
     if (typeof code === 'number' && code !== 0) return code;
-    if (typeof code === 'string') killedBySignal = true; // e.g. 'SIGINT'
+    if (typeof code === 'string') killedBySignal = true; // signal name, e.g. 'SIGTERM'
   }
   return killedBySignal ? 130 : 1;
 }
 
-function ccCommandPreview(names, cmds, killOthers) {
-  const parts = ['concurrently'];
-  if (killOthers) parts.push('--kill-others');
-  parts.push('--names', names.join(','));
-  for (const c of cmds) parts.push(JSON.stringify(c));
-  return parts.join(' ');
+function runFanout(commands, { killOthers, announceExits }) {
+  return new Promise((resolve) => {
+    const results = [];
+    const live = new Set();
+    const timers = [];
+    let aborting = false;
+    let sigints = 0;
+
+    // Shared line-aware logger: prefix only at line starts; when a different command
+    // interrupts an unterminated line, close it first (standard prefixed-logger behavior).
+    const lastWrite = { proc: null, char: '\n' };
+    const rawWrite = (s) => {
+      try {
+        process.stdout.write(s);
+      } catch {
+        /* EPIPE handled by the stdout 'error' listener */
+      }
+    };
+    const emit = (proc, text) => {
+      if (!text) return;
+      if (lastWrite.proc && lastWrite.proc !== proc && lastWrite.char !== '\n') {
+        rawWrite('\n');
+        lastWrite.char = '\n';
+      }
+      let s = '';
+      for (const ch of text) {
+        if (lastWrite.char === '\n') s += proc._prefix;
+        s += ch;
+        lastWrite.char = ch;
+      }
+      lastWrite.proc = proc;
+      rawWrite(s);
+    };
+    const note = (proc, msg) => emit(proc, (lastWrite.char === '\n' ? '' : '\n') + msg + '\n');
+
+    const killGroup = (proc, signal) => {
+      if (!proc.pid) return;
+      try {
+        process.kill(-proc.pid, signal); // negative pid -> the whole process group
+      } catch (e) {
+        if (e.code !== 'ESRCH') {
+          try {
+            proc.kill(signal);
+          } catch {
+            /* already gone */
+          }
+        }
+      }
+    };
+    const tearDown = (signal) => {
+      aborting = true;
+      for (const p of live) {
+        p._killedByUs = true;
+        killGroup(p, signal);
+      }
+      if (signal !== 'SIGKILL' && live.size) {
+        const t = setTimeout(() => {
+          for (const p of live) killGroup(p, 'SIGKILL');
+        }, KILL_GRACE_MS);
+        t.unref();
+        timers.push(t);
+      }
+    };
+    const forceKill = () => {
+      for (const p of live) killGroup(p, 'SIGKILL');
+    };
+
+    const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+    const handlers = SIGNALS.map((sig) => {
+      const h = () => {
+        if (sig === 'SIGINT' && ++sigints >= 2) return forceKill();
+        tearDown(sig === 'SIGINT' ? 'SIGINT' : 'SIGTERM');
+      };
+      process.on(sig, h);
+      return [sig, h];
+    });
+    const onStdoutErr = () => tearDown('SIGTERM');
+    process.stdout.on('error', onStdoutErr);
+
+    const settle = () => {
+      for (const [sig, h] of handlers) process.removeListener(sig, h);
+      process.stdout.removeListener('error', onStdoutErr);
+      for (const t of timers) clearTimeout(t);
+      if (lastWrite.char !== '\n') rawWrite('\n');
+      if (COLOR) rawWrite('\x1b[0m');
+      resolve(results);
+    };
+
+    const finish = (proc, exitCode) => {
+      if (!live.has(proc)) return; // 'error' and 'close' can both fire — settle once
+      live.delete(proc);
+      results.push({ name: proc._name, index: proc._index, exitCode });
+      if (announceExits) note(proc, c.dim(`exited (${exitCode})`));
+      if (killOthers && !aborting && live.size) tearDown('SIGTERM');
+      if (live.size === 0) settle();
+    };
+
+    for (let i = 0; i < commands.length; i++) {
+      const cmd = commands[i];
+      const child = spawn('/bin/sh', ['-c', cmd.command], {
+        detached: true, // own process group -> group-kill catches reparented children
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...(COLOR ? { FORCE_COLOR: '1' } : {}), ...process.env },
+      });
+      child._name = cmd.name;
+      child._index = i;
+      child._color = cmd.color;
+      child._prefix = cmd.color(`[${cmd.name}] `);
+      child._killedByUs = false;
+      live.add(child);
+      child.stdout.on('data', (b) => emit(child, b.toString('utf8')));
+      child.stderr.on('data', (b) => emit(child, b.toString('utf8')));
+      child.on('error', (err) => {
+        note(child, c.red(`failed to start: ${err.message}`));
+        finish(child, 1);
+      });
+      child.on('close', (code, signal) => finish(child, code ?? signal));
+    }
+
+    if (live.size === 0) settle();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -431,58 +537,38 @@ async function cmdRun(flags, task, targetName, args) {
   const mode = isLong ? 'long-running' : 'run-to-completion';
 
   const cmds = runnable.map((r) => `cd ${shellQuote(projectCwd(r.project))} && ${r.resolved}`);
-  const names = runnable.map((r) => r.name);
 
   if (flags.dryRun) {
     console.log(`# task '${task}' on ${target.kind} '${target.name}' — mode: ${mode}`);
     for (const r of runnable)
       console.log(`  ${r.name}: cd ${shellQuote(projectCwd(r.project))} && ${r.resolved}`);
-    console.log('\n' + ccCommandPreview(names, cmds, isLong));
     return;
   }
 
-  const concurrently = await loadConcurrently();
-  const hexes = projectHexes(cfg); // same per-project colors as `crew list`
+  const paint = projectColors(cfg); // same per-project colors as `crew list`
   const commands = runnable.map((r, i) => ({
     command: cmds[i],
     name: r.name,
-    prefixColor: hexes.get(r.name),
+    color: paint.get(r.name) || ((s) => s),
   }));
 
   if (isLong) {
-    // LONG-RUNNING: stream, --kill-others, Ctrl-C tears the whole group down.
-    const { result } = concurrently(commands, {
-      prefix: 'name',
-      killOthersOn: ['failure', 'success'],
-    });
-    try {
-      await result;
-      process.exit(0);
-    } catch (events) {
-      process.exit(exitCodeFromEvents(events));
-    }
+    // LONG-RUNNING: stream; the first exit (any) tears the whole group down; Ctrl-C too.
+    const results = await runFanout(commands, { killOthers: true, announceExits: true });
+    process.exit(exitCodeFromEvents(results));
   } else {
-    // RUN-TO-COMPLETION: wait for all, no --kill-others, then a pass/fail summary.
-    const { result } = concurrently(commands, { prefix: 'name' });
-    let events;
-    let ok = true;
-    try {
-      events = await result;
-    } catch (e) {
-      events = Array.isArray(e) ? e : null;
-      ok = false;
-    }
+    // RUN-TO-COMPLETION: wait for all (no kill-others), then a pass/fail summary.
+    const results = await runFanout(commands, { killOthers: false, announceExits: false });
     console.log(`\ncrew: task '${task}' results`);
-    const byName = new Map();
-    for (const e of events || []) byName.set(e.command?.name ?? e.index, e.exitCode);
+    const byName = new Map(results.map((e) => [e.name, e.exitCode]));
     let anyFailed = false;
     for (const r of runnable) {
-      const code = byName.has(r.name) ? byName.get(r.name) : ok ? 0 : '?';
+      const code = byName.has(r.name) ? byName.get(r.name) : '?';
       const passed = code === 0;
       if (!passed) anyFailed = true;
-      console.log(`  ${passed ? '✓' : '✗'} ${r.name} (exit ${code})`);
+      console.log(`  ${passed ? c.green('✓') : c.red('✗')} ${r.name} (exit ${code})`);
     }
-    process.exit(anyFailed || !ok ? 1 : 0);
+    process.exit(anyFailed ? 1 : 0);
   }
 }
 

@@ -13,16 +13,18 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 ## Layout
 
 - `bin/crew.js` — the entire CLI. Single ESM executable, `#!/usr/bin/env node`.
-- `package.json` — `bin.crew`, `type:module`, `engines.node >=18`.
-- `.github/workflows/publish.yml` — npm publish CI (release / `v*` tag / dispatch).
-- `instruction.md` — the original build spec (source of truth for behavior).
+- `package.json` — `bin.crew`, `type:module`, `engines.node >=18`, zero deps.
+- `.github/workflows/publish.yml` — npm publish CI (push to main; auto-bump patch).
+- `README.md` — user-facing docs (behavior reference).
 
 ## Hard constraints (do not break)
 
-- **One third-party dependency only: `concurrently`.** Everything else is Node built-ins
-  (`node:fs`, `node:path`, `node:os`, `node:child_process`, `node:readline/promises`).
+- **Zero runtime dependencies.** Node built-ins only (`node:fs`, `node:path`, `node:os`,
+  `node:child_process`, `node:https`, `node:readline` + `readline/promises`). The parallel
+  runner is our own (`runFanout`).
 - **Single executable file.** Keep the CLI in `bin/crew.js`; don't split into modules.
-- Resolve `concurrently` locally (via `createRequire` / dynamic import) — never `npx`.
+- **POSIX only (macOS + Linux).** The runner relies on `/bin/sh`, `spawn` `detached:true`
+  (setsid), and `process.kill(-pgid)`. No Windows.
 - No raw stack traces on expected errors: throw `CrewError`, exit non-zero, one-line msg.
 - `~` expansion + relative-to-cwd resolution everywhere; dedupe dir lists by resolved
   absolute path.
@@ -35,9 +37,15 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 - User-level: `~/.config/crew/config.json` (v2 schema). Project-local `./.crew.json`
   merges on top. v1 configs migrate to v2 on load (`start.command` -> `tasks.start`).
 - Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip.
-- Two execution modes by `config.longRunning`: long-running (`concurrently
-  --kill-others`, streamed, Ctrl-C tears down) vs run-to-completion (wait all, no
-  kill-others, pass/fail summary, non-zero if any failed).
+- Two execution modes by `config.longRunning`: long-running (streamed, first exit or
+  Ctrl-C tears the whole group down) vs run-to-completion (wait all, no kill-others,
+  pass/fail summary, non-zero if any failed).
+- Runner (`runFanout`): each command spawns `detached` in its own process group; teardown
+  signals the group by pgid (`kill(-pgid)`) with SIGTERM -> grace -> SIGKILL escalation, so
+  reparented grandchildren (autoreload children, supervisord) die too — unlike a ppid
+  tree-kill. Grace via `CREW_KILL_GRACE_MS` (default 5000). Colored `[name]` prefixes reuse
+  the `crew list` per-project colors; `FORCE_COLOR` is set for children when the parent is a
+  TTY.
 
 ## Testing
 
