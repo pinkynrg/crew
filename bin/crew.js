@@ -61,18 +61,33 @@ function hslToRgb(h, s, l) {
 // An ordered palette where each color sits ~137.5 deg (golden angle) from the previous
 // one, so consecutive indices are maximally distant in hue. Vivid S/L keep it readable
 // on a dark background. Index N is stable and reproducible — not random.
-function colorForIndex(i) {
+function rgbForIndex(i) {
   const hue = (i * 137.508) % 360;
-  const [r, g, b] = hslToRgb(hue, 0.72, 0.62);
+  return hslToRgb(hue, 0.72, 0.62);
+}
+function colorForIndex(i) {
+  const [r, g, b] = rgbForIndex(i);
   return fgRGB(r, g, b);
+}
+function hexForIndex(i) {
+  const [r, g, b] = rgbForIndex(i);
+  const h = (v) => v.toString(16).padStart(2, '0');
+  return `#${h(r)}${h(g)}${h(b)}`;
 }
 // Assign every known project a stable rank (sorted name order) -> golden-angle color.
 // Same project set always yields the same color per name, and neighbours differ sharply.
-// Built once per command so groups/list/run all agree.
+// Built once per command so list/groups/run all agree.
 function projectColors(cfg) {
   const names = Object.keys(cfg.projects || {}).sort();
   const map = new Map();
   names.forEach((n, i) => map.set(n, colorForIndex(i)));
+  return map;
+}
+// Same rank -> the color as a #rrggbb string, for concurrently's prefixColor.
+function projectHexes(cfg) {
+  const names = Object.keys(cfg.projects || {}).sort();
+  const map = new Map();
+  names.forEach((n, i) => map.set(n, hexForIndex(i)));
   return map;
 }
 function tildify(p) {
@@ -427,7 +442,12 @@ async function cmdRun(flags, task, targetName, args) {
   }
 
   const concurrently = await loadConcurrently();
-  const commands = runnable.map((r, i) => ({ command: cmds[i], name: r.name }));
+  const hexes = projectHexes(cfg); // same per-project colors as `crew list`
+  const commands = runnable.map((r, i) => ({
+    command: cmds[i],
+    name: r.name,
+    prefixColor: hexes.get(r.name),
+  }));
 
   if (isLong) {
     // LONG-RUNNING: stream, --kill-others, Ctrl-C tears the whole group down.
