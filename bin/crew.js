@@ -16,11 +16,69 @@ import { homedir } from 'node:os';
 import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
+import { emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+// ---------------------------------------------------------------------------
+// Colors — ANSI only (no dependency). Disabled when not a TTY, NO_COLOR is set,
+// or TERM=dumb, so piped/redirected output stays clean.
+// ---------------------------------------------------------------------------
+const COLOR = process.stdout.isTTY && !process.env.NO_COLOR && process.env.TERM !== 'dumb';
+const wrap = (n) => (s) => (COLOR ? `\x1b[${n}m${s}\x1b[0m` : `${s}`);
+const c = {
+  bold: wrap(1),
+  dim: wrap(2),
+  underline: wrap(4),
+  red: wrap(31),
+  green: wrap(32),
+  yellow: wrap(33),
+  cyan: wrap(36),
+  gray: wrap(90),
+};
+// Truecolor when the terminal advertises it, otherwise fall back to the xterm-256 cube.
+const TRUECOLOR = COLOR && /^(truecolor|24bit)$/i.test(process.env.COLORTERM || '');
+function rgbTo256(r, g, b) {
+  const to6 = (v) => (v < 48 ? 0 : v > 247 ? 5 : Math.round((v - 35) / 40));
+  return 16 + 36 * to6(r) + 6 * to6(g) + to6(b);
+}
+function fgRGB(r, g, b) {
+  if (!COLOR) return (s) => `${s}`;
+  const code = TRUECOLOR ? `38;2;${r};${g};${b}` : `38;5;${rgbTo256(r, g, b)}`;
+  return (s) => `\x1b[${code}m${s}\x1b[0m`;
+}
+function hslToRgb(h, s, l) {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => {
+    const k = (n + h / 30) % 12;
+    return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+  };
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+// An ordered palette where each color sits ~137.5 deg (golden angle) from the previous
+// one, so consecutive indices are maximally distant in hue. Vivid S/L keep it readable
+// on a dark background. Index N is stable and reproducible — not random.
+function colorForIndex(i) {
+  const hue = (i * 137.508) % 360;
+  const [r, g, b] = hslToRgb(hue, 0.72, 0.62);
+  return fgRGB(r, g, b);
+}
+// Assign every known project a stable rank (sorted name order) -> golden-angle color.
+// Same project set always yields the same color per name, and neighbours differ sharply.
+// Built once per command so groups/list/run all agree.
+function projectColors(cfg) {
+  const names = Object.keys(cfg.projects || {}).sort();
+  const map = new Map();
+  names.forEach((n, i) => map.set(n, colorForIndex(i)));
+  return map;
+}
+function tildify(p) {
+  const h = homedir();
+  return p === h || p.startsWith(h + '/') ? '~' + p.slice(h.length) : p;
+}
 
 // ---------------------------------------------------------------------------
 // Errors — expected failures print a clean one-line message, never a stack.
@@ -207,7 +265,7 @@ function resolveTarget(cfg, name) {
     `unknown target '${name}'.\n` +
       `  groups:   ${groups.join(', ') || '(none)'}\n` +
       `  projects: ${projects.join(', ') || '(none)'}` +
-      (groups.length || projects.length ? '' : '\n  Nothing configured yet — run: crew init')
+      (groups.length || projects.length ? '' : '\n  Nothing configured yet — run: crew add')
   );
 }
 
@@ -461,27 +519,63 @@ async function cmdClaude(flags, targetName) {
 }
 
 function cmdList(flags) {
-  const { cfg } = loadMerged(flags);
+  const { cfg, localPath } = loadMerged(flags);
   const projects = Object.entries(cfg.projects || {});
   const groups = Object.entries(cfg.groups || {});
+  const longRunning = new Set(cfg.longRunning || []);
+  const paint = projectColors(cfg);
   if (projects.length === 0 && groups.length === 0) {
-    console.log('No projects or groups configured yet.\nRun: crew init');
+    console.log(c.dim('No projects or groups configured yet.'));
+    console.log(`Run ${c.cyan('crew add')} to add one.`);
     return;
   }
-  console.log('Projects:');
-  if (projects.length === 0) console.log('  (none)');
+
+  // --- Projects -------------------------------------------------------------
+  console.log(c.bold(c.underline('Projects')));
+  if (projects.length === 0) console.log(c.dim('  (none)'));
+  const nameW = Math.max(0, ...projects.map(([n]) => n.length));
+  const typeW = Math.max(0, ...projects.map(([, p]) => (p.type || 'other').length));
   for (const [name, p] of projects) {
     const abs = resolvePath(p.path);
-    const exists = pathExists(abs) ? '✓' : '✗ MISSING';
-    console.log(`  ${name}  [${p.type || 'other'}]  ${abs}  ${exists}`);
-    if (p.runner) console.log(`      runner: ${p.runner}`);
-    for (const [t, c] of Object.entries(p.tasks || {})) console.log(`      task ${t}: ${c}`);
-    if (!p.runner && !Object.keys(p.tasks || {}).length) console.log('      (run-less)');
+    const ok = pathExists(abs);
+    const dot = ok ? c.green('●') : c.red('●');
+    const type = p.type || 'other';
+    const nameCell = c.bold(paint.get(name)(name.padEnd(nameW)));
+    const typeCell = c.dim(type.padEnd(typeW));
+    const pathCell = ok ? c.dim(tildify(abs)) : c.red(tildify(abs) + '  ✗ missing');
+    console.log(`  ${dot} ${nameCell}  ${typeCell}  ${pathCell}`);
+
+    const taskEntries = Object.entries(p.tasks || {});
+    const labels = [p.runner ? 'runner' : null, ...taskEntries.map(([t]) => t)].filter(Boolean);
+    const labelW = Math.max(6, ...labels.map((s) => s.length));
+    if (p.runner) console.log(`      ${c.dim('runner'.padEnd(labelW + 2))}${p.runner}`);
+    for (const [t, cmd] of taskEntries) {
+      const kind = longRunning.has(t) ? c.yellow('service') : c.green('task');
+      console.log(`      ${c.dim(t.padEnd(labelW + 2))}${cmd}  ${c.dim('[')}${kind}${c.dim(']')}`);
+    }
+    if (!p.runner && taskEntries.length === 0) console.log(`      ${c.dim('(run-less)')}`);
   }
-  console.log('\nGroups:');
-  if (groups.length === 0) console.log('  (none)');
-  for (const [name, members] of groups) console.log(`  ${name} -> ${members.join(', ')}`);
-  console.log(`\nLong-running tasks: ${(cfg.longRunning || []).join(', ') || '(none)'}`);
+
+  // --- Groups (members painted with each project's own stable color) --------
+  console.log('\n' + c.bold(c.underline('Groups')));
+  if (groups.length === 0) console.log(c.dim('  (none)'));
+  const known = new Set(Object.keys(cfg.projects || {}));
+  const gW = Math.max(0, ...groups.map(([n]) => n.length));
+  for (const [name, members] of groups) {
+    const mem = members
+      .map((m) => (known.has(m) ? paint.get(m)(m) : c.red(m + '?')))
+      .join(c.dim(', '));
+    console.log(`  ${c.bold(name.padEnd(gW))}  ${c.dim('→')}  ${mem}`);
+  }
+
+  // --- Footer ---------------------------------------------------------------
+  const lr = (cfg.longRunning || []).map((t) => c.yellow(t)).join(c.dim(', ')) || c.dim('(none)');
+  console.log('\n' + c.dim('long-running  ') + lr);
+  console.log(
+    c.dim('config        ') +
+      c.dim(tildify(userConfigPath(flags))) +
+      (localPath ? c.dim(`  (+ ${tildify(localPath)})`) : '')
+  );
 }
 
 function cmdConfig(flags, sub) {
@@ -504,113 +598,183 @@ function cmdConfig(flags, sub) {
   console.log(JSON.stringify(cfg, null, 2));
 }
 
-async function cmdInit(flags, projectName) {
+function normalizeKind(s) {
+  const v = String(s).trim().toLowerCase();
+  if (v.startsWith('g')) return 'group';
+  if (v.startsWith('p')) return 'project';
+  fail(`answer 'project' or 'group' (got '${s}')`);
+}
+
+// Prompt for every project field, defaulting to `existing` (empty object when adding).
+async function collectProject(ask, existing) {
+  const path0 = await ask('Path', existing.path || '');
+  if (!path0) fail('a path is required');
+  const abs = resolvePath(path0);
+  if (!pathExists(abs)) {
+    const keep = await ask(`Path does not exist (${abs}). Save anyway? (y/N)`, 'N');
+    if (!/^y/i.test(keep)) fail('aborted (path does not exist)');
+  }
+  const type = await ask('Type (frontend/backend/fullstack/other)', existing.type || 'other');
+  const relatedRaw = await ask(
+    'Related dirs (comma-separated, blank for none)',
+    (existing.relatedDirs || []).join(', ')
+  );
+  const relatedDirs = relatedRaw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const cwd = await ask('Working dir for tasks (blank = path)', existing.cwd || '');
+  const runner = await ask(
+    'Default runner template (e.g. "npm run {task}" or "make {task}", blank = run-less)',
+    existing.runner || ''
+  );
+  const tasks = { ...(existing.tasks || {}) };
+  console.log('Explicit task overrides (blank task name to finish; "-" to drop one):');
+  for (;;) {
+    const t = (await ask('  Task name', '')).trim();
+    if (!t) break;
+    const cmd = await ask(`  Command for '${t}'`, tasks[t] || '');
+    if (cmd === '-') delete tasks[t];
+    else if (cmd) tasks[t] = cmd;
+  }
+  const project = { path: path0, type, relatedDirs };
+  if (cwd) project.cwd = cwd;
+  if (runner) project.runner = runner;
+  if (Object.keys(tasks).length) project.tasks = tasks;
+  return project;
+}
+
+// Prompt for an ordered member list, validated against existing projects.
+async function collectMembers(ask, cfg, existing) {
+  const known = Object.keys(cfg.projects || {});
+  if (!known.length) fail('no projects exist yet — add a project first');
+  console.log('Available projects: ' + known.join(', '));
+  const raw = await ask('Members (space/comma separated, ordered)', (existing || []).join(' '));
+  const members = raw
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const missing = members.filter((m) => !cfg.projects[m]);
+  if (missing.length) fail(`unknown project(s): ${missing.join(', ')}. Known: ${known.join(', ')}`);
+  return members;
+}
+
+// crew add — create a NEW project or group entirely via wizard (errors if it exists).
+async function cmdAdd(flags) {
   const { cfg, path } = loadUserConfig(flags);
   const { ask, close } = makeAsker();
   try {
-    const name = (projectName || (await ask('Project name', ''))).trim();
-    if (!name) fail('init: a project name is required');
-    const existing = cfg.projects[name] || {};
-    if (cfg.groups[name])
-      console.log(`WARNING: '${name}' is also a group name — the group shadows this project.`);
-    if (cfg.projects[name]) console.log(`(updating existing project '${name}')`);
+    const kind = normalizeKind(await ask('Add a project or a group? (project/group)', 'project'));
+    const name = (await ask(`${kind === 'group' ? 'Group' : 'Project'} name`, '')).trim();
+    if (!name) fail(`add: a ${kind} name is required`);
+    if (cfg.projects[name] || cfg.groups[name])
+      fail(`'${name}' already exists. Use: crew edit ${name}`);
 
-    let path0 = await ask('Path', existing.path || '');
-    if (!path0) fail('init: a path is required');
-    const abs = resolvePath(path0);
-    if (!pathExists(abs)) {
-      const keep = await ask(`Path does not exist (${abs}). Save anyway? (y/N)`, 'N');
-      if (!/^y/i.test(keep)) fail('init: aborted (path does not exist)');
+    if (kind === 'group') {
+      const members = await collectMembers(ask, cfg, []);
+      if (!members.length) fail('add: a group needs at least one member');
+      cfg.groups[name] = members;
+      writeUserConfig(path, cfg);
+      console.log(`\nSaved group '${name}' -> ${members.join(', ')}`);
+    } else {
+      cfg.projects[name] = await collectProject(ask, {});
+      writeUserConfig(path, cfg);
+      console.log(`\nSaved project '${name}' to ${path}`);
     }
-
-    const type = await ask('Type (frontend/backend/fullstack/other)', existing.type || 'other');
-    const relatedRaw = await ask(
-      'Related dirs (comma-separated, blank for none)',
-      (existing.relatedDirs || []).join(', ')
-    );
-    const relatedDirs = relatedRaw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const cwd = await ask('Working dir for tasks (blank = path)', existing.cwd || '');
-    const runner = await ask(
-      'Default runner template (e.g. "npm run {task}" or "make {task}", blank = run-less)',
-      existing.runner || ''
-    );
-
-    const tasks = { ...(existing.tasks || {}) };
-    console.log('Explicit task overrides (blank task name to finish):');
-    for (;;) {
-      const t = (await ask('  Task name', '')).trim();
-      if (!t) break;
-      const c = await ask(`  Command for '${t}'`, tasks[t] || '');
-      if (c) tasks[t] = c;
-    }
-
-    const project = { path: path0, type, relatedDirs };
-    if (cwd) project.cwd = cwd;
-    if (runner) project.runner = runner;
-    if (Object.keys(tasks).length) project.tasks = tasks;
-
-    cfg.projects[name] = project;
-    writeUserConfig(path, cfg);
-    console.log(`\nSaved project '${name}' to ${path}`);
   } finally {
     close();
   }
 }
 
-function cmdGroup(flags, groupName, members) {
-  if (!groupName) fail('group: missing name. Usage: crew group <name> <project ...>');
+// crew edit [name] — modify an EXISTING project or group via wizard (errors if absent).
+async function cmdEdit(flags, name) {
   const { cfg, path } = loadUserConfig(flags);
+  const projects = Object.keys(cfg.projects || {});
+  const groups = Object.keys(cfg.groups || {});
+  if (!projects.length && !groups.length) fail('edit: nothing to edit yet. Run: crew add');
 
-  if (members.length === 0) {
-    if (cfg.groups[groupName]) {
-      console.log(`${groupName} -> ${cfg.groups[groupName].join(', ')}`);
-      return;
+  // No name given: pick from a list — arrow keys when interactive, else typed.
+  if (!name) {
+    const items = [
+      ...projects.map((n) => ({ name: n, kind: 'project' })),
+      ...groups.map((n) => ({ name: n, kind: 'group' })),
+    ];
+    if (canInteractive()) {
+      const picked = await pickFromList('Edit which?', items, (it, sel) => {
+        const nm = sel ? c.bold(it.name) : it.name;
+        return `${nm} ${c.dim('— ' + it.kind)}`;
+      });
+      if (!picked) {
+        console.log('edit: cancelled');
+        return;
+      }
+      name = picked.name;
+    } else {
+      const { ask, close } = makeAsker();
+      try {
+        console.log('Projects: ' + (projects.join(', ') || '(none)'));
+        console.log('Groups:   ' + (groups.join(', ') || '(none)'));
+        name = (await ask('Name to edit', '')).trim();
+      } finally {
+        close();
+      }
     }
-    fail(`no such group '${groupName}'. Provide members to create it: crew group ${groupName} <project ...>`);
   }
+  if (!name) fail('edit: a name is required');
 
-  const missing = members.filter((m) => !cfg.projects[m]);
-  if (missing.length)
-    fail(
-      `unknown project(s): ${missing.join(', ')}. ` +
-        `Known: ${Object.keys(cfg.projects).join(', ') || '(none)'}`
-    );
-  if (cfg.projects[groupName])
-    console.log(`WARNING: '${groupName}' is also a project name — the group shadows it.`);
+  const { ask, close } = makeAsker();
+  try {
+    const isGroup = !!cfg.groups[name];
+    const isProject = !!cfg.projects[name];
+    if (!isGroup && !isProject) fail(`no such project or group '${name}'. Run: crew add`);
 
-  cfg.groups[groupName] = members;
-  writeUserConfig(path, cfg);
-  console.log(`Saved group '${groupName}' -> ${members.join(', ')}`);
+    if (isGroup) {
+      const members = await collectMembers(ask, cfg, cfg.groups[name]);
+      if (!members.length) fail('edit: a group needs at least one member');
+      cfg.groups[name] = members;
+      writeUserConfig(path, cfg);
+      console.log(`\nUpdated group '${name}' -> ${members.join(', ')}`);
+    } else {
+      cfg.projects[name] = await collectProject(ask, cfg.projects[name]);
+      writeUserConfig(path, cfg);
+      console.log(`\nUpdated project '${name}' in ${path}`);
+    }
+  } finally {
+    close();
+  }
 }
 
-async function cmdRemove(flags, projectName) {
-  if (!projectName) fail('remove: missing project name. Usage: crew remove <project>');
+// Names are unique across projects and groups, so one command removes either.
+async function cmdRemove(flags, name) {
+  if (!name) fail('remove: missing name. Usage: crew remove <name>');
   const { cfg, path } = loadUserConfig(flags);
-  if (!cfg.projects[projectName])
-    fail(`no such project '${projectName}'. Known: ${Object.keys(cfg.projects).join(', ') || '(none)'}`);
-  if (!(await confirm(flags, `Delete project '${projectName}'?`))) return;
-  delete cfg.projects[projectName];
-  const referencing = Object.entries(cfg.groups)
-    .filter(([, m]) => m.includes(projectName))
-    .map(([g]) => g);
+  const isGroup = !!cfg.groups[name];
+  const isProject = !!cfg.projects[name];
+  if (isGroup && isProject)
+    fail(`'${name}' exists as both a group and a project (legacy config); edit ${path} by hand.`);
+  if (!isGroup && !isProject)
+    fail(
+      `no such project or group '${name}'.\n` +
+        `  projects: ${Object.keys(cfg.projects).join(', ') || '(none)'}\n` +
+        `  groups:   ${Object.keys(cfg.groups).join(', ') || '(none)'}`
+    );
+
+  const kind = isGroup ? 'group' : 'project';
+  if (!(await confirm(flags, `Delete ${kind} '${name}'?`))) return;
+
+  let referencing = [];
+  if (isGroup) {
+    delete cfg.groups[name];
+  } else {
+    delete cfg.projects[name];
+    referencing = Object.entries(cfg.groups)
+      .filter(([, m]) => m.includes(name))
+      .map(([g]) => g);
+  }
   writeUserConfig(path, cfg);
-  console.log(`Removed project '${projectName}'`);
+  console.log(`Removed ${kind} '${name}'`);
   if (referencing.length)
     console.log(`NOTE: still referenced by group(s): ${referencing.join(', ')}`);
-}
-
-async function cmdRemoveGroup(flags, groupName) {
-  if (!groupName) fail('remove-group: missing group name. Usage: crew remove-group <name>');
-  const { cfg, path } = loadUserConfig(flags);
-  if (!cfg.groups[groupName])
-    fail(`no such group '${groupName}'. Known: ${Object.keys(cfg.groups).join(', ') || '(none)'}`);
-  if (!(await confirm(flags, `Delete group '${groupName}'?`))) return;
-  delete cfg.groups[groupName];
-  writeUserConfig(path, cfg);
-  console.log(`Removed group '${groupName}'`);
 }
 
 // ---------------------------------------------------------------------------
@@ -671,55 +835,132 @@ async function confirm(flags, question) {
   }
 }
 
+// Arrow-key selectable list. Needs an interactive TTY (raw mode); callers fall back to a
+// typed prompt otherwise. Up/down (or k/j) move, Enter picks, Esc/q/Ctrl-C cancel (null).
+function canInteractive() {
+  return !!(process.stdin.isTTY && process.stdout.isTTY);
+}
+function pickFromList(title, items, label) {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    const out = process.stdout;
+    let idx = 0;
+    emitKeypressEvents(stdin);
+    const wasRaw = stdin.isRaw;
+    stdin.setRawMode(true);
+    stdin.resume();
+    out.write(`${title}${c.dim('  (↑/↓ to move, Enter to pick, Esc to cancel)')}\n`);
+    out.write('\x1b[?25l'); // hide cursor
+
+    const render = (first) => {
+      if (!first) out.write(`\x1b[${items.length}A`);
+      items.forEach((it, i) => {
+        const sel = i === idx;
+        const ptr = sel ? c.cyan('❯ ') : '  ';
+        out.write(`\x1b[2K${ptr}${label(it, sel)}\n`);
+      });
+    };
+    render(true);
+
+    const cleanup = () => {
+      out.write('\x1b[?25h'); // show cursor
+      stdin.removeListener('keypress', onKey);
+      if (stdin.setRawMode) stdin.setRawMode(wasRaw);
+      stdin.pause();
+    };
+    const onKey = (_str, key) => {
+      if (!key) return;
+      if (key.name === 'up' || key.name === 'k') {
+        idx = (idx - 1 + items.length) % items.length;
+        render();
+      } else if (key.name === 'down' || key.name === 'j') {
+        idx = (idx + 1) % items.length;
+        render();
+      } else if (key.name === 'return' || key.name === 'enter') {
+        cleanup();
+        resolve(items[idx]);
+      } else if (key.name === 'escape' || key.name === 'q' || (key.ctrl && key.name === 'c')) {
+        cleanup();
+        resolve(null);
+      }
+    };
+    stdin.on('keypress', onKey);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Help
 // ---------------------------------------------------------------------------
 function help() {
-  console.log(`crew ${PKG.version} — fan a task across a group of local projects
+  // Minimal color: bold section headers + cyan command names. Everything else is
+  // default color. Padding is computed on the plain text, so alignment holds.
+  const COL = 35;
+  const cmd = (name, rest, desc) => {
+    const sig = rest ? `${name} ${rest}` : name;
+    const left = rest ? `${c.cyan(name)} ${rest}` : c.cyan(name);
+    return `  ${left}${' '.repeat(Math.max(2, COL - sig.length))}${desc}`;
+  };
+  const ACTIONS = [
+    ['help', '', 'Show this help (no args / -h / --help)'],
+    ['list', '', 'List projects and groups (alias: ls)'],
+    ['install', '<project|group>', 'Run the install task (= crew run install)'],
+    ['start', '<project|group> [args]', 'Run the start task (= crew run start)'],
+    ['workspace', '<project|group>', 'Open as one VSCode window (alias: code)'],
+    ['claude', '<project|group>', 'Launch Claude Code once (deduped dirs)'],
+    ['run', '<task> <project|group> [args]', 'Fan any task across a project/group'],
+  ];
+  const CONFIG = [
+    ['add', '', 'Wizard: create a new project or group'],
+    ['edit', '[name]', 'Wizard: modify an existing project or group'],
+    ['remove', '<name>', 'Delete a project or group (-y, alias rm)'],
+    ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
+  ];
+  const FLAGS = [
+    ['--dry-run', 'Show what would run without executing'],
+    ['--fileless', 'workspace: open windows instead of a workspace file'],
+    ['--config <path>', 'Use a specific config file'],
+    ['-y, --yes', 'Skip confirmation prompts'],
+    ['-h, --help', 'This help'],
+    ['-v, --version', 'Print version'],
+  ];
+  const EXAMPLES = [
+    'crew add',
+    'crew edit full',
+    'crew run install full',
+    'crew run build api',
+    'crew start checkout env=qa',
+    'crew workspace full',
+    'crew claude full',
+  ];
 
-USAGE
-  crew <command> [target] [args] [flags]
-
-COMMANDS
-  help                              Show this help (also: no args, -h, --help)
-  list                              List projects and groups            (alias: ls)
-  run <task> <target> [args]        Fan <task> out across the target
-  start <target> [args]             = crew run start <target>
-  install <target>                  = crew run install <target>
-  workspace <target> [--fileless]   Open target as one VSCode window    (alias: code)
-  claude <target>                   Launch Claude Code once with --add-dir per dir
-  init [project]                    Wizard: add/update a project
-  group <name> <project ...>        Create/update a group (no members = print it)
-  remove <project>                  Delete a project (confirm; -y skips) (alias: rm)
-  remove-group <name>               Delete a group (confirm; -y skips)
-  config [path|edit]                Print resolved config / its path / open in $EDITOR
-
-TARGET
-  A group name OR a single project name (bare project = group of one).
-  Resolved group-first, then project.
-
-TASKS
-  A task resolves per project: tasks[<task>] -> runner with {task} -> skip.
-  Long-running tasks (config.longRunning, default: start/dev/watch) stream and
-  are torn down together on Ctrl-C. Others run to completion and report pass/fail.
-  Placeholders {name} are filled by args: bare positional or key=value (strict).
-
-FLAGS
-  --dry-run            Show what would run without executing
-  --fileless           workspace: open windows instead of a workspace file
-  --config <path>      Use a specific config file
-  -y, --yes            Skip confirmation prompts
-  -h, --help           This help
-  -v, --version        Print version
-
-EXAMPLES
-  crew init
-  crew group full api web
-  crew run install full
-  crew run build api
-  crew start checkout env=qa
-  crew workspace full
-  crew claude full`);
+  const L = [];
+  L.push(`${c.bold('crew')} ${PKG.version} — fan a task across a group of local projects`);
+  L.push('');
+  L.push(c.bold('USAGE'));
+  L.push('  crew <command> [project|group] [args] [flags]');
+  L.push('');
+  L.push(c.bold('ACTIONS'));
+  for (const [n, r, d] of ACTIONS) L.push(cmd(n, r, d));
+  L.push('');
+  L.push(c.bold('CONFIG'));
+  for (const [n, r, d] of CONFIG) L.push(cmd(n, r, d));
+  L.push('');
+  L.push(c.bold('PROJECT | GROUP'));
+  L.push('  A single project name OR a group name (a bare project = a group of one).');
+  L.push('  Resolved group-first, then project. Names are unique across the two.');
+  L.push('');
+  L.push(c.bold('TASKS'));
+  L.push('  A task resolves per project: tasks[<task>] -> runner with {task} -> skip.');
+  L.push('  Long-running tasks (config.longRunning, default: start/dev/watch) stream and');
+  L.push('  tear down together on Ctrl-C. Others run to completion, then report pass/fail.');
+  L.push('  Placeholders {name} are filled by args: bare positional or key=value (strict).');
+  L.push('');
+  L.push(c.bold('FLAGS'));
+  for (const [f, d] of FLAGS) L.push(`  ${c.cyan(f)}${' '.repeat(Math.max(2, 18 - f.length))}${d}`);
+  L.push('');
+  L.push(c.bold('EXAMPLES'));
+  for (const e of EXAMPLES) L.push('  ' + e);
+  console.log(L.join('\n'));
 }
 
 // ---------------------------------------------------------------------------
@@ -790,18 +1031,15 @@ async function main() {
     case 'claude':
       await cmdClaude(flags, rest[0]);
       return;
-    case 'init':
-      await cmdInit(flags, rest[0]);
+    case 'add':
+      await cmdAdd(flags);
       return;
-    case 'group':
-      cmdGroup(flags, rest[0], rest.slice(1));
+    case 'edit':
+      await cmdEdit(flags, rest[0]);
       return;
     case 'remove':
     case 'rm':
       await cmdRemove(flags, rest[0]);
-      return;
-    case 'remove-group':
-      await cmdRemoveGroup(flags, rest[0]);
       return;
     case 'config':
       cmdConfig(flags, rest[0]);

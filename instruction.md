@@ -68,9 +68,9 @@ Schema:
 - Every command taking a <target> accepts a group name OR a single project name
   (bare project = group of one). Resolve GROUP FIRST, then project, else error listing
   valid names.
-- NAME COLLISION: if a project and a group share a name, the group shadows the project
-  (group-first). Warn at `init` and `group` creation time when a new name collides with
-  an existing one of the other kind.
+- UNIQUE NAMES: a name identifies exactly one thing. `add` ERRORs if a name already
+  exists (as either kind). Because names are unique, <target> resolution, `edit`, and
+  `remove` are unambiguous and need no shadowing rule.
 - DEDUPE: when building any folder/dir list (workspace folders, claude --add-dir), dedupe
   by RESOLVED ABSOLUTE PATH so shared relatedDirs aren't listed twice.
 - PATH VALIDATION: before any command acts, verify each member's path (and relatedDirs)
@@ -132,7 +132,7 @@ crew help
 
 crew list                                        # alias: ls
     List projects (name, type, path, path-exists, runner + explicit task overrides) and
-    groups (name -> members). Empty config -> point to `crew init`.
+    groups (name -> members). Empty config -> point to `crew add`.
 
 crew run <task> <target> [value] [key=value ...] [--dry-run]
     Resolve <task> per project (tasks[task] -> runner{task} -> skip) and fan out across
@@ -159,19 +159,23 @@ crew claude <target> [--dry-run]
     relatedDirs (deduped). cwd = first project's path. Inherits stdio (interactive).
     --dry-run prints the resolved `claude` invocation.
 
-crew init [project]
-    Wizard to add/update a PROJECT: name, path (validated), type, relatedDirs, cwd, a
-    default `runner` template (e.g. `make {task}` or `npm run {task}`, blank = run-less),
-    and any explicit `tasks` overrides. Warn on name collision with a group. Merge into
-    user-level config, print where saved. Re-running a name updates it.
+crew add
+    Interactive wizard to CREATE a new entry. First asks project or group.
+    - project: name, path (validated), type, relatedDirs, cwd, a default `runner`
+      template (e.g. `make {task}` / `npm run {task}`, blank = run-less), and explicit
+      `tasks` overrides.
+    - group: name, then an ordered member list picked from existing projects.
+    ERROR if the name already exists (as either kind) — use `crew edit` to change it.
 
-crew group <groupName> <project ...>
-    Create/update a GROUP as an ordered list of existing project names (validate each).
-    Warn on name collision with a project. `crew group <name>` with no members prints
-    the group's contents.
+crew edit [name]
+    Interactive wizard to MODIFY an existing entry (prefilled with current values). If
+    <name> is omitted, lists projects/groups and asks which. ERROR if <name> does not
+    exist — use `crew add` to create it. Editing a project re-prompts every field (blank
+    keeps current, `-` on a task command drops that task); editing a group re-picks members.
 
-crew remove <project>            # alias: rm  — delete a project (confirm; -y to skip)
-crew remove-group <groupName>    #            — delete a group (confirm; -y to skip)
+crew remove <name>               # alias: rm  — delete a project OR group (confirm; -y to
+                                 #               skip). Names are unique, so one command
+                                 #               resolves either.
 
 crew config
     Print resolved config path + merged contents.
@@ -184,9 +188,10 @@ crew config
     -v, --version    print version
 
 # Acceptance criteria
-- `npx crew` with no config runs and guides the user to `init`.
+- `npx crew` with no config runs and guides the user to `add`.
 - ~ expansion and relative-to-cwd resolution everywhere.
-- <target> resolves group-first, then single project; name collisions warn.
+- <target> resolves group-first, then single project; names are unique across projects
+  and groups (`add` errors on any name clash), so a single `remove` handles both.
 - `crew run <task> <group>` resolves per project (tasks -> runner{task} -> skip), runs in
   the mode dictated by `longRunning`, and: long-running tasks stream + --kill-others +
   Ctrl-C stops all; run-to-completion tasks wait for all, do NOT kill-others, print a

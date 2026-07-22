@@ -43,21 +43,22 @@ yourself:
 ## Quick start
 
 ```sh
-crew init                       # wizard: add a project
-crew init                       # add another
-crew group full api web db      # name a set of projects
+crew add                        # wizard: create a project (run twice for two projects)
+crew add                        # then create a group, picking its member projects
 crew run install full           # install everything (waits, reports pass/fail)
 crew start full                 # start every runnable member in parallel
 crew workspace full             # open them all as one VSCode window
 crew claude full                # launch Claude Code over the whole set
+crew edit full                  # wizard: change a project or group later
 ```
 
 ## Concepts
 
 - **Projects** are the building blocks. **Groups** are named, ordered sets of projects.
 - Any `<target>` is a **group name OR a single project name** (a bare project = a group
-  of one). Targets resolve **group-first**, then project. If a project and a group share
-  a name, the group shadows the project — crew warns when you create such a collision.
+  of one). Targets resolve **group-first**, then project. Names are **unique** across
+  projects and groups — `init` and `group` error if a name is already taken by the other
+  kind — so every name maps to exactly one thing.
 - Paths are `~`-expanded and resolved relative to the current directory. Before any
   command acts, crew verifies each member's `path` and `relatedDirs` exist and fails
   naming the offending project.
@@ -160,18 +161,24 @@ crew owns supervision in both modes — it never hand-rolls process or signal ha
 
 ## Commands
 
+Actions:
+
 ```
 crew help                              usage (also: no args, -h, --help)
 crew list                              list projects + groups            (alias: ls)
-crew run <task> <target> [args]        fan <task> out across the target
-crew start <target> [args]             = crew run start <target>
 crew install <target>                  = crew run install <target>
+crew start <target> [args]             = crew run start <target>
 crew workspace <target> [--fileless]   open one multi-root VSCode window  (alias: code)
 crew claude <target>                   launch Claude Code once, deduped --add-dir
-crew init [project]                    wizard: add/update a project
-crew group <name> <project ...>        create/update a group (no members = print it)
-crew remove <project>                  delete a project (confirm; -y)     (alias: rm)
-crew remove-group <name>               delete a group (confirm; -y)
+crew run <task> <target> [args]        fan any <task> across the target (general form)
+```
+
+Config:
+
+```
+crew add                               wizard: create a new project or group
+crew edit [name]                       wizard: modify an existing project or group
+crew remove <name>                     delete a project or group (confirm; -y) (alias: rm)
 crew config [path|edit]                print merged config / its path / open in $EDITOR
 ```
 
