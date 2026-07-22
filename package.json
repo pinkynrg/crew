@@ -1,6 +1,6 @@
 {
   "name": "@pinkynrg/crew",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Fan a named task across a group of local projects — run in parallel, open as one VSCode workspace, or hand the set to Claude Code. One persistent config, run via npx.",
   "type": "module",
   "bin": {
