@@ -212,6 +212,26 @@ an existing window for that workspace instead of duplicating it.
 `code --add`s the rest as an in-memory Untitled Workspace (attaches to the last active
 instance; less deterministic).
 
+## Claude sessions (stable history)
+
+Claude Code stores its per-directory history under `~/.claude/projects/<cwd-slug>/`, keyed
+by the directory it's launched in. So `crew claude <target>` launches Claude with a
+**stable, crew-managed working directory** per target:
+
+```
+~/.config/crew/sessions/<target>/
+```
+
+Every project (and its `relatedDirs`) is still passed via `--add-dir`, so the whole set is
+fully accessible. But because the cwd is fixed to the *target name* — not the first member
+— your Claude history for a group is stable: reordering the group's projects no longer
+moves (and appears to lose) the history, and it never lives inside one project's folder.
+
+Note: the working dir is a crew-owned folder, not a project checkout, so there's no cwd
+`CLAUDE.md`/git at the root — each project brings its own via `--add-dir`. Switching to
+this scheme starts history under the new stable path; any prior history under a project's
+slug isn't deleted, just no longer auto-loaded.
+
 ## Config
 
 - User-level: `~/.config/crew/config.json` (created on first write).

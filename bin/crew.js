@@ -607,17 +607,24 @@ async function cmdWorkspace(flags, targetName) {
 
 async function cmdClaude(flags, targetName) {
   if (!targetName) fail('claude: missing target. Usage: crew claude <target>');
-  const { cfg } = loadMerged(flags);
+  const { cfg, userPath } = loadMerged(flags);
   const target = resolveTarget(cfg, targetName);
   validateMemberPaths(target.members);
   const dirs = dirList(target.members);
-  const cwd = projectCwd(target.members[0].project);
+
+  // Stable, crew-owned cwd per target. Claude Code keys its history off the cwd path
+  // (~/.claude/projects/<cwd-slug>/), so a fixed dir keeps history tied to the TARGET
+  // NAME — not the first member — surviving any reordering of the group's projects,
+  // and keeps it out of any single project's folder. All projects stay reachable via
+  // the --add-dir list below.
+  const cwd = join(crewHomeFor(userPath), 'sessions', sanitize(target.name));
+  mkdirSync(cwd, { recursive: true });
 
   const cliArgs = [];
   for (const d of dirs) cliArgs.push('--add-dir', d);
 
   if (flags.dryRun) {
-    console.log(`# cwd: ${cwd}`);
+    console.log(`# cwd (stable, crew-managed): ${cwd}`);
     console.log(`claude ${cliArgs.map(shellQuote).join(' ')}`);
     return;
   }
