@@ -57,13 +57,13 @@ crew edit full                  # wizard: change a project or group later
 - **Projects** are the building blocks. **Groups** are named, ordered sets of projects.
 - Any `<target>` is a **group name OR a single project name** (a bare project = a group
   of one). Targets resolve **group-first**, then project. Names are **unique** across
-  projects and groups — `init` and `group` error if a name is already taken by the other
-  kind — so every name maps to exactly one thing.
+  projects and groups — `crew add` errors if a name is already taken — so every name maps
+  to exactly one thing.
 - Paths are `~`-expanded and resolved relative to the current directory. Before any
-  command acts, crew verifies each member's `path` and `relatedDirs` exist and fails
-  naming the offending project.
+  command acts, crew verifies each member's `path` exists and fails naming the offending
+  project.
 - Folder lists (workspace folders, `claude --add-dir`) are **deduped by resolved absolute
-  path**, so shared `relatedDirs` are never listed twice.
+  path**, so a project shared across a group is never listed twice.
 
 ## The runner / tasks model
 
@@ -90,27 +90,23 @@ runs nothing.
     "api": {
       "path": "~/code/api",
       "type": "backend",
-      "relatedDirs": ["~/code/shared"],
       "runner": "make {task}"
     },
     "web": {
       "path": "~/code/web",
       "type": "frontend",
-      "relatedDirs": [],
       "runner": "npm run {task}"
     },
     "worker": {
       "path": "~/code/worker",
       "type": "backend",
-      "relatedDirs": [],
       "tasks": {
         "start": "AWS_PROFILE=pre_bee ./scripts/run.sh {env}"
       }
     },
     "docs": {
       "path": "~/code/docs",
-      "type": "other",
-      "relatedDirs": []
+      "type": "other"
     }
   },
   "groups": {
@@ -222,7 +218,7 @@ by the directory it's launched in. So `crew claude <target>` launches Claude wit
 ~/.config/crew/sessions/<target>/
 ```
 
-Every project (and its `relatedDirs`) is still passed via `--add-dir`, so the whole set is
+Every project is still passed via `--add-dir`, so the whole set is
 fully accessible. But because the cwd is fixed to the *target name* — not the first member
 — your Claude history for a group is stable: reordering the group's projects no longer
 moves (and appears to lose) the history, and it never lives inside one project's folder.
@@ -240,8 +236,7 @@ slug isn't deleted, just no longer auto-loaded.
 - `--config <path>` points at a specific config file instead.
 
 On load, a config with a missing or `< 2` version is migrated to v2 in memory and
-written back. A v1 project's single `start` block becomes `tasks.start` (and its `cwd`
-is preserved).
+written back. A v1 project's single `start` block becomes `tasks.start`.
 
 ## Known limitations (by design)
 

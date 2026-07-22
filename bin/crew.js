@@ -166,13 +166,12 @@ function crewHomeFor(configPath) {
 function migrate(cfg) {
   let changed = false;
   if (typeof cfg.version !== 'number' || cfg.version < 2) {
-    // v1 -> v2: a project's single `start` block becomes tasks.start (+ cwd).
+    // v1 -> v2: a project's single `start` block becomes tasks.start.
     for (const p of Object.values(cfg.projects || {})) {
       if (p && p.start && typeof p.start === 'object') {
         p.tasks = p.tasks || {};
         if (p.start.command && p.tasks.start == null) p.tasks.start = p.start.command;
-        if (p.start.cwd && p.cwd == null) p.cwd = p.start.cwd;
-        delete p.start; // defaults/allowed dropped: v2 fills placeholders from args only
+        delete p.start; // cwd/defaults/allowed dropped: v2 fills placeholders from args only
       }
     }
     cfg.version = 2;
@@ -272,36 +271,30 @@ function resolveTarget(cfg, name) {
   );
 }
 
-// Verify every member's path and relatedDirs exist. Names the offending project.
+// Verify every member's path exists. Names the offending project.
 function validateMemberPaths(members) {
   for (const m of members) {
     const p = resolvePath(m.project.path);
     if (!pathExists(p)) fail(`project '${m.name}': path not found: ${p}`);
-    for (const d of m.project.relatedDirs || []) {
-      const rd = resolvePath(d);
-      if (!pathExists(rd)) fail(`project '${m.name}': relatedDir not found: ${rd}`);
-    }
   }
 }
 
-// Build a deduped absolute-path list (project path + relatedDirs), first-seen order.
+// Build a deduped absolute-path list of member project paths, first-seen order.
 function dirList(members) {
   const seen = new Set();
   const out = [];
   for (const m of members) {
-    for (const raw of [m.project.path, ...(m.project.relatedDirs || [])]) {
-      const abs = resolvePath(raw);
-      if (!seen.has(abs)) {
-        seen.add(abs);
-        out.push(abs);
-      }
+    const abs = resolvePath(m.project.path);
+    if (!seen.has(abs)) {
+      seen.add(abs);
+      out.push(abs);
     }
   }
   return out;
 }
 
-function projectCwd(project) {
-  return resolvePath(project.cwd || project.path);
+function projectDir(project) {
+  return resolvePath(project.path);
 }
 
 // ---------------------------------------------------------------------------
@@ -536,12 +529,12 @@ async function cmdRun(flags, task, targetName, args) {
   const isLong = (cfg.longRunning || []).includes(task);
   const mode = isLong ? 'long-running' : 'run-to-completion';
 
-  const cmds = runnable.map((r) => `cd ${shellQuote(projectCwd(r.project))} && ${r.resolved}`);
+  const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
 
   if (flags.dryRun) {
     console.log(`# task '${task}' on ${target.kind} '${target.name}' — mode: ${mode}`);
     for (const r of runnable)
-      console.log(`  ${r.name}: cd ${shellQuote(projectCwd(r.project))} && ${r.resolved}`);
+      console.log(`  ${r.name}: cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
     return;
   }
 
@@ -711,62 +704,44 @@ function cmdConfig(flags, sub) {
   console.log(JSON.stringify(cfg, null, 2));
 }
 
-function normalizeKind(s) {
-  const v = String(s).trim().toLowerCase();
-  if (v.startsWith('g')) return 'group';
-  if (v.startsWith('p')) return 'project';
-  fail(`answer 'project' or 'group' (got '${s}')`);
-}
+const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 
 // Prompt for every project field, defaulting to `existing` (empty object when adding).
-async function collectProject(ask, existing) {
-  const path0 = await ask('Path', existing.path || '');
+// Text fields are inline-editable; type is a picked list; a blank runner/command unsets.
+async function collectProject(p, existing) {
+  const path0 = await p.ask('Path', existing.path || '');
   if (!path0) fail('a path is required');
   const abs = resolvePath(path0);
   if (!pathExists(abs)) {
-    const keep = await ask(`Path does not exist (${abs}). Save anyway? (y/N)`, 'N');
+    const keep = await p.ask(`Path does not exist (${abs}). Save anyway? (y/N)`, '');
     if (!/^y/i.test(keep)) fail('aborted (path does not exist)');
   }
-  const type = await ask('Type (frontend/backend/fullstack/other)', existing.type || 'other');
-  const relatedRaw = await ask(
-    'Related dirs (comma-separated, blank for none)',
-    (existing.relatedDirs || []).join(', ')
-  );
-  const relatedDirs = relatedRaw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const cwd = await ask('Working dir for tasks (blank = path)', existing.cwd || '');
-  const runner = await ask(
-    'Default runner template (e.g. "npm run {task}" or "make {task}", blank = run-less)',
-    existing.runner || ''
-  );
+  const type = await p.select('Type', PROJECT_TYPES, existing.type || 'other');
+  const runner = await p.ask('Runner template, e.g. "npm run {task}" (empty = run-less)', existing.runner || '');
+
   const tasks = { ...(existing.tasks || {}) };
-  console.log('Explicit task overrides (blank task name to finish; "-" to drop one):');
+  const known = Object.keys(tasks);
+  if (known.length) console.log(c.dim(`current tasks: ${known.join(', ')}`));
+  console.log(c.dim('Task overrides — enter a task name to add/edit (empty to finish; clear its command to remove):'));
   for (;;) {
-    const t = (await ask('  Task name', '')).trim();
+    const t = (await p.ask('  Task name', '')).trim();
     if (!t) break;
-    const cmd = await ask(`  Command for '${t}'`, tasks[t] || '');
-    if (cmd === '-') delete tasks[t];
-    else if (cmd) tasks[t] = cmd;
+    const cmd = await p.ask(`  Command for '${t}'`, tasks[t] || '');
+    if (cmd) tasks[t] = cmd;
+    else delete tasks[t];
   }
-  const project = { path: path0, type, relatedDirs };
-  if (cwd) project.cwd = cwd;
+
+  const project = { path: path0, type };
   if (runner) project.runner = runner;
   if (Object.keys(tasks).length) project.tasks = tasks;
   return project;
 }
 
-// Prompt for an ordered member list, validated against existing projects.
-async function collectMembers(ask, cfg, existing) {
+// Pick an ordered member list from existing projects (multi-select on a TTY).
+async function collectMembers(p, cfg, existing) {
   const known = Object.keys(cfg.projects || {});
   if (!known.length) fail('no projects exist yet — add a project first');
-  console.log('Available projects: ' + known.join(', '));
-  const raw = await ask('Members (space/comma separated, ordered)', (existing || []).join(' '));
-  const members = raw
-    .split(/[\s,]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const members = await p.multiselect('Members', known, existing || []);
   const missing = members.filter((m) => !cfg.projects[m]);
   if (missing.length) fail(`unknown project(s): ${missing.join(', ')}. Known: ${known.join(', ')}`);
   return members;
@@ -775,27 +750,27 @@ async function collectMembers(ask, cfg, existing) {
 // crew add — create a NEW project or group entirely via wizard (errors if it exists).
 async function cmdAdd(flags) {
   const { cfg, path } = loadUserConfig(flags);
-  const { ask, close } = makeAsker();
+  const p = makePrompter();
   try {
-    const kind = normalizeKind(await ask('Add a project or a group? (project/group)', 'project'));
-    const name = (await ask(`${kind === 'group' ? 'Group' : 'Project'} name`, '')).trim();
+    const kind = await p.select('Add a project or a group?', ['project', 'group'], 'project');
+    const name = (await p.ask(`${kind === 'group' ? 'Group' : 'Project'} name`, '')).trim();
     if (!name) fail(`add: a ${kind} name is required`);
     if (cfg.projects[name] || cfg.groups[name])
       fail(`'${name}' already exists. Use: crew edit ${name}`);
 
     if (kind === 'group') {
-      const members = await collectMembers(ask, cfg, []);
+      const members = await collectMembers(p, cfg, []);
       if (!members.length) fail('add: a group needs at least one member');
       cfg.groups[name] = members;
       writeUserConfig(path, cfg);
       console.log(`\nSaved group '${name}' -> ${members.join(', ')}`);
     } else {
-      cfg.projects[name] = await collectProject(ask, {});
+      cfg.projects[name] = await collectProject(p, {});
       writeUserConfig(path, cfg);
       console.log(`\nSaved project '${name}' to ${path}`);
     }
   } finally {
-    close();
+    p.close();
   }
 }
 
@@ -806,54 +781,50 @@ async function cmdEdit(flags, name) {
   const groups = Object.keys(cfg.groups || {});
   if (!projects.length && !groups.length) fail('edit: nothing to edit yet. Run: crew add');
 
-  // No name given: pick from a list — arrow keys when interactive, else typed.
-  if (!name) {
-    const items = [
-      ...projects.map((n) => ({ name: n, kind: 'project' })),
-      ...groups.map((n) => ({ name: n, kind: 'group' })),
-    ];
-    if (canInteractive()) {
-      const picked = await pickFromList('Edit which?', items, (it, sel) => {
-        const nm = sel ? c.bold(it.name) : it.name;
-        return `${nm} ${c.dim('— ' + it.kind)}`;
-      });
-      if (!picked) {
-        console.log('edit: cancelled');
-        return;
-      }
-      name = picked.name;
-    } else {
-      const { ask, close } = makeAsker();
-      try {
+  const p = makePrompter();
+  try {
+    // No name given: pick from a list — arrow keys when interactive, else typed.
+    if (!name) {
+      const items = [
+        ...projects.map((n) => ({ name: n, kind: 'project' })),
+        ...groups.map((n) => ({ name: n, kind: 'group' })),
+      ];
+      if (canInteractive()) {
+        const picked = await menu({
+          title: 'Edit which?',
+          items,
+          label: (it, cur) => `${cur ? c.bold(it.name) : it.name} ${c.dim('— ' + it.kind)}`,
+        });
+        if (!picked) {
+          console.log('edit: cancelled');
+          return;
+        }
+        name = picked.name;
+      } else {
         console.log('Projects: ' + (projects.join(', ') || '(none)'));
         console.log('Groups:   ' + (groups.join(', ') || '(none)'));
-        name = (await ask('Name to edit', '')).trim();
-      } finally {
-        close();
+        name = (await p.ask('Name to edit', '')).trim();
       }
     }
-  }
-  if (!name) fail('edit: a name is required');
+    if (!name) fail('edit: a name is required');
 
-  const { ask, close } = makeAsker();
-  try {
     const isGroup = !!cfg.groups[name];
     const isProject = !!cfg.projects[name];
     if (!isGroup && !isProject) fail(`no such project or group '${name}'. Run: crew add`);
 
     if (isGroup) {
-      const members = await collectMembers(ask, cfg, cfg.groups[name]);
+      const members = await collectMembers(p, cfg, cfg.groups[name]);
       if (!members.length) fail('edit: a group needs at least one member');
       cfg.groups[name] = members;
       writeUserConfig(path, cfg);
       console.log(`\nUpdated group '${name}' -> ${members.join(', ')}`);
     } else {
-      cfg.projects[name] = await collectProject(ask, cfg.projects[name]);
+      cfg.projects[name] = await collectProject(p, cfg.projects[name]);
       writeUserConfig(path, cfg);
       console.log(`\nUpdated project '${name}' in ${path}`);
     }
   } finally {
-    close();
+    p.close();
   }
 }
 
@@ -907,70 +878,37 @@ function launch(bin, args, opts = {}) {
   process.exit(r.status ?? 0);
 }
 
-// A line reader that works over BOTH an interactive TTY and piped/scripted stdin.
-// (readline/promises' question() only resolves its FIRST call over a non-TTY pipe,
-// so we consume 'line' events directly and queue them.)
-function makeAsker() {
-  const rl = createInterface({ input, output });
-  const queue = [];
-  const waiters = [];
-  let closed = false;
-  rl.on('line', (line) => {
-    if (waiters.length) waiters.shift()(line);
-    else queue.push(line);
-  });
-  rl.on('close', () => {
-    closed = true;
-    while (waiters.length) waiters.shift()(null);
-  });
-  const ask = async (q, def) => {
-    const suffix = def != null && def !== '' ? ` [${def}]` : '';
-    output.write(`${q}${suffix}: `);
-    let line;
-    if (queue.length) line = queue.shift();
-    else if (closed) line = null;
-    else line = await new Promise((res) => waiters.push(res));
-    if (line == null) return def ?? ''; // EOF -> take default
-    const a = line.trim();
-    return a === '' ? (def ?? '') : a;
-  };
-  return { ask, close: () => rl.close() };
-}
-
-async function confirm(flags, question) {
-  if (flags.yes) return true;
-  const { ask, close } = makeAsker();
-  try {
-    const a = await ask(`${question} (y/N)`, 'N');
-    return /^y/i.test(a);
-  } finally {
-    close();
-  }
-}
-
-// Arrow-key selectable list. Needs an interactive TTY (raw mode); callers fall back to a
-// typed prompt otherwise. Up/down (or k/j) move, Enter picks, Esc/q/Ctrl-C cancel (null).
 function canInteractive() {
   return !!(process.stdin.isTTY && process.stdout.isTTY);
 }
-function pickFromList(title, items, label) {
+
+// Arrow-key menu (needs an interactive TTY). Single-select returns the chosen item;
+// multi-select returns the checked items in toggle order. Esc/q/Ctrl-C -> null.
+// Up/Down (or k/j) move; Space toggles (multi); Enter confirms.
+function menu({ title, items, label, multi = false, start = 0, preselected = [] }) {
   return new Promise((resolve) => {
     const stdin = process.stdin;
     const out = process.stdout;
-    let idx = 0;
+    let idx = Math.max(0, Math.min(start, items.length - 1));
+    const checked = new Set(preselected.filter((v) => items.includes(v)));
+    const order = [...checked];
     emitKeypressEvents(stdin);
     const wasRaw = stdin.isRaw;
     stdin.setRawMode(true);
     stdin.resume();
-    out.write(`${title}${c.dim('  (↑/↓ to move, Enter to pick, Esc to cancel)')}\n`);
+    const hint = multi
+      ? '  (↑/↓ move, Space toggle, Enter confirm, Esc cancel)'
+      : '  (↑/↓ move, Enter select, Esc cancel)';
+    out.write(`${title}${c.dim(hint)}\n`);
     out.write('\x1b[?25l'); // hide cursor
 
     const render = (first) => {
       if (!first) out.write(`\x1b[${items.length}A`);
       items.forEach((it, i) => {
-        const sel = i === idx;
-        const ptr = sel ? c.cyan('❯ ') : '  ';
-        out.write(`\x1b[2K${ptr}${label(it, sel)}\n`);
+        const cursor = i === idx;
+        const ptr = cursor ? c.cyan('❯ ') : '  ';
+        const box = multi ? (checked.has(it) ? c.green('◉ ') : '◯ ') : '';
+        out.write(`\x1b[2K${ptr}${box}${label(it, cursor)}\n`);
       });
     };
     render(true);
@@ -989,9 +927,19 @@ function pickFromList(title, items, label) {
       } else if (key.name === 'down' || key.name === 'j') {
         idx = (idx + 1) % items.length;
         render();
+      } else if (multi && key.name === 'space') {
+        const it = items[idx];
+        if (checked.has(it)) {
+          checked.delete(it);
+          order.splice(order.indexOf(it), 1);
+        } else {
+          checked.add(it);
+          order.push(it);
+        }
+        render();
       } else if (key.name === 'return' || key.name === 'enter') {
         cleanup();
-        resolve(items[idx]);
+        resolve(multi ? order : items[idx]);
       } else if (key.name === 'escape' || key.name === 'q' || (key.ctrl && key.name === 'c')) {
         cleanup();
         resolve(null);
@@ -999,6 +947,93 @@ function pickFromList(title, items, label) {
     };
     stdin.on('keypress', onKey);
   });
+}
+
+// Unified prompter. On a TTY: text fields are inline-EDITABLE (the current value is
+// prefilled at the cursor — edit it, or clear it to unset), and enumerable choices use
+// the arrow menu. Over a pipe (scripts/tests): fall back to typed lines where a blank
+// keeps the prefilled default. `close()` only matters for the piped path.
+function makePrompter() {
+  if (canInteractive()) {
+    const ask = (labelText, prefill = '') =>
+      new Promise((resolve) => {
+        const rl = createInterface({ input, output });
+        const p = rl.question(`${labelText}: `);
+        if (prefill) rl.write(prefill);
+        p.then((a) => {
+          rl.close();
+          resolve(a.trim());
+        });
+      });
+    const select = async (labelText, options, current) => {
+      const r = await menu({
+        title: labelText,
+        items: options,
+        label: (o, cur) => (cur ? c.bold(o) : o),
+        start: Math.max(0, options.indexOf(current)),
+      });
+      return r == null ? (current ?? options[0]) : r;
+    };
+    const multiselect = async (labelText, options, preselected = []) => {
+      const r = await menu({
+        title: labelText,
+        items: options,
+        label: (o, cur) => (cur ? c.bold(o) : o),
+        multi: true,
+        preselected,
+      });
+      return r == null ? preselected : r;
+    };
+    return { ask, select, multiselect, close: () => {} };
+  }
+
+  // Piped / non-interactive: one readline, line-queue (question() is unreliable here).
+  const rl = createInterface({ input, output });
+  const queue = [];
+  const waiters = [];
+  let closed = false;
+  rl.on('line', (line) => (waiters.length ? waiters.shift()(line) : queue.push(line)));
+  rl.on('close', () => {
+    closed = true;
+    while (waiters.length) waiters.shift()(null);
+  });
+  const readLine = () =>
+    queue.length
+      ? Promise.resolve(queue.shift())
+      : closed
+        ? Promise.resolve(null)
+        : new Promise((res) => waiters.push(res));
+  const ask = async (labelText, prefill = '') => {
+    output.write(`${labelText}${prefill ? ` [${prefill}]` : ''}: `);
+    const line = await readLine();
+    if (line == null) return prefill;
+    const a = line.trim();
+    return a === '' ? prefill : a;
+  };
+  const select = async (labelText, options, current) => {
+    output.write(`${labelText} (${options.join('/')})${current ? ` [${current}]` : ''}: `);
+    const line = await readLine();
+    const v = (line || '').trim();
+    return v || current || options[0];
+  };
+  const multiselect = async (labelText, options, preselected = []) => {
+    output.write(`${labelText} (space/comma separated)${preselected.length ? ` [${preselected.join(' ')}]` : ''}: `);
+    const line = await readLine();
+    const v = (line || '').trim();
+    return v ? v.split(/[\s,]+/).filter(Boolean) : preselected;
+  };
+  return { ask, select, multiselect, close: () => rl.close() };
+}
+
+async function confirm(flags, question) {
+  if (flags.yes) return true;
+  const { ask, close } = makePrompter();
+  try {
+    const a = await ask(`${question} (y/N)`, '');
+    return /^y/i.test(a);
+  } finally {
+    close();
+  }
 }
 
 // ---------------------------------------------------------------------------
