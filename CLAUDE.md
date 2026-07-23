@@ -28,7 +28,8 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 - No raw stack traces on expected errors: throw `CrewError`, exit non-zero, one-line msg.
 - `~` expansion + relative-to-cwd resolution everywhere; dedupe dir lists by resolved
   absolute path.
-- Strict placeholders: every `{name}` must resolve; unknown `key=value` is an error;
+- Placeholders: every `{name}` must resolve (else red error, nothing runs); an unknown
+  `key=value` is skipped with a yellow warning;
   shell-quote every substituted value. Hardcode no task names/values beyond
   `config.longRunning`.
 

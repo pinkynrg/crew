@@ -127,10 +127,12 @@ from the task name; everything else comes from your args:
 - a bare positional fills a single remaining placeholder,
 - `key=value` fills `{key}` by name.
 
-Resolution is strict — nothing runs on error:
+Resolution rules:
 
-- every placeholder must be satisfied, else an error lists the unresolved ones;
-- any `key=value` that matches no placeholder is an error (the unknown key is listed);
+- every placeholder must be satisfied, else a **red error** lists the unresolved ones and
+  nothing runs;
+- a `key=value` that matches no placeholder in the target is **skipped with a yellow
+  warning** (so `crew start backend env=local` still runs when backend has no `{env}`);
 - substituted values are shell-quoted, so spaces and metacharacters are safe.
 
 ```sh

@@ -90,6 +90,9 @@ class CrewError extends Error {}
 function fail(msg) {
   throw new CrewError(msg);
 }
+function warn(msg) {
+  console.error(c.yellow(`crew: ${msg}`));
+}
 
 // ---------------------------------------------------------------------------
 // Path helpers — ~ expansion + relative-to-cwd resolution everywhere.
@@ -192,6 +195,17 @@ function migrate(cfg) {
   if (!cfg.workspaceName) {
     cfg.workspaceName = 'crew';
     changed = true;
+  }
+  // Self-heal: drop fields removed in later versions so a config edited by an older crew
+  // gets cleaned up (and written back) the first time a newer crew loads it.
+  const DEPRECATED_PROJECT_FIELDS = ['relatedDirs', 'cwd', 'start'];
+  for (const p of Object.values(cfg.projects || {})) {
+    for (const dead of DEPRECATED_PROJECT_FIELDS) {
+      if (p && typeof p === 'object' && dead in p) {
+        delete p[dead];
+        changed = true;
+      }
+    }
   }
   return changed;
 }
@@ -330,11 +344,13 @@ function resolveRun(cfg, task, members, args) {
     else positionals.push(a);
   }
 
+  // Unknown key=value (matches no placeholder in the target): warn and skip, don't abort
+  // — lets `crew start backend env=local` run even though backend has no {env}.
   const unknown = Object.keys(keyVals).filter((k) => !union.has(k));
   if (unknown.length)
-    fail(
-      `unknown argument key(s): ${unknown.join(', ')}. ` +
-        `Task '${task}' placeholders: ${[...union].join(', ') || '(none)'}`
+    warn(
+      `ignoring unused argument(s): ${unknown.join(', ')}. ` +
+        `Task '${task}' takes: ${[...union].join(', ') || '(none)'}`
     );
 
   const remaining = [...union].filter((k) => !(k in keyVals)).sort();
@@ -1193,7 +1209,7 @@ async function main() {
       cmdConfig(flags, rest[0]);
       return;
     default:
-      console.error(`crew: unknown command '${cmd}'\n`);
+      console.error(c.red(`crew: unknown command '${cmd}'`) + '\n');
       help();
       process.exitCode = 1;
       return;
@@ -1202,9 +1218,9 @@ async function main() {
 
 main().catch((err) => {
   if (err instanceof CrewError) {
-    console.error(`crew: ${err.message}`);
+    console.error(c.red(`crew: ${err.message}`));
     process.exit(1);
   }
-  console.error(`crew: unexpected error: ${err && err.message ? err.message : err}`);
+  console.error(c.red(`crew: unexpected error: ${err && err.message ? err.message : err}`));
   process.exit(1);
 });
