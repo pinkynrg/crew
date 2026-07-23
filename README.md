@@ -28,6 +28,19 @@ Requires Node >= 18 on a POSIX system (macOS or Linux), with `code` (VSCode CLI)
 `claude` on your PATH. **Zero runtime dependencies** — crew is Node built-ins only,
 including its own parallel process runner.
 
+### Update
+
+npm has no "upgrade one global" command — reinstall at `@latest`:
+
+```sh
+npm i -g @pinkynrg/crew@latest
+crew --version                    # confirm
+```
+
+`npx @pinkynrg/crew@latest …` always fetches the newest without installing. Your
+`~/.config/crew/config.json` is untouched by upgrades (and self-heals any dropped fields
+on first load of a newer version).
+
 ## The three-tab workflow
 
 The three surfaces are **separate commands** on purpose — each wants its own terminal /
