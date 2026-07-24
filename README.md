@@ -202,8 +202,49 @@ crew remove <name>                     delete a project or group (confirm; -y) (
 crew config [path|edit]                print merged config / its path / open in $EDITOR
 ```
 
-Global flags: `--dry-run`, `--config <path>`, `-y/--yes`, `-h/--help`, `-v/--version`.
-Every acting command supports `--dry-run` to print what it would do without running.
+Global flags: `--dry-run`, `--skip-checks`, `--config <path>`, `-y/--yes`, `-h/--help`,
+`-v/--version`. Every acting command supports `--dry-run` to print what it would do
+without running.
+
+## Preflight checks
+
+A project can require named **checks** — preconditions verified before `crew run`/`start`
+does anything. crew stays agnostic: a check is just a shell command, and it **passes iff
+it exits 0**. Define them once, reference them per project:
+
+```json
+{
+  "checks": {
+    "aws": {
+      "command": "aws sts get-caller-identity --profile pre_bee >/dev/null 2>&1",
+      "message": "AWS SSO expired — run: aws sso login --profile pre_bee"
+    },
+    "vpn": {
+      "command": "nc -z -w2 vpn.internal 443",
+      "message": "VPN not connected."
+    }
+  },
+  "projects": {
+    "backend":   { "path": "~/code/backend",   "type": "backend", "checks": ["aws"] },
+    "orchestra": { "path": "~/code/orchestra",  "type": "backend", "checks": ["aws", "vpn"] }
+  }
+}
+```
+
+Before a run, crew collects the **union** of the target's checks, **deduped by name** — a
+check shared by several projects runs **once**, not per project. All run in parallel; if
+any fails, crew prints each failure's `message` in red and **aborts before anything
+starts**:
+
+```
+preflight: aws, vpn
+  ✓ aws
+  ✗ vpn: VPN not connected.
+crew: preflight check failed — nothing started.
+```
+
+Bypass with `--skip-checks`. Checks only gate `run`/`start`/`install` — `workspace` and
+`claude` don't run them.
 
 ## The hidden workspace file
 

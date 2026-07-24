@@ -252,6 +252,7 @@ function loadMerged(flags) {
     if (Array.isArray(local.longRunning)) merged.longRunning = local.longRunning;
     Object.assign(merged.projects, local.projects || {});
     Object.assign(merged.groups, local.groups || {});
+    merged.checks = { ...(merged.checks || {}), ...(local.checks || {}) };
     localUsed = localPath;
   }
   return { cfg: merged, userPath: path, localPath: localUsed };
@@ -530,6 +531,51 @@ function runFanout(commands, { killOthers, announceExits }) {
 }
 
 // ---------------------------------------------------------------------------
+// Preflight checks — named shell probes a project can require (VPN up, AWS logged in,
+// …). crew is agnostic: a check passes iff its command exits 0. Deduped by name across
+// the target, so a check shared by several projects runs once. Any failure prints its
+// message and aborts before anything starts. Bypass with --skip-checks.
+// ---------------------------------------------------------------------------
+async function runChecks(cfg, members) {
+  const registry = cfg.checks || {};
+  const names = [];
+  const seen = new Set();
+  for (const m of members)
+    for (const cn of m.project.checks || [])
+      if (!seen.has(cn)) {
+        seen.add(cn);
+        names.push(cn);
+      }
+  if (!names.length) return;
+
+  const undef = names.filter((n) => !registry[n] || !registry[n].command);
+  if (undef.length)
+    fail(`undefined check(s): ${undef.join(', ')}. Define them under "checks" in your config.`);
+
+  console.log(c.dim(`preflight: ${names.join(', ')}`));
+  const results = await Promise.all(
+    names.map(
+      (n) =>
+        new Promise((res) => {
+          const child = spawn('/bin/sh', ['-c', registry[n].command], { stdio: 'ignore' });
+          child.on('error', () => res({ n, ok: false }));
+          child.on('close', (code) => res({ n, ok: code === 0 }));
+        })
+    )
+  );
+  let failed = false;
+  for (const r of results) {
+    if (r.ok) {
+      console.log(`  ${c.green('✓')} ${r.n}`);
+    } else {
+      failed = true;
+      console.log(`  ${c.red('✗')} ${r.n}: ${c.red(registry[r.n].message || 'check failed')}`);
+    }
+  }
+  if (failed) fail(`preflight ${results.filter((r) => !r.ok).length > 1 ? 'checks' : 'check'} failed — nothing started.`);
+}
+
+// ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 async function cmdRun(flags, task, targetName, args) {
@@ -549,10 +595,14 @@ async function cmdRun(flags, task, targetName, args) {
 
   if (flags.dryRun) {
     console.log(`# task '${task}' on ${target.kind} '${target.name}' — mode: ${mode}`);
+    const checkNames = [...new Set(runnable.flatMap((r) => r.project.checks || []))];
+    if (checkNames.length) console.log(`# preflight checks: ${checkNames.join(', ')}`);
     for (const r of runnable)
       console.log(`  ${r.name}: cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
     return;
   }
+
+  if (!flags.skipChecks) await runChecks(cfg, runnable);
 
   const paint = projectColors(cfg); // same per-project colors as `crew list`
   const commands = runnable.map((r, i) => ({
@@ -676,6 +726,8 @@ function cmdList(flags) {
       console.log(`      ${c.dim(t.padEnd(labelW + 2))}${cmd}  ${c.dim('[')}${kind}${c.dim(']')}`);
     }
     if (!p.runner && taskEntries.length === 0) console.log(`      ${c.dim('(run-less)')}`);
+    if (p.checks && p.checks.length)
+      console.log(`      ${c.dim('checks'.padEnd(labelW + 2))}${p.checks.join(', ')}`);
   }
 
   // --- Groups (members painted with each project's own stable color) --------
@@ -724,7 +776,8 @@ const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 
 // Prompt for every project field, defaulting to `existing` (empty object when adding).
 // Text fields are inline-editable; type is a picked list; a blank runner/command unsets.
-async function collectProject(p, existing) {
+// `checkNames` are the check names defined in the config (offered as a multi-select).
+async function collectProject(p, existing, checkNames = []) {
   const path0 = await p.ask('Path', existing.path || '');
   if (!path0) fail('a path is required');
   const abs = resolvePath(path0);
@@ -747,9 +800,13 @@ async function collectProject(p, existing) {
     else delete tasks[t];
   }
 
+  let checks = existing.checks || [];
+  if (checkNames.length) checks = await p.multiselect('Preflight checks', checkNames, checks);
+
   const project = { path: path0, type };
   if (runner) project.runner = runner;
   if (Object.keys(tasks).length) project.tasks = tasks;
+  if (checks && checks.length) project.checks = checks;
   return project;
 }
 
@@ -781,7 +838,7 @@ async function cmdAdd(flags) {
       writeUserConfig(path, cfg);
       console.log(`\nSaved group '${name}' -> ${members.join(', ')}`);
     } else {
-      cfg.projects[name] = await collectProject(p, {});
+      cfg.projects[name] = await collectProject(p, {}, Object.keys(cfg.checks || {}));
       writeUserConfig(path, cfg);
       console.log(`\nSaved project '${name}' to ${path}`);
     }
@@ -835,7 +892,7 @@ async function cmdEdit(flags, name) {
       writeUserConfig(path, cfg);
       console.log(`\nUpdated group '${name}' -> ${members.join(', ')}`);
     } else {
-      cfg.projects[name] = await collectProject(p, cfg.projects[name]);
+      cfg.projects[name] = await collectProject(p, cfg.projects[name], Object.keys(cfg.checks || {}));
       writeUserConfig(path, cfg);
       console.log(`\nUpdated project '${name}' in ${path}`);
     }
@@ -1081,6 +1138,7 @@ function help() {
   ];
   const FLAGS = [
     ['--dry-run', 'Show what would run without executing'],
+    ['--skip-checks', 'Skip a target\'s preflight checks'],
     ['--fileless', 'workspace: open windows instead of a workspace file'],
     ['--config <path>', 'Use a specific config file'],
     ['-y, --yes', 'Skip confirmation prompts'],
@@ -1135,6 +1193,7 @@ function parseArgs(argv) {
     dryRun: false,
     fileless: false,
     yes: false,
+    skipChecks: false,
     help: false,
     version: false,
     config: null,
@@ -1143,6 +1202,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') flags.dryRun = true;
+    else if (a === '--skip-checks') flags.skipChecks = true;
     else if (a === '--fileless') flags.fileless = true;
     else if (a === '-y' || a === '--yes') flags.yes = true;
     else if (a === '-h' || a === '--help') flags.help = true;
