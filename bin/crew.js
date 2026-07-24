@@ -1332,7 +1332,7 @@ function help() {
     ['edit', '[name]', 'Wizard: modify an existing project or group'],
     ['remove', '<name>', 'Delete a project or group (-y, alias rm)'],
     ['guards', '[target]', 'List/manage guards (add/remove/link/unlink)'],
-    ['dir', '[path]', 'Show/set the projects dir (relative paths resolve here)'],
+    ['dir', '[path]', 'Show/set the projects directory'],
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
   ];
   const FLAGS = [
