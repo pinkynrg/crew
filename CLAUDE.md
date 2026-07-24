@@ -38,10 +38,12 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 - User-level: `~/.config/crew/config.json` (v2 schema). Project-local `./.crew.json`
   merges on top. v1 configs migrate to v2 on load (`start.command` -> `tasks.start`).
 - Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip.
-- Preflight `checks`: top-level `checks: {name: {command, message}}` registry; a project
-  lists names in `project.checks`. Before a run, the target's checks are deduped by name,
-  run once each in parallel (pass = exit 0); any failure prints its message and aborts.
-  `--skip-checks` bypasses. Only `run`/`start`/`install` gate on them.
+- `guards`: top-level `guards: {name: {command, message}}` registry; a project lists names
+  in `project.guards` (many-to-many). Before a run, the target's guards are deduped by
+  name, run once each in parallel (pass = exit 0); any failure prints its message and
+  aborts. `--skip-guards` bypasses. Only `run`/`start`/`install` gate on them. Managed via
+  the `crew guards` command group (list/add/remove/link/unlink, all select-driven). The v1
+  `checks` key auto-migrates to `guards` on load.
 - Two execution modes by `config.longRunning`: long-running (streamed, first exit or
   Ctrl-C tears the whole group down) vs run-to-completion (wait all, no kill-others,
   pass/fail summary, non-zero if any failed).

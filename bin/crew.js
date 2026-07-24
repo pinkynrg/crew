@@ -196,9 +196,21 @@ function migrate(cfg) {
     cfg.workspaceName = 'crew';
     changed = true;
   }
+  // Rename the short-lived `checks` feature to `guards` (top-level registry + per-project).
+  if (cfg.checks && typeof cfg.checks === 'object') {
+    cfg.guards = { ...cfg.checks, ...(cfg.guards || {}) };
+    delete cfg.checks;
+    changed = true;
+  }
+  for (const p of Object.values(cfg.projects || {})) {
+    if (p && Array.isArray(p.checks) && !p.guards) {
+      p.guards = p.checks;
+      changed = true;
+    }
+  }
   // Self-heal: drop fields removed in later versions so a config edited by an older crew
   // gets cleaned up (and written back) the first time a newer crew loads it.
-  const DEPRECATED_PROJECT_FIELDS = ['relatedDirs', 'cwd', 'start'];
+  const DEPRECATED_PROJECT_FIELDS = ['relatedDirs', 'cwd', 'start', 'checks'];
   for (const p of Object.values(cfg.projects || {})) {
     for (const dead of DEPRECATED_PROJECT_FIELDS) {
       if (p && typeof p === 'object' && dead in p) {
@@ -252,7 +264,7 @@ function loadMerged(flags) {
     if (Array.isArray(local.longRunning)) merged.longRunning = local.longRunning;
     Object.assign(merged.projects, local.projects || {});
     Object.assign(merged.groups, local.groups || {});
-    merged.checks = { ...(merged.checks || {}), ...(local.checks || {}) };
+    merged.guards = { ...(merged.guards || {}), ...(local.guards || {}) };
     localUsed = localPath;
   }
   return { cfg: merged, userPath: path, localPath: localUsed };
@@ -531,28 +543,28 @@ function runFanout(commands, { killOthers, announceExits }) {
 }
 
 // ---------------------------------------------------------------------------
-// Preflight checks — named shell probes a project can require (VPN up, AWS logged in,
-// …). crew is agnostic: a check passes iff its command exits 0. Deduped by name across
-// the target, so a check shared by several projects runs once. Any failure prints its
-// message and aborts before anything starts. Bypass with --skip-checks.
+// Guards — named shell probes a project can require (VPN up, AWS logged in, …). crew is
+// agnostic: a guard passes iff its command exits 0. Deduped by name across the target, so
+// a guard shared by several projects runs once. Any failure prints its message and aborts
+// before anything starts. Bypass with --skip-guards.
 // ---------------------------------------------------------------------------
-async function runChecks(cfg, members) {
-  const registry = cfg.checks || {};
+async function runGuards(cfg, members) {
+  const registry = cfg.guards || {};
   const names = [];
   const seen = new Set();
   for (const m of members)
-    for (const cn of m.project.checks || [])
-      if (!seen.has(cn)) {
-        seen.add(cn);
-        names.push(cn);
+    for (const gn of m.project.guards || [])
+      if (!seen.has(gn)) {
+        seen.add(gn);
+        names.push(gn);
       }
   if (!names.length) return;
 
   const undef = names.filter((n) => !registry[n] || !registry[n].command);
   if (undef.length)
-    fail(`undefined check(s): ${undef.join(', ')}. Define them under "checks" in your config.`);
+    fail(`undefined guard(s): ${undef.join(', ')}. Define them with: crew guards add`);
 
-  console.log(c.dim(`preflight: ${names.join(', ')}`));
+  console.log(c.dim(`guards: ${names.join(', ')}`));
   const results = await Promise.all(
     names.map(
       (n) =>
@@ -569,10 +581,10 @@ async function runChecks(cfg, members) {
       console.log(`  ${c.green('✓')} ${r.n}`);
     } else {
       failed = true;
-      console.log(`  ${c.red('✗')} ${r.n}: ${c.red(registry[r.n].message || 'check failed')}`);
+      console.log(`  ${c.red('✗')} ${r.n}: ${c.red(registry[r.n].message || 'guard failed')}`);
     }
   }
-  if (failed) fail(`preflight ${results.filter((r) => !r.ok).length > 1 ? 'checks' : 'check'} failed — nothing started.`);
+  if (failed) fail(`${results.filter((r) => !r.ok).length > 1 ? 'guards' : 'guard'} failed — nothing started.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -595,14 +607,14 @@ async function cmdRun(flags, task, targetName, args) {
 
   if (flags.dryRun) {
     console.log(`# task '${task}' on ${target.kind} '${target.name}' — mode: ${mode}`);
-    const checkNames = [...new Set(runnable.flatMap((r) => r.project.checks || []))];
-    if (checkNames.length) console.log(`# preflight checks: ${checkNames.join(', ')}`);
+    const guardNames = [...new Set(runnable.flatMap((r) => r.project.guards || []))];
+    if (guardNames.length) console.log(`# guards: ${guardNames.join(', ')}`);
     for (const r of runnable)
       console.log(`  ${r.name}: cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
     return;
   }
 
-  if (!flags.skipChecks) await runChecks(cfg, runnable);
+  if (!flags.skipGuards) await runGuards(cfg, runnable);
 
   const paint = projectColors(cfg); // same per-project colors as `crew list`
   const commands = runnable.map((r, i) => ({
@@ -726,8 +738,8 @@ function cmdList(flags) {
       console.log(`      ${c.dim(t.padEnd(labelW + 2))}${cmd}  ${c.dim('[')}${kind}${c.dim(']')}`);
     }
     if (!p.runner && taskEntries.length === 0) console.log(`      ${c.dim('(run-less)')}`);
-    if (p.checks && p.checks.length)
-      console.log(`      ${c.dim('checks'.padEnd(labelW + 2))}${p.checks.join(', ')}`);
+    if (p.guards && p.guards.length)
+      console.log(`      ${c.dim('guards'.padEnd(labelW + 2))}${p.guards.join(', ')}`);
   }
 
   // --- Groups (members painted with each project's own stable color) --------
@@ -776,8 +788,8 @@ const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 
 // Prompt for every project field, defaulting to `existing` (empty object when adding).
 // Text fields are inline-editable; type is a picked list; a blank runner/command unsets.
-// `checkNames` are the check names defined in the config (offered as a multi-select).
-async function collectProject(p, existing, checkNames = []) {
+// `guardNames` are the guard names defined in the config (offered as a multi-select).
+async function collectProject(p, existing, guardNames = []) {
   const path0 = await p.ask('Path', existing.path || '');
   if (!path0) fail('a path is required');
   const abs = resolvePath(path0);
@@ -800,13 +812,13 @@ async function collectProject(p, existing, checkNames = []) {
     else delete tasks[t];
   }
 
-  let checks = existing.checks || [];
-  if (checkNames.length) checks = await p.multiselect('Preflight checks', checkNames, checks);
+  let guards = existing.guards || [];
+  if (guardNames.length) guards = await p.multiselect('Guards', guardNames, guards);
 
   const project = { path: path0, type };
   if (runner) project.runner = runner;
   if (Object.keys(tasks).length) project.tasks = tasks;
-  if (checks && checks.length) project.checks = checks;
+  if (guards && guards.length) project.guards = guards;
   return project;
 }
 
@@ -838,7 +850,7 @@ async function cmdAdd(flags) {
       writeUserConfig(path, cfg);
       console.log(`\nSaved group '${name}' -> ${members.join(', ')}`);
     } else {
-      cfg.projects[name] = await collectProject(p, {}, Object.keys(cfg.checks || {}));
+      cfg.projects[name] = await collectProject(p, {}, Object.keys(cfg.guards || {}));
       writeUserConfig(path, cfg);
       console.log(`\nSaved project '${name}' to ${path}`);
     }
@@ -892,7 +904,7 @@ async function cmdEdit(flags, name) {
       writeUserConfig(path, cfg);
       console.log(`\nUpdated group '${name}' -> ${members.join(', ')}`);
     } else {
-      cfg.projects[name] = await collectProject(p, cfg.projects[name], Object.keys(cfg.checks || {}));
+      cfg.projects[name] = await collectProject(p, cfg.projects[name], Object.keys(cfg.guards || {}));
       writeUserConfig(path, cfg);
       console.log(`\nUpdated project '${name}' in ${path}`);
     }
@@ -932,6 +944,115 @@ async function cmdRemove(flags, name) {
   console.log(`Removed ${kind} '${name}'`);
   if (referencing.length)
     console.log(`NOTE: still referenced by group(s): ${referencing.join(', ')}`);
+}
+
+// crew guards [target]           -> list all guards (or a target's), with usage
+// crew guards add|remove|link|unlink -> wizard-driven management (selects, no hand-editing)
+const GUARD_ACTIONS = ['add', 'remove', 'link', 'unlink'];
+async function cmdGuards(flags, sub, rest) {
+  if (sub && GUARD_ACTIONS.includes(sub)) {
+    const { cfg, path } = loadUserConfig(flags);
+    const p = makePrompter();
+    try {
+      if (sub === 'add') return await guardAdd(flags, cfg, path, p);
+      const names = Object.keys(cfg.guards || {});
+      if (!names.length) fail('no guards defined yet. Add one: crew guards add');
+      if (sub === 'remove') return await guardRemove(flags, cfg, path, p);
+      return await guardLink(cfg, path, p, sub === 'link'); // link (toggle) / unlink
+    } finally {
+      p.close();
+    }
+  }
+  guardList(loadMerged(flags).cfg, sub); // sub (optional) = a target to scope the list to
+}
+
+function printGuard(reg, n) {
+  const g = reg[n] || {};
+  console.log(`  ${c.cyan(n)}`);
+  console.log(`      ${c.dim('command')}  ${g.command || c.dim('(none)')}`);
+  if (g.message) console.log(`      ${c.dim('message')}  ${g.message}`);
+}
+function guardList(cfg, targetName) {
+  const reg = cfg.guards || {};
+  if (targetName) {
+    const target = resolveTarget(cfg, targetName);
+    const used = [...new Set(target.members.flatMap((m) => m.project.guards || []))];
+    console.log(c.bold(c.underline(`Guards for ${target.kind} '${target.name}'`)));
+    if (!used.length) return void console.log(c.dim('  (none)'));
+    for (const n of used) printGuard(reg, n);
+    return;
+  }
+  console.log(c.bold(c.underline('Guards')));
+  const names = Object.keys(reg);
+  if (!names.length) return void console.log(c.dim('  (none) — add one: crew guards add'));
+  const users = {};
+  for (const [pn, pr] of Object.entries(cfg.projects || {}))
+    for (const g of pr.guards || []) (users[g] = users[g] || []).push(pn);
+  for (const n of names) {
+    printGuard(reg, n);
+    console.log(`      ${c.dim('used by')}  ${(users[n] || []).join(', ') || c.dim('(no projects)')}`);
+  }
+}
+
+async function guardAdd(flags, cfg, path, p) {
+  const name = (await p.ask('Guard name', '')).trim();
+  if (!name) fail('guards: a name is required');
+  if (cfg.guards && cfg.guards[name]) fail(`guard '${name}' already exists`);
+  const command = (await p.ask('Check command (exit 0 = pass)', '')).trim();
+  if (!command) fail('guards: a command is required');
+  const message = (await p.ask('Failure message', '')).trim();
+  cfg.guards = cfg.guards || {};
+  cfg.guards[name] = message ? { command, message } : { command };
+  // Optionally attach to projects right away.
+  const projNames = Object.keys(cfg.projects || {});
+  if (projNames.length) {
+    const sel = await p.multiselect('Attach to projects', projNames, []);
+    for (const pn of sel) setProjectGuard(cfg.projects[pn], name, true);
+  }
+  writeUserConfig(path, cfg);
+  console.log(`\nSaved guard '${name}'`);
+}
+
+async function guardRemove(flags, cfg, path, p) {
+  const names = Object.keys(cfg.guards);
+  const name = await p.select('Remove which guard?', names, names[0]);
+  if (!flags.yes) {
+    const yes = await p.ask(`Delete guard '${name}'? (y/N)`, '');
+    if (!/^y/i.test(yes)) return void console.log('cancelled');
+  }
+  delete cfg.guards[name];
+  for (const pr of Object.values(cfg.projects || {})) setProjectGuard(pr, name, false);
+  writeUserConfig(path, cfg);
+  console.log(`Removed guard '${name}'`);
+}
+
+async function guardLink(cfg, path, p, attach) {
+  const names = Object.keys(cfg.guards);
+  const gname = await p.select(attach ? 'Link which guard?' : 'Unlink which guard?', names, names[0]);
+  const projNames = Object.keys(cfg.projects || {});
+  if (!projNames.length) fail('no projects to link.');
+  const current = projNames.filter((pn) => (cfg.projects[pn].guards || []).includes(gname));
+  if (attach) {
+    // Toggle-multiselect over ALL projects (preselected = current) => sets membership.
+    const sel = await p.multiselect(`Projects using '${gname}'`, projNames, current);
+    for (const pn of projNames) setProjectGuard(cfg.projects[pn], gname, sel.includes(pn));
+  } else {
+    if (!current.length) return void console.log(`'${gname}' is not linked to any project.`);
+    const sel = await p.multiselect(`Remove '${gname}' from`, current, []);
+    for (const pn of sel) setProjectGuard(cfg.projects[pn], gname, false);
+  }
+  writeUserConfig(path, cfg);
+  console.log(`Updated '${gname}' links`);
+}
+
+// Add/remove a guard name on a project, keeping `guards` absent when empty.
+function setProjectGuard(project, name, on) {
+  const set = new Set(project.guards || []);
+  if (on) set.add(name);
+  else set.delete(name);
+  const list = [...set];
+  if (list.length) project.guards = list;
+  else delete project.guards;
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,11 +1255,12 @@ function help() {
     ['add', '', 'Wizard: create a new project or group'],
     ['edit', '[name]', 'Wizard: modify an existing project or group'],
     ['remove', '<name>', 'Delete a project or group (-y, alias rm)'],
+    ['guards', '[target]', 'List/manage guards (add/remove/link/unlink)'],
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
   ];
   const FLAGS = [
     ['--dry-run', 'Show what would run without executing'],
-    ['--skip-checks', 'Skip a target\'s preflight checks'],
+    ['--skip-guards', "Skip a target's guards"],
     ['--fileless', 'workspace: open windows instead of a workspace file'],
     ['--config <path>', 'Use a specific config file'],
     ['-y, --yes', 'Skip confirmation prompts'],
@@ -1193,7 +1315,7 @@ function parseArgs(argv) {
     dryRun: false,
     fileless: false,
     yes: false,
-    skipChecks: false,
+    skipGuards: false,
     help: false,
     version: false,
     config: null,
@@ -1202,7 +1324,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') flags.dryRun = true;
-    else if (a === '--skip-checks') flags.skipChecks = true;
+    else if (a === '--skip-guards') flags.skipGuards = true;
     else if (a === '--fileless') flags.fileless = true;
     else if (a === '-y' || a === '--yes') flags.yes = true;
     else if (a === '-h' || a === '--help') flags.help = true;
@@ -1264,6 +1386,9 @@ async function main() {
     case 'remove':
     case 'rm':
       await cmdRemove(flags, rest[0]);
+      return;
+    case 'guards':
+      await cmdGuards(flags, rest[0], rest.slice(1));
       return;
     case 'config':
       cmdConfig(flags, rest[0]);

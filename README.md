@@ -202,49 +202,64 @@ crew remove <name>                     delete a project or group (confirm; -y) (
 crew config [path|edit]                print merged config / its path / open in $EDITOR
 ```
 
-Global flags: `--dry-run`, `--skip-checks`, `--config <path>`, `-y/--yes`, `-h/--help`,
+Global flags: `--dry-run`, `--skip-guards`, `--config <path>`, `-y/--yes`, `-h/--help`,
 `-v/--version`. Every acting command supports `--dry-run` to print what it would do
 without running.
 
-## Preflight checks
+## Guards
 
-A project can require named **checks** — preconditions verified before `crew run`/`start`
-does anything. crew stays agnostic: a check is just a shell command, and it **passes iff
-it exits 0**. Define them once, reference them per project:
+A project can require named **guards** — preconditions verified before `crew run`/`start`
+does anything. crew stays agnostic: a guard is just a shell command, and it **passes iff
+it exits 0**. Guards live in a top-level registry and attach to projects many-to-many:
 
 ```json
 {
-  "checks": {
+  "guards": {
     "aws": {
       "command": "aws sts get-caller-identity --profile pre_bee >/dev/null 2>&1",
       "message": "AWS SSO expired — run: aws sso login --profile pre_bee"
     },
     "vpn": {
-      "command": "nc -z -w2 vpn.internal 443",
+      "command": "ifconfig | grep -qE 'inet (10\\.11\\.12\\.|172\\.27\\.)'",
       "message": "VPN not connected."
     }
   },
   "projects": {
-    "backend":   { "path": "~/code/backend",   "type": "backend", "checks": ["aws"] },
-    "orchestra": { "path": "~/code/orchestra",  "type": "backend", "checks": ["aws", "vpn"] }
+    "backend":   { "path": "~/code/backend",   "type": "backend", "guards": ["aws"] },
+    "orchestra": { "path": "~/code/orchestra",  "type": "backend", "guards": ["aws", "vpn"] }
   }
 }
 ```
 
-Before a run, crew collects the **union** of the target's checks, **deduped by name** — a
-check shared by several projects runs **once**, not per project. All run in parallel; if
+Before a run, crew collects the **union** of the target's guards, **deduped by name** — a
+guard shared by several projects runs **once**, not per project. All run in parallel; if
 any fails, crew prints each failure's `message` in red and **aborts before anything
 starts**:
 
 ```
-preflight: aws, vpn
+guards: aws, vpn
   ✓ aws
   ✗ vpn: VPN not connected.
-crew: preflight check failed — nothing started.
+crew: guard failed — nothing started.
 ```
 
-Bypass with `--skip-checks`. Checks only gate `run`/`start`/`install` — `workspace` and
+Bypass with `--skip-guards`. Guards only gate `run`/`start`/`install` — `workspace` and
 `claude` don't run them.
+
+### Managing guards
+
+All wizard/select-driven — no hand-editing:
+
+```
+crew guards [target]     list guards (all, or just a target's), with which projects use each
+crew guards add          wizard: name + command + failure message, then attach to projects
+crew guards remove       pick a guard to delete (also detaches it from every project)
+crew guards link         pick a guard, then toggle which projects use it (multi-select)
+crew guards unlink       pick a guard, then pick linked projects to detach
+```
+
+You can also attach guards from the project side in `crew edit <project>` (the guards
+multi-select). Both sides write the same `project.guards` list.
 
 ## The hidden workspace file
 
