@@ -199,6 +199,8 @@ Config:
 crew add                               wizard: create a new project or group
 crew edit [name]                       wizard: modify an existing project or group
 crew remove <name>                     delete a project or group (confirm; -y) (alias: rm)
+crew guards [target]                   list/manage guards (add/remove/link/unlink)
+crew dir [path]                        show/set the projects dir (relative paths resolve here)
 crew config [path|edit]                print merged config / its path / open in $EDITOR
 ```
 
@@ -303,11 +305,42 @@ slug isn't deleted, just no longer auto-loaded.
 
 - User-level: `~/.config/crew/config.json` (created on first write).
 - Project-local: a `./.crew.json` in the current directory merges **on top** of the
-  user config (its `projects`/`groups` override by name).
+  user config (its `projects`/`groups`/`guards` override by name).
 - `--config <path>` points at a specific config file instead.
 
 On load, a config with a missing or `< 2` version is migrated to v2 in memory and
 written back. A v1 project's single `start` block becomes `tasks.start`.
+
+## Projects directory (shareable config)
+
+A project's `path` can be **relative** — it resolves against a machine-local
+**projects directory**. Set it once per machine (stored in your user config, never in a
+committed file):
+
+```sh
+crew dir ~/Projects     # set it
+crew dir                # show it
+```
+
+Then project paths are short and portable:
+
+```json
+{
+  "projects": {
+    "backend":  { "path": "bee-beepro-backend", "type": "backend", "runner": "make {task}" },
+    "frontend": { "path": "bee-beepro-frontend", "type": "frontend", "runner": "npm run {task}" }
+  }
+}
+```
+
+`~…`/absolute paths are still honoured as-is (escape hatch for a repo living outside the
+projects dir). A relative path with no projects dir set is a clear error pointing you at
+`crew dir`.
+
+**Sharing a config with your team:** put `projects` + `groups` + `guards` (all relative
+paths) in a `./.crew.json` and commit it. Each teammate clones the repo and runs
+`crew dir <their-path>` once. Because the projects dir lives only in the machine-local
+user config, the committed file has zero absolute paths and works for everyone.
 
 ## Known limitations (by design)
 

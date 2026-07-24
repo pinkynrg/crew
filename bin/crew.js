@@ -106,6 +106,22 @@ function resolvePath(p) {
   const e = expandHome(String(p));
   return isAbsolute(e) ? e : resolve(process.cwd(), e);
 }
+// Machine-local projects directory; relative project paths resolve against it. Set once
+// per machine via `crew dir` (stored in the user-level config, never in a committed
+// ./.crew.json), so shared configs can use short relative paths like "bee-beepro-backend".
+let PROJECTS_DIR = null;
+// Resolve a PROJECT path: `~`/absolute is used as-is (escape hatch for repos outside the
+// projects dir); anything relative resolves against PROJECTS_DIR.
+function resolveProjectPath(p) {
+  const e = expandHome(String(p));
+  if (isAbsolute(e)) return e;
+  if (!PROJECTS_DIR)
+    fail(
+      `project path '${p}' is relative but no projects directory is set.\n` +
+        `  Set it once: crew dir <path>   (e.g. crew dir ~/Projects)`
+    );
+  return resolve(PROJECTS_DIR, e);
+}
 function pathExists(p) {
   try {
     statSync(p);
@@ -239,6 +255,10 @@ function loadUserConfig(flags) {
       /* read-only fs — proceed with the in-memory migration */
     }
   }
+  // Machine-local projects dir comes ONLY from the user-level config (never a committed
+  // ./.crew.json), so relative project paths resolve the same for the owner and never
+  // leak an absolute path into a shared file.
+  PROJECTS_DIR = cfg.projectsDir ? resolvePath(cfg.projectsDir) : null;
   return { path, cfg, existed: true };
 }
 
@@ -301,7 +321,7 @@ function resolveTarget(cfg, name) {
 // Verify every member's path exists. Names the offending project.
 function validateMemberPaths(members) {
   for (const m of members) {
-    const p = resolvePath(m.project.path);
+    const p = resolveProjectPath(m.project.path);
     if (!pathExists(p)) fail(`project '${m.name}': path not found: ${p}`);
   }
 }
@@ -311,7 +331,7 @@ function dirList(members) {
   const seen = new Set();
   const out = [];
   for (const m of members) {
-    const abs = resolvePath(m.project.path);
+    const abs = resolveProjectPath(m.project.path);
     if (!seen.has(abs)) {
       seen.add(abs);
       out.push(abs);
@@ -321,7 +341,7 @@ function dirList(members) {
 }
 
 function projectDir(project) {
-  return resolvePath(project.path);
+  return resolveProjectPath(project.path);
 }
 
 // ---------------------------------------------------------------------------
@@ -740,13 +760,20 @@ function cmdList(flags) {
   const nameW = Math.max(0, ...projects.map(([n]) => n.length));
   const typeW = Math.max(0, ...projects.map(([, p]) => (p.type || 'other').length));
   for (const [name, p] of projects) {
-    const abs = resolvePath(p.path);
-    const ok = pathExists(abs);
+    // Tolerant of an unset projects dir: show the raw relative path instead of crashing.
+    let abs = null;
+    try {
+      abs = resolveProjectPath(p.path);
+    } catch {
+      abs = null;
+    }
+    const ok = abs ? pathExists(abs) : false;
     const dot = ok ? c.green('●') : c.red('●');
     const type = p.type || 'other';
     const nameCell = c.bold(paint.get(name)(name.padEnd(nameW)));
     const typeCell = c.dim(type.padEnd(typeW));
-    const pathCell = ok ? c.dim(tildify(abs)) : c.red(tildify(abs) + '  ✗ missing');
+    const shown = abs ? tildify(abs) : `${p.path}  ${c.dim('(set projects dir: crew dir)')}`;
+    const pathCell = ok ? c.dim(shown) : c.red(shown + (abs ? '  ✗ missing' : ''));
     console.log(`  ${dot} ${nameCell}  ${typeCell}  ${pathCell}`);
 
     const taskEntries = Object.entries(p.tasks || {});
@@ -784,6 +811,35 @@ function cmdList(flags) {
   );
 }
 
+// crew dir [path] — show or set the machine-local projects directory. Relative project
+// paths resolve against it, so the projects/groups/guards config can use short relative
+// paths and be committed & shared; each machine sets its own dir here (not committed).
+function cmdDir(flags, arg) {
+  const { cfg, path } = loadUserConfig(flags);
+  if (arg == null) {
+    if (cfg.projectsDir) {
+      console.log(`${c.bold('projects dir')}  ${tildify(resolvePath(cfg.projectsDir))}`);
+      console.log(c.dim(`stored in ${tildify(path)} (machine-local)`));
+    } else {
+      console.log(c.dim('No projects directory set.'));
+      console.log(`Set it: ${c.cyan('crew dir <path>')}  (e.g. crew dir ~/Projects)`);
+    }
+    return;
+  }
+  const abs = resolvePath(arg);
+  let st = null;
+  try {
+    st = statSync(abs);
+  } catch {
+    /* missing */
+  }
+  if (!st || !st.isDirectory()) fail(`not a directory: ${abs}`);
+  cfg.projectsDir = arg; // keep the user's form (e.g. ~/Projects)
+  writeUserConfig(path, cfg);
+  console.log(`Set projects dir → ${tildify(abs)}`);
+  console.log(c.dim(`stored in ${tildify(path)} — machine-local, not committed`));
+}
+
 function cmdConfig(flags, sub) {
   const path = userConfigPath(flags);
   if (sub === 'path') {
@@ -812,7 +868,7 @@ const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 async function collectProject(p, existing, guardNames = []) {
   const path0 = await p.ask('Path', existing.path || '');
   if (!path0) fail('a path is required');
-  const abs = resolvePath(path0);
+  const abs = resolveProjectPath(path0);
   if (!pathExists(abs)) {
     const keep = await p.ask(`Path does not exist (${abs}). Save anyway? (y/N)`, '');
     if (!/^y/i.test(keep)) fail('aborted (path does not exist)');
@@ -1276,6 +1332,7 @@ function help() {
     ['edit', '[name]', 'Wizard: modify an existing project or group'],
     ['remove', '<name>', 'Delete a project or group (-y, alias rm)'],
     ['guards', '[target]', 'List/manage guards (add/remove/link/unlink)'],
+    ['dir', '[path]', 'Show/set the projects dir (relative paths resolve here)'],
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
   ];
   const FLAGS = [
@@ -1409,6 +1466,9 @@ async function main() {
       return;
     case 'guards':
       await cmdGuards(flags, rest[0], rest.slice(1));
+      return;
+    case 'dir':
+      cmdDir(flags, rest[0]);
       return;
     case 'config':
       cmdConfig(flags, rest[0]);
