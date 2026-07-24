@@ -423,6 +423,7 @@ function runFanout(commands, { killOthers, announceExits }) {
   return new Promise((resolve) => {
     const results = [];
     const live = new Set();
+    const spawned = [];
     const timers = [];
     let aborting = false;
     let sigints = 0;
@@ -502,6 +503,12 @@ function runFanout(commands, { killOthers, announceExits }) {
       for (const [sig, h] of handlers) process.removeListener(sig, h);
       process.stdout.removeListener('error', onStdoutErr);
       for (const t of timers) clearTimeout(t);
+      // Final sweep: SIGKILL each project's process group to reap stragglers that
+      // outlived their tracked shell — e.g. a supervisord/gunicorn worker orphaned on a
+      // "clean" exit. The leader is already gone, so -pgid only hits survivors (ESRCH is
+      // ignored). This is why crew reaps such orphans even when the app's own shutdown
+      // (or a wrapper like `uv run`/supervisord) fails to.
+      for (const pr of spawned) killGroup(pr, 'SIGKILL');
       if (lastWrite.char !== '\n') rawWrite('\n');
       if (COLOR) rawWrite('\x1b[0m');
       resolve(results);
@@ -529,6 +536,7 @@ function runFanout(commands, { killOthers, announceExits }) {
       child._prefix = cmd.color(`[${cmd.name}] `);
       child._killedByUs = false;
       live.add(child);
+      spawned.push(child);
       child.stdout.on('data', (b) => emit(child, b.toString('utf8')));
       child.stderr.on('data', (b) => emit(child, b.toString('utf8')));
       child.on('error', (err) => {
