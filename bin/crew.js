@@ -444,14 +444,26 @@ function runFanout(commands, { killOthers, announceExits }) {
         rawWrite('\n');
         lastWrite.char = '\n';
       }
-      let s = '';
-      for (const ch of text) {
-        if (lastWrite.char === '\n') s += proc._prefix;
-        s += ch;
-        lastWrite.char = ch;
+      // Prefix each non-empty line start. Built per-segment (split on '\n'), not per
+      // character — a char loop here pegs the event loop under a high-volume log stream
+      // and starves signal handling (Ctrl-C stops responding).
+      const pfx = proc._prefix;
+      const lines = text.split('\n');
+      let out = '';
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) {
+          out += '\n';
+          lastWrite.char = '\n';
+        }
+        const seg = lines[i];
+        if (seg) {
+          if (lastWrite.char === '\n') out += pfx;
+          out += seg;
+          lastWrite.char = seg[seg.length - 1];
+        }
       }
       lastWrite.proc = proc;
-      rawWrite(s);
+      rawWrite(out);
     };
     const note = (proc, msg) => emit(proc, (lastWrite.char === '\n' ? '' : '\n') + msg + '\n');
 
