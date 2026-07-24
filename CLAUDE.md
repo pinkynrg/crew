@@ -37,9 +37,12 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 
 - User-level: `~/.config/crew/config.json` (v2 schema). Project-local `./.crew.json`
   merges on top. v1 configs migrate to v2 on load (`start.command` -> `tasks.start`).
-- `projectsDir` (machine-local, user config only — set via `crew dir <path>`): relative
-  project `path`s resolve against it; `~`/absolute paths are used as-is. Keeps committed
-  `./.crew.json` (projects/groups/guards, relative paths) portable across machines.
+- `projectsDir` (machine-local — stored in `local.json` beside the config, set via
+  `crew dir <path>`, never in the committable `config.json`): relative project `path`s
+  resolve against it; `~`/absolute paths are used as-is. So `config.json`
+  (projects/groups/guards, relative paths) is directly committable; a legacy `projectsDir`
+  in `config.json` auto-migrates to `local.json` on load. `local.json` reads from beside
+  the resolved config (works with `--config`); gitignore it when committing.
 - Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip.
 - `guards`: top-level `guards: {name: {command, message}}` registry; a project lists names
   in `project.guards` (many-to-many). Before a run, the target's guards are deduped by

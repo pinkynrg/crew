@@ -314,15 +314,16 @@ written back. A v1 project's single `start` block becomes `tasks.start`.
 ## Projects directory (shareable config)
 
 A project's `path` can be **relative** — it resolves against a machine-local
-**projects directory**. Set it once per machine (stored in your user config, never in a
-committed file):
+**projects directory**. Set it once per machine:
 
 ```sh
 crew dir ~/Projects     # set it
 crew dir                # show it
 ```
 
-Then project paths are short and portable:
+The projects dir is stored in **`local.json`** (next to the config — `~/.config/crew/local.json`),
+**never** in `config.json`. That keeps `config.json` fully shareable. Project paths are
+then short and portable:
 
 ```json
 {
@@ -337,10 +338,18 @@ Then project paths are short and portable:
 projects dir). A relative path with no projects dir set is a clear error pointing you at
 `crew dir`.
 
-**Sharing a config with your team:** put `projects` + `groups` + `guards` (all relative
-paths) in a `./.crew.json` and commit it. Each teammate clones the repo and runs
-`crew dir <their-path>` once. Because the projects dir lives only in the machine-local
-user config, the committed file has zero absolute paths and works for everyone.
+### Sharing a config with your team
+
+Because `config.json` never contains machine-specific data, it's directly committable:
+
+1. Keep `projects`/`groups`/`guards` on relative paths (`crew dir` + `crew add`/`edit` do this).
+2. Commit `config.json` (in a repo, or `git init` inside `~/.config/crew`). **Gitignore
+   `local.json`** (and `workspaces/`, `sessions/`) — those are machine-local/generated.
+3. A teammate drops `config.json` at `~/.config/crew/config.json` (clone/symlink) and runs
+   `crew dir <their-path>` once. Everything resolves; no absolute paths are ever shared.
+
+`--config <path>` works too: `local.json` is always read from **beside** the config file,
+so an isolated config keeps its own machine settings.
 
 ## Known limitations (by design)
 

@@ -180,6 +180,26 @@ function crewHomeFor(configPath) {
   // The dir that holds the config also holds generated workspaces.
   return dirname(configPath);
 }
+// Machine-local settings (currently just projectsDir) live beside the config as
+// `local.json` — never committed. This keeps config.json fully shareable; teammates set
+// their own projectsDir with `crew dir`. Add `local.json` to .gitignore when committing.
+function machineConfigPath(flags) {
+  return join(crewHomeFor(userConfigPath(flags)), 'local.json');
+}
+function loadMachine(flags) {
+  const p = machineConfigPath(flags);
+  if (!pathExists(p)) return {};
+  try {
+    return JSON.parse(readFileSync(p, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+function writeMachine(flags, obj) {
+  const p = machineConfigPath(flags);
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, JSON.stringify(obj, null, 2) + '\n');
+}
 
 // Migrate a config object in place to v2. Returns true if anything changed.
 function migrate(cfg) {
@@ -248,17 +268,32 @@ function loadUserConfig(flags) {
   } catch (e) {
     fail(`config file is not valid JSON: ${path}`);
   }
-  if (migrate(cfg)) {
+  let changed = migrate(cfg);
+  // projectsDir is machine-local: it belongs in local.json, not the committable config.
+  // Migrate any legacy value out of config.json into local.json so config.json stays
+  // shareable.
+  const machine = loadMachine(flags);
+  let projectsDir = machine.projectsDir;
+  if (cfg.projectsDir) {
+    if (!projectsDir) {
+      projectsDir = cfg.projectsDir;
+      try {
+        writeMachine(flags, { ...machine, projectsDir });
+      } catch {
+        /* read-only fs */
+      }
+    }
+    delete cfg.projectsDir;
+    changed = true;
+  }
+  if (changed) {
     try {
       writeUserConfig(path, cfg);
     } catch {
       /* read-only fs — proceed with the in-memory migration */
     }
   }
-  // Machine-local projects dir comes ONLY from the user-level config (never a committed
-  // ./.crew.json), so relative project paths resolve the same for the owner and never
-  // leak an absolute path into a shared file.
-  PROJECTS_DIR = cfg.projectsDir ? resolvePath(cfg.projectsDir) : null;
+  PROJECTS_DIR = projectsDir ? resolvePath(projectsDir) : null;
   return { path, cfg, existed: true };
 }
 
@@ -811,15 +846,17 @@ function cmdList(flags) {
   );
 }
 
-// crew dir [path] — show or set the machine-local projects directory. Relative project
-// paths resolve against it, so the projects/groups/guards config can use short relative
-// paths and be committed & shared; each machine sets its own dir here (not committed).
+// crew dir [path] — show or set the machine-local projects directory. Stored in
+// local.json (beside the config, never committed); relative project paths resolve against
+// it, so config.json can use short relative paths and be committed & shared.
 function cmdDir(flags, arg) {
-  const { cfg, path } = loadUserConfig(flags);
+  loadUserConfig(flags); // migrate any legacy projectsDir out of config.json into local.json
+  const machinePath = machineConfigPath(flags);
+  const machine = loadMachine(flags);
   if (arg == null) {
-    if (cfg.projectsDir) {
-      console.log(`${c.bold('projects dir')}  ${tildify(resolvePath(cfg.projectsDir))}`);
-      console.log(c.dim(`stored in ${tildify(path)} (machine-local)`));
+    if (machine.projectsDir) {
+      console.log(`${c.bold('projects dir')}  ${tildify(resolvePath(machine.projectsDir))}`);
+      console.log(c.dim(`stored in ${tildify(machinePath)} (machine-local, not committed)`));
     } else {
       console.log(c.dim('No projects directory set.'));
       console.log(`Set it: ${c.cyan('crew dir <path>')}  (e.g. crew dir ~/Projects)`);
@@ -834,10 +871,11 @@ function cmdDir(flags, arg) {
     /* missing */
   }
   if (!st || !st.isDirectory()) fail(`not a directory: ${abs}`);
-  cfg.projectsDir = arg; // keep the user's form (e.g. ~/Projects)
-  writeUserConfig(path, cfg);
+  machine.projectsDir = arg; // keep the user's form (e.g. ~/Projects)
+  writeMachine(flags, machine);
+  loadUserConfig(flags); // strips any legacy projectsDir out of the committable config
   console.log(`Set projects dir → ${tildify(abs)}`);
-  console.log(c.dim(`stored in ${tildify(path)} — machine-local, not committed`));
+  console.log(c.dim(`stored in ${tildify(machinePath)} — machine-local, not committed`));
 }
 
 function cmdConfig(flags, sub) {
