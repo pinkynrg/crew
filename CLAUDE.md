@@ -2,6 +2,12 @@
 
 Guidance for working in this repo.
 
+## Commits & PRs
+
+- Never sign anything: no `Co-Authored-By` trailer, no "Generated with" line, no
+  agent/tool attribution of any kind in commit messages or PR bodies.
+- Single-line commit messages only — no body.
+
 ## What crew is
 
 A single-file macOS CLI that fans a **named task** out across a group of local

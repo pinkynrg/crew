@@ -10,6 +10,7 @@ import {
   writeFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   statSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -878,6 +879,161 @@ function cmdDir(flags, arg) {
   console.log(c.dim(`stored in ${tildify(machinePath)} — machine-local, not committed`));
 }
 
+// Scan <dir>/.envs, parse each file's name as <env>[-<slug>] (slug optional; some projects
+// name files plainly, e.g. `pre`, `qa`). Returns [{env, slug, path}].
+function envFilesFor(dir) {
+  const envsDir = join(dir, '.envs');
+  let names = [];
+  try {
+    names = readdirSync(envsDir).filter((n) => !n.startsWith('.'));
+  } catch {
+    return [];
+  }
+  return names.map((name) => {
+    const base = name.replace(/\.env$/, '');
+    const dash = base.indexOf('-');
+    const env = dash > 0 ? base.slice(0, dash) : base;
+    const slug = dash > 0 ? base.slice(dash + 1) : '';
+    return { env, slug, path: join(envsDir, name) };
+  });
+}
+const URL_RE = /\bhttps?:\/\/[^\s"'`)}<]+/g;
+// Split a URL into host + path (lowercased, scheme/port/query/trailing-slash dropped).
+function urlHostPath(url) {
+  const m = url.match(/^https?:\/\/([^/?#]+)([^?#\s]*)/i);
+  if (!m) return null;
+  const host = m[1].replace(/:\d+$/, '').toLowerCase();
+  const path = (m[2] || '').replace(/\/+$/, '').toLowerCase();
+  return { host, path };
+}
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const glob = (s) => s.split('*').map(escapeRe).join('.*'); // `*` = any run of chars
+// A match token is a WHOLE-host glob, optionally with a `/path` prefix. Split at the first
+// `/`: the host part must match the ENTIRE URL host (anchored both ends) — write `*` exactly
+// where the URL varies, e.g. `*svc.foo.io` (env prefix) or `svc-api*.foo.io` (env infix).
+// Because it must reach the end of the host, `*bee-sdk-mcp.getbee.io` matches
+// `qa-bee-sdk-mcp.getbee.io` but NOT `vpc-…-bee-sdk-mcp-….amazonaws.com`. The path part (if
+// any) is matched as a prefix, so a shared gateway host is split by path. Returns the matched
+// token's length (0 = no match) so the caller keeps the most specific token when several hit.
+function tokenMatchLen(host, path, tok) {
+  tok = String(tok).toLowerCase();
+  if (!tok) return 0;
+  const slash = tok.indexOf('/');
+  const hostPat = slash === -1 ? tok : tok.slice(0, slash);
+  const pathPat = slash === -1 ? '' : tok.slice(slash);
+  if (!new RegExp('^' + glob(hostPat) + '$').test(host)) return 0;
+  if (pathPat && !new RegExp('^' + glob(pathPat)).test(path)) return 0;
+  return tok.length;
+}
+
+// crew graph [target] — read-only dependency graph derived from env files (no wiring).
+// Each project's id comes ONLY from config `match` (whole-host glob patterns); edge P→T
+// when a URL in P's envs matches one of T's patterns (see tokenMatchLen; most-specific
+// token wins). Optional config `internalDomains: [..]` only affects the cosmetic "other
+// hosts" list. localhost URLs match no id, so they drop out.
+//
+// No auto-guessing (folder/filename heuristics were dropped): a project with no `match` has
+// no id, so nothing can point at it — it's flagged ⚠ until you add one.
+function projectIdentity(project) {
+  const tokens = Array.isArray(project.match) ? project.match.filter(Boolean) : [];
+  return { tokens, source: tokens.length ? 'match' : 'none' };
+}
+function cmdGraph(flags, targetName) {
+  const { cfg } = loadMerged(flags);
+  const paint = projectColors(cfg);
+  const projects = targetName
+    ? resolveTarget(cfg, targetName).members.map((m) => [m.name, m.project])
+    : Object.entries(cfg.projects || {});
+  const domains = Array.isArray(cfg.internalDomains) ? cfg.internalDomains : [];
+
+  const meta = {};
+  for (const [name, project] of projects) {
+    let dir;
+    try {
+      dir = resolveProjectPath(project.path);
+    } catch {
+      dir = null;
+    }
+    meta[name] = { files: dir ? envFilesFor(dir) : [], ...projectIdentity(project) };
+  }
+  const inDomain = (host) => domains.some((d) => host === d || host.endsWith('.' + d) || host.endsWith(d));
+
+  console.log(c.bold('Dependency graph') + c.dim('  — edges auto-discovered from .envs, no wiring'));
+  console.log(
+    c.dim(
+      [
+        'How it works:',
+        '  1. Give each project an id so crew can recognize it when another project\'s URL',
+        '     points at it: a `match` glob for its WHOLE hostname, with `*` written exactly',
+        '     where the URL varies. E.g. qa-billing.example.com → match: ["*billing.example.com"].',
+        '     No `match` = no id, so nothing can point at it (⚠).',
+        '  2. Read every env file and pull out every http(s):// URL.',
+        '  3. For each URL, test every `match` glob against its host. The glob must match the',
+        '     WHOLE host, so `*billing.example.com` matches qa-billing.example.com but never',
+        '     vpc-…-billing-….amazonaws.com. Add a `/path` to a token to split a gateway host.',
+        '  4. The project with the longest (most specific) matching token gets the edge P → T.',
+        '  5. URLs matching no project are dropped as 3rd-party (or listed as "other internal"',
+        '     when you set `internalDomains`).',
+      ].join('\n')
+    )
+  );
+  let warned = false;
+  for (const [name] of projects) {
+    const { files, tokens, source } = meta[name];
+    const seen = new Map(); // host\npath -> { host, path } (deduped across this project's envs)
+    for (const f of files) {
+      let text = '';
+      try {
+        text = readFileSync(f.path, 'utf8');
+      } catch {
+        /* skip */
+      }
+      for (const u of text.match(URL_RE) || []) {
+        const p = urlHostPath(u);
+        if (p) seen.set(p.host + '\n' + p.path, p);
+      }
+    }
+    const edges = new Set();
+    const other = new Set();
+    for (const { host, path } of seen.values()) {
+      // Pick the project whose matching token is longest (most specific), so a gateway host
+      // split by path resolves to the deeper path, not a shorter prefix.
+      let best = null;
+      let bestLen = 0;
+      for (const [t] of projects) {
+        for (const tok of meta[t].tokens) {
+          const len = tokenMatchLen(host, path, tok);
+          if (len > bestLen) {
+            bestLen = len;
+            best = t;
+          }
+        }
+      }
+      if (best && best !== name) edges.add(best);
+      else if (!best && domains.length && inDomain(host)) other.add(host); // only when configured
+    }
+
+    const head = c.bold(paint.get(name) ? paint.get(name)(name) : name);
+    if (source === 'none') {
+      warned = true;
+      console.log(`\n${head}  ${c.yellow('⚠ no `match` — no id, peers can\'t link to it')}`);
+    } else {
+      console.log(`\n${head}  ${c.dim('[' + tokens.join(', ') + ']')}`);
+    }
+    if (edges.size) {
+      for (const t of [...edges].sort())
+        console.log(`  ${c.green('→')} ${paint.get(t) ? paint.get(t)(t) : t}`);
+    } else {
+      console.log(`  ${c.dim('→ (no crew-project edges)')}`);
+    }
+    if (other.size) console.log(`  ${c.dim('· other internal: ' + [...other].sort().join(', '))}`);
+  }
+  if (warned)
+    console.log(
+      '\n' + c.yellow('⚠ ') + c.dim('some projects have no `match` — add `match: ["*host.example.com"]` so peers can link to them.')
+    );
+}
+
 function cmdConfig(flags, sub) {
   const path = userConfigPath(flags);
   if (sub === 'path') {
@@ -1507,6 +1663,9 @@ async function main() {
       return;
     case 'dir':
       cmdDir(flags, rest[0]);
+      return;
+    case 'graph':
+      cmdGraph(flags, rest[0]);
       return;
     case 'config':
       cmdConfig(flags, rest[0]);
