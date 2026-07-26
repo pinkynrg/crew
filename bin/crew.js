@@ -12,6 +12,7 @@ import {
   mkdirSync,
   readdirSync,
   statSync,
+  unlinkSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve, isAbsolute } from 'node:path';
@@ -154,7 +155,8 @@ function placeholdersIn(str) {
   return [...set];
 }
 function substitute(str, values) {
-  return str.replace(PLACEHOLDER_RE, (_, k) => shellQuote(values[k]));
+  // Unknown placeholders are left intact (e.g. crew fills {envfile} per-project later).
+  return str.replace(PLACEHOLDER_RE, (m, k) => (k in values ? shellQuote(values[k]) : m));
 }
 
 // ---------------------------------------------------------------------------
@@ -523,10 +525,13 @@ function resolveRun(cfg, task, members, args) {
   if (runnable.length === 0)
     fail(`no project in target can run task '${task}' (all run-less for this task)`);
 
-  // Union of placeholders across all runnable commands, excluding auto-filled {task}.
+  // Reserved placeholders crew fills itself (not from user args): {task} = the task name;
+  // {envfile} = the per-project wired env file crew materializes at start (see cmdRun).
+  const RESERVED = new Set(['task', 'envfile']);
+  // Union of placeholders across all runnable commands, excluding the reserved ones.
   const union = new Set();
   for (const r of runnable)
-    for (const p of placeholdersIn(r.template)) if (p !== 'task') union.add(p);
+    for (const p of placeholdersIn(r.template)) if (!RESERVED.has(p)) union.add(p);
 
   // Parse user args: key=value fills {key}; bare positional fills a remaining one.
   const keyVals = {};
@@ -558,18 +563,26 @@ function resolveRun(cfg, task, members, args) {
     if (i < positionals.length) values[k] = positionals[i];
   });
 
-  // Strict: every placeholder in every runnable command must be satisfied.
+  // Strict: every placeholder in every runnable command must be satisfied (reserved ones
+  // are crew-filled, so exempt: {task} is in values; {envfile} is substituted later).
   const unresolved = new Set();
   for (const r of runnable)
     for (const p of placeholdersIn(r.template))
-      if (p !== 'task' && !(p in values)) unresolved.add(p);
+      if (!RESERVED.has(p) && !(p in values)) unresolved.add(p);
   if (unresolved.size)
     fail(
       `unresolved placeholder(s): ${[...unresolved].join(', ')}. ` +
         `Provide as a positional or key=value.`
     );
 
-  for (const r of runnable) r.resolved = substitute(r.template, values);
+  for (const r of runnable) {
+    r.resolved = substitute(r.template, values); // {envfile} left intact for cmdRun
+    // Resolve the base env-file path (if declared) with the same values — raw (no shell
+    // quoting): it's a filesystem path crew reads, not a shell token.
+    r.envFile = r.project.env
+      ? r.project.env.replace(PLACEHOLDER_RE, (m, k) => (k in values ? values[k] : m))
+      : null;
+  }
   return { runnable, skipped };
 }
 
@@ -805,9 +818,60 @@ async function runGuards(cfg, members) {
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
+// Local service wiring: for each runnable whose command uses {envfile}, load its base env
+// (project.env), rewrite any URL pointing at a CO-RUNNING peer to that peer's `local`
+// origin, and materialize a FRESH temp file per run (stateless — regenerated every start,
+// deleted on teardown). {envfile} in the command is replaced with the temp path. Peers not
+// in the running set (or without a `local`) stay remote. dry => annotate only, no writes.
+function wireRun(userPath, runnable, members, { dry }) {
+  const peers = members
+    .filter((m) => m.project.local)
+    .map((m) => ({ name: m.name, tokens: projectIdentity(m.project).tokens, origin: originOf(m.project.local) || m.project.local }));
+  const tmpDir = join(crewHomeFor(userPath), 'tmp');
+  const tempPaths = [];
+  for (const r of runnable) {
+    if (!r.resolved.includes('{envfile}')) continue;
+    if (!r.envFile) fail(`project '${r.name}' uses {envfile} but has no "env" field in config`);
+    const basePath = resolve(projectDir(r.project), r.envFile);
+    if (!pathExists(basePath)) fail(`project '${r.name}': env file not found: ${basePath}`);
+    const myPeers = peers.filter((p) => p.name !== r.name);
+    let baseText = '';
+    try {
+      baseText = readFileSync(basePath, 'utf8');
+    } catch (e) {
+      fail(`project '${r.name}': cannot read env file ${basePath}: ${e.message}`);
+    }
+    if (dry) {
+      const hit = new Set();
+      baseText.replace(URL_RE, (u) => {
+        const p = urlHostPath(u);
+        if (!p) return u;
+        let b = null;
+        let bl = 0;
+        for (const pe of myPeers)
+          for (const t of pe.tokens) {
+            const l = tokenMatchLen(p.host, p.path, t);
+            if (l > bl) (bl = l), (b = pe);
+          }
+        if (b) hit.add(b.name);
+        return u;
+      });
+      r._wired = [...hit];
+      r.resolved = r.resolved.replace(/\{envfile\}/g, shellQuote(`<wired ${r.envFile}>`));
+      continue;
+    }
+    mkdirSync(tmpDir, { recursive: true });
+    const out = join(tmpDir, `${sanitize(r.name)}.env`);
+    writeFileSync(out, wireText(baseText, myPeers));
+    tempPaths.push(out);
+    r.resolved = r.resolved.replace(/\{envfile\}/g, shellQuote(out));
+  }
+  return { cleanup: () => tempPaths.forEach((p) => { try { unlinkSync(p); } catch {} }) };
+}
+
 async function cmdRun(flags, task, rest) {
   if (!task) fail('run: missing task name. Usage: crew run <task> [project...] [args]');
-  const { cfg } = loadMerged(flags);
+  const { cfg, userPath } = loadMerged(flags);
   // rest = bare project names + key=value placeholder args. No names -> picker.
   const names = rest.filter((a) => !a.includes('='));
   const args = rest.filter((a) => a.includes('='));
@@ -829,6 +893,9 @@ async function cmdRun(flags, task, rest) {
   const { runnable, skipped } = resolveRun(cfg, task, members, args);
   for (const s of skipped) console.log(`skipping ${s} (no task '${task}')`);
 
+  // Materialize wired env files (fills {envfile}); fresh per run, cleaned up after.
+  const { cleanup } = wireRun(userPath, runnable, members, { dry: flags.dryRun });
+
   const label = members.map((m) => m.name).join(', ');
   const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
 
@@ -836,8 +903,11 @@ async function cmdRun(flags, task, rest) {
     console.log(`# task '${task}' on: ${label} — mode: ${mode}`);
     const guardNames = [...new Set(runnable.flatMap((r) => r.project.guards || []))];
     if (guardNames.length) console.log(`# guards: ${guardNames.join(', ')}`);
-    for (const r of runnable)
+    for (const r of runnable) {
+      if (r._wired && r._wired.length)
+        console.log(`  ${c.dim('# ' + r.name + ' wired to localhost: ' + r._wired.join(', '))}`);
       console.log(`  ${r.name}: cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
+    }
     return;
   }
 
@@ -853,10 +923,12 @@ async function cmdRun(flags, task, rest) {
   if (isLong) {
     // LONG-RUNNING: stream; the first exit (any) tears the whole group down; Ctrl-C too.
     const results = await runFanout(commands, { killOthers: true, announceExits: true });
+    cleanup(); // remove the wired temp env files
     process.exit(exitCodeFromEvents(results));
   } else {
     // RUN-TO-COMPLETION: wait for all (no kill-others), then a pass/fail summary.
     const results = await runFanout(commands, { killOthers: false, announceExits: false });
+    cleanup();
     console.log(`\ncrew: task '${task}' results`);
     const byName = new Map(results.map((e) => [e.name, e.exitCode]));
     let anyFailed = false;
@@ -1070,6 +1142,35 @@ function tokenMatchLen(host, path, tok) {
   if (!new RegExp('^' + glob(hostPat) + '$').test(host)) return 0;
   if (pathPat && !new RegExp('^' + glob(pathPat)).test(path)) return 0;
   return tok.length;
+}
+
+// The scheme://host[:port] prefix of a URL (drops path/query/fragment). '' if not a URL.
+function originOf(url) {
+  const m = String(url).match(/^https?:\/\/[^/?#\s]+/i);
+  return m ? m[0] : '';
+}
+// Rewrite env-file text for local wiring: every URL whose host/path matches a co-running
+// peer's tokens has its origin swapped to that peer's local origin (path/query preserved).
+// Most-specific token wins (gateway paths). Peers absent from `peers` stay remote. `peers`
+// = [{ tokens, origin }]. Format-preserving — only URL origins change.
+function wireText(text, peers) {
+  return text.replace(URL_RE, (url) => {
+    const p = urlHostPath(url);
+    if (!p) return url;
+    let best = null;
+    let bestLen = 0;
+    for (const peer of peers)
+      for (const tok of peer.tokens) {
+        const len = tokenMatchLen(p.host, p.path, tok);
+        if (len > bestLen) {
+          bestLen = len;
+          best = peer;
+        }
+      }
+    if (!best) return url;
+    const o = originOf(url);
+    return o ? best.origin + url.slice(o.length) : url;
+  });
 }
 
 // crew graph [target] — read-only dependency graph derived from env files (no wiring).
