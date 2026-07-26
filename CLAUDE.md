@@ -46,15 +46,24 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 - `projectsDir` (machine-local — stored in `local.json` beside the config, set via
   `crew dir <path>`, never in the committable `config.json`): relative project `path`s
   resolve against it; `~`/absolute paths are used as-is. So `config.json`
-  (projects/groups/guards, relative paths) is directly committable; a legacy `projectsDir`
+  (projects/guards, relative paths) is directly committable; a legacy `projectsDir`
   in `config.json` auto-migrates to `local.json` on load. `local.json` reads from beside
-  the resolved config (works with `--config`); gitignore it when committing.
+  the resolved config (works with `--config`); gitignore it when committing. `local.json`
+  also holds `lastSelection` (the remembered picker selection).
+- No groups. A command acts on a **selection** of projects: explicit names on the CLI, or
+  an interactive multiselect (preselected with `lastSelection`) when none are given
+  (`selectMembers`). The picked set is saved to `lastSelection` (global, machine-local) and
+  reused across start/workspace/claude/run. A legacy `groups` key is dropped on load.
+- `match` (per project): whole-host glob(s) identifying the project's deployed hostname(s),
+  `*` where the URL varies, optional `/path` to split a gateway host. `crew graph` derives
+  edges from `.envs/*` URLs (most-specific token wins; see `tokenMatchLen`). `crew start`
+  warns when a co-running selection isn't connected in that graph.
 - Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip.
 - `guards`: top-level `guards: {name: {command, message}}` registry; a project lists names
   in `project.guards` (many-to-many). Before a run, the target's guards are deduped by
   name, run once each in parallel (pass = exit 0); any failure prints its message and
   aborts. `--skip-guards` bypasses. Only `run`/`start`/`install` gate on them. Managed via
-  the `crew guards` command group (list/add/remove/link/unlink, all select-driven). The v1
+  the `crew guards` command (list/add/remove/link/unlink, all select-driven). The v1
   `checks` key auto-migrates to `guards` on load.
 - Two execution modes by `config.longRunning`: long-running (streamed, first exit or
   Ctrl-C tears the whole group down) vs run-to-completion (wait all, no kill-others,

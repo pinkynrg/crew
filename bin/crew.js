@@ -169,7 +169,6 @@ function defaultConfig() {
     workspaceName: 'crew',
     longRunning: [...DEFAULT_LONG_RUNNING],
     projects: {},
-    groups: {},
   };
 }
 
@@ -225,8 +224,9 @@ function migrate(cfg) {
     cfg.projects = {};
     changed = true;
   }
-  if (!cfg.groups) {
-    cfg.groups = {};
+  // Groups were removed in favour of the on-the-fly picker + remembered selection; drop any.
+  if (cfg.groups) {
+    delete cfg.groups;
     changed = true;
   }
   if (!cfg.workspaceName) {
@@ -319,7 +319,6 @@ function loadMerged(flags) {
     if (local.workspaceName) merged.workspaceName = local.workspaceName;
     if (Array.isArray(local.longRunning)) merged.longRunning = local.longRunning;
     Object.assign(merged.projects, local.projects || {});
-    Object.assign(merged.groups, local.groups || {});
     merged.guards = { ...(merged.guards || {}), ...(local.guards || {}) };
     localUsed = localPath;
   }
@@ -327,31 +326,156 @@ function loadMerged(flags) {
 }
 
 // ---------------------------------------------------------------------------
-// Target resolution — group FIRST, then single project (bare project = group of one).
+// Selection — a set of projects chosen per-run: either named explicitly on the CLI, or
+// picked interactively (preselected with the last selection). No groups; the remembered
+// selection replaces them. `label` names the set for display.
 // ---------------------------------------------------------------------------
-function resolveTarget(cfg, name) {
-  if (cfg.groups && cfg.groups[name]) {
-    const members = cfg.groups[name];
-    const missing = members.filter((p) => !cfg.projects[p]);
-    if (missing.length)
-      fail(`group '${name}' references unknown project(s): ${missing.join(', ')}`);
-    return {
-      kind: 'group',
-      name,
-      members: members.map((p) => ({ name: p, project: cfg.projects[p] })),
-    };
+function membersFor(cfg, names) {
+  const known = Object.keys(cfg.projects || {});
+  const missing = names.filter((n) => !cfg.projects[n]);
+  if (missing.length)
+    fail(
+      `unknown project(s): ${missing.join(', ')}.\n` +
+        `  projects: ${known.join(', ') || '(none) — run: crew add'}`
+    );
+  return names.map((n) => ({ name: n, project: cfg.projects[n] }));
+}
+
+// The remembered selection is global (shared by start/workspace/claude/run) and machine-
+// local (local.json beside the config) — ephemeral per-machine state, never committed.
+function loadLastSelection(flags) {
+  const s = loadMachine(flags).lastSelection;
+  return Array.isArray(s) ? s : [];
+}
+function saveLastSelection(flags, names) {
+  try {
+    writeMachine(flags, { ...loadMachine(flags), lastSelection: names });
+  } catch {
+    /* read-only fs — selection just won't persist */
   }
-  if (cfg.projects && cfg.projects[name]) {
-    return { kind: 'project', name, members: [{ name, project: cfg.projects[name] }] };
+}
+
+// Resolve the project set for a command: use explicit CLI names, else open the multiselect
+// picker (preselected with the remembered selection). Persists the chosen set globally.
+// opts.connectivity shows a live wiring-connectivity footer in the picker (for co-running
+// sets). Returns members [] or null if the picker was cancelled / nothing chosen.
+async function selectMembers(flags, cfg, names, opts = {}) {
+  const known = Object.keys(cfg.projects || {});
+  if (!known.length) fail('no projects configured yet — run: crew add');
+  if (names.length) {
+    const members = membersFor(cfg, names);
+    saveLastSelection(flags, names);
+    return members;
   }
-  const groups = Object.keys(cfg.groups || {});
-  const projects = Object.keys(cfg.projects || {});
-  fail(
-    `unknown target '${name}'.\n` +
-      `  groups:   ${groups.join(', ') || '(none)'}\n` +
-      `  projects: ${projects.join(', ') || '(none)'}` +
-      (groups.length || projects.length ? '' : '\n  Nothing configured yet — run: crew add')
-  );
+  if (!canInteractive())
+    fail('no projects given and not an interactive terminal — pass names, e.g. crew start rge-be rge-fe');
+  const paint = projectColors(cfg);
+  // Precompute the graph once so the live footer is a pure in-memory lookup per keypress.
+  const edges = opts.connectivity ? dependencyEdges(cfg, Object.entries(cfg.projects)) : null;
+  const picked = await menu({
+    title: 'Select projects',
+    items: known,
+    multi: true,
+    preselected: loadLastSelection(flags).filter((n) => cfg.projects[n]),
+    label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)),
+    footer: edges ? (sel) => connectivityStatus(cfg, edges, sel, true) : null,
+  });
+  if (!picked || !picked.length) {
+    console.log(c.dim('nothing selected'));
+    return null;
+  }
+  saveLastSelection(flags, picked);
+  return membersFor(cfg, picked);
+}
+
+// Directed dependency edges among the given [name, project] entries: name -> Set(peer).
+// Same rule as `crew graph` (whole-host glob, most-specific token wins).
+function dependencyEdges(cfg, entries) {
+  const meta = {};
+  for (const [name, project] of entries) {
+    let dir;
+    try {
+      dir = resolveProjectPath(project.path);
+    } catch {
+      dir = null;
+    }
+    meta[name] = { files: dir ? envFilesFor(dir) : [], ...projectIdentity(project) };
+  }
+  const edges = new Map(entries.map(([n]) => [n, new Set()]));
+  for (const [name] of entries) {
+    const seen = new Map();
+    for (const f of meta[name].files) {
+      let text = '';
+      try {
+        text = readFileSync(f.path, 'utf8');
+      } catch {
+        /* skip */
+      }
+      for (const u of text.match(URL_RE) || []) {
+        const p = urlHostPath(u);
+        if (p) seen.set(p.host + '\n' + p.path, p);
+      }
+    }
+    for (const { host, path } of seen.values()) {
+      let best = null;
+      let bestLen = 0;
+      for (const [t] of entries)
+        for (const tok of meta[t].tokens) {
+          const len = tokenMatchLen(host, path, tok);
+          if (len > bestLen) {
+            bestLen = len;
+            best = t;
+          }
+        }
+      if (best && best !== name) edges.get(name).add(best);
+    }
+  }
+  return edges;
+}
+
+// Connected components (undirected) of the induced dependency subgraph over `names` — using
+// a precomputed directed `edges` map, so this is pure/cheap enough to call on every keypress.
+function componentsFrom(edges, names) {
+  const set = new Set(names);
+  const adj = new Map(names.map((n) => [n, new Set()]));
+  for (const from of names)
+    for (const to of edges.get(from) || [])
+      if (set.has(to)) {
+        adj.get(from).add(to);
+        adj.get(to).add(from);
+      }
+  const seen = new Set();
+  const comps = [];
+  for (const n of names) {
+    if (seen.has(n)) continue;
+    const stack = [n];
+    const comp = [];
+    seen.add(n);
+    while (stack.length) {
+      const x = stack.pop();
+      comp.push(x);
+      for (const y of adj.get(x)) if (!seen.has(y)) (seen.add(y), stack.push(y));
+    }
+    comps.push(comp);
+  }
+  return comps;
+}
+
+// Single-line connectivity status for a selection, using precomputed `edges`. Empty when
+// there's nothing to say (unless verbose, which also emits the <2 hint and the ✓ line).
+// Disconnected => one inline line listing the islands (they run with no local wiring between).
+function connectivityStatus(cfg, edges, names, verbose = false) {
+  const valid = names.filter((n) => cfg.projects[n]);
+  if (valid.length < 2) return verbose ? c.dim('  select 2+ projects to check local wiring') : '';
+  const comps = componentsFrom(edges, valid);
+  if (comps.length <= 1)
+    return verbose ? '  ' + c.green('✓') + c.dim(' connected') : '';
+  const paint = projectColors(cfg);
+  const islands = comps
+    .sort((a, b) => b.length - a.length)
+    .map((comp) => comp.map((n) => paint.get(n)(n)).join(c.dim('·')))
+    .join(c.dim('  |  '));
+  return '  ' + c.yellow('⚠ not connected:') + ' ' + islands;
 }
 
 // Verify every member's path exists. Names the offending project.
@@ -456,11 +580,16 @@ function resolveRun(cfg, task, members, args) {
 // the whole group by pgid — catching grandchildren that reparent away (e.g. a dev
 // server's autoreload child) which a ppid-walking tree-kill would miss. Two modes:
 // kill-others (long-running) and wait-all (run-to-completion), with SIGTERM -> grace
-// -> SIGKILL escalation and double-Ctrl-C force-kill. crew never forwards stdin, so
+// -> SIGKILL escalation; a second Ctrl-C force-kills, but only after a window (see
+// SIGINT_FORCE_AFTER_MS) so an impatient double-tap can't skip teardown. crew never forwards stdin, so
 // detaching the children (which removes them from the TTY foreground group) is safe;
 // we forward SIGINT/SIGTERM/SIGHUP to each group ourselves.
 // ---------------------------------------------------------------------------
 const KILL_GRACE_MS = Number(process.env.CREW_KILL_GRACE_MS) || 5000;
+// A second Ctrl-C only force-kills once this long has passed since the first — so an
+// impatient double-tap can't skip the graceful group teardown (which orphans supervisord/
+// gunicorn-style children). Within the window, extra Ctrl-C is ignored with a nudge.
+const SIGINT_FORCE_AFTER_MS = Number(process.env.CREW_FORCE_AFTER_MS) || 10000;
 
 // exitCode is a number (normal exit) or a signal-name string (killed). Aggregate:
 // first non-zero numeric wins; else 130 if anything was signalled; else 0/1.
@@ -482,7 +611,7 @@ function runFanout(commands, { killOthers, announceExits }) {
     const spawned = [];
     const timers = [];
     let aborting = false;
-    let sigints = 0;
+    let firstSigintAt = 0;
 
     // Shared line-aware logger: prefix only at line starts; when a different command
     // interrupts an unterminated line, close it first (standard prefixed-logger behavior).
@@ -558,8 +687,18 @@ function runFanout(commands, { killOthers, announceExits }) {
     const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
     const handlers = SIGNALS.map((sig) => {
       const h = () => {
-        if (sig === 'SIGINT' && ++sigints >= 2) return forceKill();
-        tearDown(sig === 'SIGINT' ? 'SIGINT' : 'SIGTERM');
+        if (sig !== 'SIGINT') return tearDown('SIGTERM');
+        const now = Date.now();
+        if (!firstSigintAt) {
+          firstSigintAt = now;
+          return tearDown('SIGINT'); // graceful: SIGTERM group -> grace -> SIGKILL
+        }
+        if (now - firstSigintAt >= SIGINT_FORCE_AFTER_MS) return forceKill();
+        // Still inside the graceful window — ignore the extra Ctrl-C, just nudge.
+        const left = Math.ceil((SIGINT_FORCE_AFTER_MS - (now - firstSigintAt)) / 1000);
+        if (lastWrite.char !== '\n') rawWrite('\n');
+        rawWrite(c.dim(`crew: shutting down… press Ctrl-C again in ${left}s to force-kill\n`));
+        lastWrite.char = '\n';
       };
       process.on(sig, h);
       return [sig, h];
@@ -666,23 +805,35 @@ async function runGuards(cfg, members) {
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
-async function cmdRun(flags, task, targetName, args) {
-  if (!task) fail('run: missing task name. Usage: crew run <task> <target> [args]');
-  if (!targetName) fail(`run: missing target. Usage: crew run ${task} <target> [args]`);
+async function cmdRun(flags, task, rest) {
+  if (!task) fail('run: missing task name. Usage: crew run <task> [project...] [args]');
   const { cfg } = loadMerged(flags);
-  const target = resolveTarget(cfg, targetName);
-  validateMemberPaths(target.members);
-
-  const { runnable, skipped } = resolveRun(cfg, task, target.members, args);
-  for (const s of skipped) console.log(`skipping ${s} (no task '${task}')`);
-
+  // rest = bare project names + key=value placeholder args. No names -> picker.
+  const names = rest.filter((a) => !a.includes('='));
+  const args = rest.filter((a) => a.includes('='));
   const isLong = (cfg.longRunning || []).includes(task);
   const mode = isLong ? 'long-running' : 'run-to-completion';
+  // For a co-running local set the picker shows a live wiring-connectivity footer.
+  const members = await selectMembers(flags, cfg, names, { connectivity: isLong });
+  if (!members) return;
+  validateMemberPaths(members);
 
+  // Restate the connectivity result once (the picker footer is erased on close; and the
+  // explicit-names path has no picker), so a disconnected run is visible in scrollback.
+  if (isLong) {
+    const edges = dependencyEdges(cfg, Object.entries(cfg.projects));
+    const w = connectivityStatus(cfg, edges, members.map((m) => m.name));
+    if (w) console.log(w);
+  }
+
+  const { runnable, skipped } = resolveRun(cfg, task, members, args);
+  for (const s of skipped) console.log(`skipping ${s} (no task '${task}')`);
+
+  const label = members.map((m) => m.name).join(', ');
   const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
 
   if (flags.dryRun) {
-    console.log(`# task '${task}' on ${target.kind} '${target.name}' — mode: ${mode}`);
+    console.log(`# task '${task}' on: ${label} — mode: ${mode}`);
     const guardNames = [...new Set(runnable.flatMap((r) => r.project.guards || []))];
     if (guardNames.length) console.log(`# guards: ${guardNames.join(', ')}`);
     for (const r of runnable)
@@ -719,12 +870,18 @@ async function cmdRun(flags, task, targetName, args) {
   }
 }
 
-async function cmdWorkspace(flags, targetName) {
-  if (!targetName) fail('workspace: missing target. Usage: crew workspace <target> [--fileless]');
+// A stable id for a selection: sorted member names joined — same set => same id regardless
+// of pick order, so workspace files / claude sessions stay tied to the set, not the order.
+function selectionLabel(members) {
+  return sanitize(members.map((m) => m.name).sort().join('+')) || 'selection';
+}
+
+async function cmdWorkspace(flags, rest) {
   const { cfg, userPath } = loadMerged(flags);
-  const target = resolveTarget(cfg, targetName);
-  validateMemberPaths(target.members);
-  const dirs = dirList(target.members);
+  const members = await selectMembers(flags, cfg, rest.filter((a) => !a.includes('=')));
+  if (!members) return;
+  validateMemberPaths(members);
+  const dirs = dirList(members);
 
   if (flags.fileless) {
     if (flags.dryRun) {
@@ -738,7 +895,7 @@ async function cmdWorkspace(flags, targetName) {
   }
 
   const wsDir = join(crewHomeFor(userPath), 'workspaces');
-  const wsFile = join(wsDir, `${sanitize(target.name)}.code-workspace`);
+  const wsFile = join(wsDir, `${selectionLabel(members)}.code-workspace`);
   const wsJson = { folders: dirs.map((p) => ({ path: p })), settings: {} };
 
   if (flags.dryRun) {
@@ -752,19 +909,18 @@ async function cmdWorkspace(flags, targetName) {
   launch('code', [wsFile]);
 }
 
-async function cmdClaude(flags, targetName) {
-  if (!targetName) fail('claude: missing target. Usage: crew claude <target>');
+async function cmdClaude(flags, rest) {
   const { cfg, userPath } = loadMerged(flags);
-  const target = resolveTarget(cfg, targetName);
-  validateMemberPaths(target.members);
-  const dirs = dirList(target.members);
+  const members = await selectMembers(flags, cfg, rest.filter((a) => !a.includes('=')));
+  if (!members) return;
+  validateMemberPaths(members);
+  const dirs = dirList(members);
 
-  // Stable, crew-owned cwd per target. Claude Code keys its history off the cwd path
-  // (~/.claude/projects/<cwd-slug>/), so a fixed dir keeps history tied to the TARGET
-  // NAME — not the first member — surviving any reordering of the group's projects,
-  // and keeps it out of any single project's folder. All projects stay reachable via
-  // the --add-dir list below.
-  const cwd = join(crewHomeFor(userPath), 'sessions', sanitize(target.name));
+  // Stable, crew-owned cwd per selection. Claude Code keys its history off the cwd path
+  // (~/.claude/projects/<cwd-slug>/), so a fixed dir keeps history tied to the SET of
+  // projects (sorted, order-independent) — not the first member — and keeps it out of any
+  // single project's folder. All projects stay reachable via the --add-dir list below.
+  const cwd = join(crewHomeFor(userPath), 'sessions', selectionLabel(members));
   mkdirSync(cwd, { recursive: true });
 
   const cliArgs = [];
@@ -781,11 +937,10 @@ async function cmdClaude(flags, targetName) {
 function cmdList(flags) {
   const { cfg, localPath } = loadMerged(flags);
   const projects = Object.entries(cfg.projects || {});
-  const groups = Object.entries(cfg.groups || {});
   const longRunning = new Set(cfg.longRunning || []);
   const paint = projectColors(cfg);
-  if (projects.length === 0 && groups.length === 0) {
-    console.log(c.dim('No projects or groups configured yet.'));
+  if (projects.length === 0) {
+    console.log(c.dim('No projects configured yet.'));
     console.log(`Run ${c.cyan('crew add')} to add one.`);
     return;
   }
@@ -825,21 +980,12 @@ function cmdList(flags) {
       console.log(`      ${c.dim('guards'.padEnd(labelW + 2))}${p.guards.join(', ')}`);
   }
 
-  // --- Groups (members painted with each project's own stable color) --------
-  console.log('\n' + c.bold(c.underline('Groups')));
-  if (groups.length === 0) console.log(c.dim('  (none)'));
-  const known = new Set(Object.keys(cfg.projects || {}));
-  const gW = Math.max(0, ...groups.map(([n]) => n.length));
-  for (const [name, members] of groups) {
-    const mem = members
-      .map((m) => (known.has(m) ? paint.get(m)(m) : c.red(m + '?')))
-      .join(c.dim(', '));
-    console.log(`  ${c.bold(name.padEnd(gW))}  ${c.dim('→')}  ${mem}`);
-  }
-
   // --- Footer ---------------------------------------------------------------
+  const last = loadLastSelection(flags).filter((n) => cfg.projects[n]);
+  if (last.length)
+    console.log('\n' + c.dim('last selection  ') + last.map((n) => paint.get(n)(n)).join(c.dim(', ')));
   const lr = (cfg.longRunning || []).map((t) => c.yellow(t)).join(c.dim(', ')) || c.dim('(none)');
-  console.log('\n' + c.dim('long-running  ') + lr);
+  console.log((last.length ? '' : '\n') + c.dim('long-running  ') + lr);
   console.log(
     c.dim('config        ') +
       c.dim(tildify(userConfigPath(flags))) +
@@ -938,12 +1084,13 @@ function projectIdentity(project) {
   const tokens = Array.isArray(project.match) ? project.match.filter(Boolean) : [];
   return { tokens, source: tokens.length ? 'match' : 'none' };
 }
-function cmdGraph(flags, targetName) {
+function cmdGraph(flags, names) {
   const { cfg } = loadMerged(flags);
   const paint = projectColors(cfg);
-  const projects = targetName
-    ? resolveTarget(cfg, targetName).members.map((m) => [m.name, m.project])
-    : Object.entries(cfg.projects || {});
+  const projects =
+    names && names.length
+      ? membersFor(cfg, names).map((m) => [m.name, m.project])
+      : Object.entries(cfg.projects || {});
   const domains = Array.isArray(cfg.internalDomains) ? cfg.internalDomains : [];
 
   const meta = {};
@@ -1092,128 +1239,69 @@ async function collectProject(p, existing, guardNames = []) {
   return project;
 }
 
-// Pick an ordered member list from existing projects (multi-select on a TTY).
-async function collectMembers(p, cfg, existing) {
-  const known = Object.keys(cfg.projects || {});
-  if (!known.length) fail('no projects exist yet — add a project first');
-  const members = await p.multiselect('Members', known, existing || []);
-  const missing = members.filter((m) => !cfg.projects[m]);
-  if (missing.length) fail(`unknown project(s): ${missing.join(', ')}. Known: ${known.join(', ')}`);
-  return members;
-}
-
-// crew add — create a NEW project or group entirely via wizard (errors if it exists).
+// crew add — create a NEW project via wizard (errors if it exists).
 async function cmdAdd(flags) {
   const { cfg, path } = loadUserConfig(flags);
   const p = makePrompter();
   try {
-    const kind = await p.select('Add a project or a group?', ['project', 'group'], 'project');
-    const name = (await p.ask(`${kind === 'group' ? 'Group' : 'Project'} name`, '')).trim();
-    if (!name) fail(`add: a ${kind} name is required`);
-    if (cfg.projects[name] || cfg.groups[name])
-      fail(`'${name}' already exists. Use: crew edit ${name}`);
-
-    if (kind === 'group') {
-      const members = await collectMembers(p, cfg, []);
-      if (!members.length) fail('add: a group needs at least one member');
-      cfg.groups[name] = members;
-      writeUserConfig(path, cfg);
-      console.log(`\nSaved group '${name}' -> ${members.join(', ')}`);
-    } else {
-      cfg.projects[name] = await collectProject(p, {}, Object.keys(cfg.guards || {}));
-      writeUserConfig(path, cfg);
-      console.log(`\nSaved project '${name}' to ${path}`);
-    }
+    const name = (await p.ask('Project name', '')).trim();
+    if (!name) fail('add: a project name is required');
+    if (cfg.projects[name]) fail(`'${name}' already exists. Use: crew edit ${name}`);
+    cfg.projects[name] = await collectProject(p, {}, Object.keys(cfg.guards || {}));
+    writeUserConfig(path, cfg);
+    console.log(`\nSaved project '${name}' to ${path}`);
   } finally {
     p.close();
   }
 }
 
-// crew edit [name] — modify an EXISTING project or group via wizard (errors if absent).
+// crew edit [name] — modify an EXISTING project via wizard (errors if absent).
 async function cmdEdit(flags, name) {
   const { cfg, path } = loadUserConfig(flags);
   const projects = Object.keys(cfg.projects || {});
-  const groups = Object.keys(cfg.groups || {});
-  if (!projects.length && !groups.length) fail('edit: nothing to edit yet. Run: crew add');
+  if (!projects.length) fail('edit: nothing to edit yet. Run: crew add');
 
   const p = makePrompter();
   try {
     // No name given: pick from a list — arrow keys when interactive, else typed.
     if (!name) {
-      const items = [
-        ...projects.map((n) => ({ name: n, kind: 'project' })),
-        ...groups.map((n) => ({ name: n, kind: 'group' })),
-      ];
       if (canInteractive()) {
         const picked = await menu({
-          title: 'Edit which?',
-          items,
-          label: (it, cur) => `${cur ? c.bold(it.name) : it.name} ${c.dim('— ' + it.kind)}`,
+          title: 'Edit which project?',
+          items: projects,
+          label: (n, cur) => (cur ? c.bold(n) : n),
         });
         if (!picked) {
           console.log('edit: cancelled');
           return;
         }
-        name = picked.name;
+        name = picked;
       } else {
-        console.log('Projects: ' + (projects.join(', ') || '(none)'));
-        console.log('Groups:   ' + (groups.join(', ') || '(none)'));
+        console.log('Projects: ' + projects.join(', '));
         name = (await p.ask('Name to edit', '')).trim();
       }
     }
     if (!name) fail('edit: a name is required');
+    if (!cfg.projects[name]) fail(`no such project '${name}'. Run: crew add`);
 
-    const isGroup = !!cfg.groups[name];
-    const isProject = !!cfg.projects[name];
-    if (!isGroup && !isProject) fail(`no such project or group '${name}'. Run: crew add`);
-
-    if (isGroup) {
-      const members = await collectMembers(p, cfg, cfg.groups[name]);
-      if (!members.length) fail('edit: a group needs at least one member');
-      cfg.groups[name] = members;
-      writeUserConfig(path, cfg);
-      console.log(`\nUpdated group '${name}' -> ${members.join(', ')}`);
-    } else {
-      cfg.projects[name] = await collectProject(p, cfg.projects[name], Object.keys(cfg.guards || {}));
-      writeUserConfig(path, cfg);
-      console.log(`\nUpdated project '${name}' in ${path}`);
-    }
+    cfg.projects[name] = await collectProject(p, cfg.projects[name], Object.keys(cfg.guards || {}));
+    writeUserConfig(path, cfg);
+    console.log(`\nUpdated project '${name}' in ${path}`);
   } finally {
     p.close();
   }
 }
 
-// Names are unique across projects and groups, so one command removes either.
 async function cmdRemove(flags, name) {
   if (!name) fail('remove: missing name. Usage: crew remove <name>');
   const { cfg, path } = loadUserConfig(flags);
-  const isGroup = !!cfg.groups[name];
-  const isProject = !!cfg.projects[name];
-  if (isGroup && isProject)
-    fail(`'${name}' exists as both a group and a project (legacy config); edit ${path} by hand.`);
-  if (!isGroup && !isProject)
-    fail(
-      `no such project or group '${name}'.\n` +
-        `  projects: ${Object.keys(cfg.projects).join(', ') || '(none)'}\n` +
-        `  groups:   ${Object.keys(cfg.groups).join(', ') || '(none)'}`
-    );
+  if (!cfg.projects[name])
+    fail(`no such project '${name}'.\n  projects: ${Object.keys(cfg.projects).join(', ') || '(none)'}`);
 
-  const kind = isGroup ? 'group' : 'project';
-  if (!(await confirm(flags, `Delete ${kind} '${name}'?`))) return;
-
-  let referencing = [];
-  if (isGroup) {
-    delete cfg.groups[name];
-  } else {
-    delete cfg.projects[name];
-    referencing = Object.entries(cfg.groups)
-      .filter(([, m]) => m.includes(name))
-      .map(([g]) => g);
-  }
+  if (!(await confirm(flags, `Delete project '${name}'?`))) return;
+  delete cfg.projects[name];
   writeUserConfig(path, cfg);
-  console.log(`Removed ${kind} '${name}'`);
-  if (referencing.length)
-    console.log(`NOTE: still referenced by group(s): ${referencing.join(', ')}`);
+  console.log(`Removed project '${name}'`);
 }
 
 // crew guards [target]           -> list all guards (or a target's), with usage
@@ -1242,12 +1330,12 @@ function printGuard(reg, n) {
   console.log(`      ${c.dim('command')}  ${g.command || c.dim('(none)')}`);
   if (g.message) console.log(`      ${c.dim('message')}  ${g.message}`);
 }
-function guardList(cfg, targetName) {
+function guardList(cfg, projectName) {
   const reg = cfg.guards || {};
-  if (targetName) {
-    const target = resolveTarget(cfg, targetName);
-    const used = [...new Set(target.members.flatMap((m) => m.project.guards || []))];
-    console.log(c.bold(c.underline(`Guards for ${target.kind} '${target.name}'`)));
+  if (projectName) {
+    const members = membersFor(cfg, [projectName]);
+    const used = [...new Set(members.flatMap((m) => m.project.guards || []))];
+    console.log(c.bold(c.underline(`Guards for project '${projectName}'`)));
     if (!used.length) return void console.log(c.dim('  (none)'));
     for (const n of used) printGuard(reg, n);
     return;
@@ -1349,7 +1437,9 @@ function canInteractive() {
 // Arrow-key menu (needs an interactive TTY). Single-select returns the chosen item;
 // multi-select returns the checked items in toggle order. Esc/q/Ctrl-C -> null.
 // Up/Down (or k/j) move; Space toggles (multi); Enter confirms.
-function menu({ title, items, label, multi = false, start = 0, preselected = [] }) {
+// `footer(selection)` (optional) returns a live status block redrawn on every keypress —
+// `selection` is the checked items (multi) or the highlighted item. May be multi-line.
+function menu({ title, items, label, multi = false, start = 0, preselected = [], footer = null }) {
   return new Promise((resolve) => {
     const stdin = process.stdin;
     const out = process.stdout;
@@ -1366,14 +1456,25 @@ function menu({ title, items, label, multi = false, start = 0, preselected = [] 
     out.write(`${title}${c.dim(hint)}\n`);
     out.write('\x1b[?25l'); // hide cursor
 
+    let prevLines = 0; // lines drawn last render (items + footer), for cursor rewind
     const render = (first) => {
-      if (!first) out.write(`\x1b[${items.length}A`);
+      if (!first) {
+        out.write(`\x1b[${prevLines}A`); // back to the top of the block
+        out.write('\x1b[0J'); // erase it (items + any stale footer)
+      }
+      let lines = 0;
       items.forEach((it, i) => {
         const cursor = i === idx;
         const ptr = cursor ? c.cyan('❯ ') : '  ';
         const box = multi ? (checked.has(it) ? c.green('◉ ') : '◯ ') : '';
-        out.write(`\x1b[2K${ptr}${box}${label(it, cursor)}\n`);
+        out.write(`${ptr}${box}${label(it, cursor)}\n`);
+        lines++;
       });
+      if (footer) {
+        const f = footer(multi ? order : items[idx]);
+        if (f) for (const fl of f.split('\n')) (out.write(fl + '\n'), lines++);
+      }
+      prevLines = lines;
     };
     render(true);
 
@@ -1514,18 +1615,19 @@ function help() {
   };
   const ACTIONS = [
     ['help', '', 'Show this help (no args / -h / --help)'],
-    ['list', '', 'List projects and groups (alias: ls)'],
-    ['install', '<project|group>', 'Run the install task (= crew run install)'],
-    ['start', '<project|group> [args]', 'Run the start task (= crew run start)'],
-    ['workspace', '<project|group>', 'Open as one VSCode window (alias: code)'],
-    ['claude', '<project|group>', 'Launch Claude Code once (deduped dirs)'],
-    ['run', '<task> <project|group> [args]', 'Fan any task across a project/group'],
+    ['list', '', 'List projects (alias: ls)'],
+    ['install', '[project...]', 'Run the install task (= crew run install)'],
+    ['start', '[project...] [args]', 'Run the start task (= crew run start)'],
+    ['workspace', '[project...]', 'Open as one VSCode window (alias: code)'],
+    ['claude', '[project...]', 'Launch Claude Code once (deduped dirs)'],
+    ['run', '<task> [project...] [args]', 'Fan any task across the selected projects'],
+    ['graph', '[project...]', 'Show the dependency graph derived from .envs'],
   ];
   const CONFIG = [
-    ['add', '', 'Wizard: create a new project or group'],
-    ['edit', '[name]', 'Wizard: modify an existing project or group'],
-    ['remove', '<name>', 'Delete a project or group (-y, alias rm)'],
-    ['guards', '[target]', 'List/manage guards (add/remove/link/unlink)'],
+    ['add', '', 'Wizard: create a new project'],
+    ['edit', '[name]', 'Wizard: modify an existing project'],
+    ['remove', '<name>', 'Delete a project (-y, alias rm)'],
+    ['guards', '[project]', 'List/manage guards (add/remove/link/unlink)'],
     ['dir', '[path]', 'Show/set the projects directory'],
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
   ];
@@ -1540,19 +1642,19 @@ function help() {
   ];
   const EXAMPLES = [
     'crew add',
-    'crew edit full',
-    'crew run install full',
+    'crew start                 # pick projects (preselected = last run)',
+    'crew start rge-be rge-fe   # explicit set, no picker',
     'crew run build api',
-    'crew start checkout env=qa',
-    'crew workspace full',
-    'crew claude full',
+    'crew start rge-be env=qa',
+    'crew workspace',
+    'crew claude',
   ];
 
   const L = [];
   L.push(`${c.bold('crew')} ${PKG.version} — fan a task across a group of local projects`);
   L.push('');
   L.push(c.bold('USAGE'));
-  L.push('  crew <command> [project|group] [args] [flags]');
+  L.push('  crew <command> [project...] [args] [flags]');
   L.push('');
   L.push(c.bold('ACTIONS'));
   for (const [n, r, d] of ACTIONS) L.push(cmd(n, r, d));
@@ -1560,15 +1662,18 @@ function help() {
   L.push(c.bold('CONFIG'));
   for (const [n, r, d] of CONFIG) L.push(cmd(n, r, d));
   L.push('');
-  L.push(c.bold('PROJECT | GROUP'));
-  L.push('  A single project name OR a group name (a bare project = a group of one).');
-  L.push('  Resolved group-first, then project. Names are unique across the two.');
+  L.push(c.bold('SELECTION'));
+  L.push('  Name one or more projects, or omit them to pick interactively (multiselect,');
+  L.push('  preselected with your last selection). The chosen set is remembered globally');
+  L.push('  and reused across start/workspace/claude/run. For a co-running set, start warns');
+  L.push('  if the selection isn\'t connected in the dependency graph.');
   L.push('');
   L.push(c.bold('TASKS'));
   L.push('  A task resolves per project: tasks[<task>] -> runner with {task} -> skip.');
   L.push('  Long-running tasks (config.longRunning, default: start/dev/watch) stream and');
   L.push('  tear down together on Ctrl-C. Others run to completion, then report pass/fail.');
-  L.push('  Placeholders {name} are filled by args: bare positional or key=value (strict).');
+  L.push('  Placeholders {name} are filled by key=value args (strict); bare tokens are');
+  L.push('  project names, not values.');
   L.push('');
   L.push(c.bold('FLAGS'));
   for (const [f, d] of FLAGS) L.push(`  ${c.cyan(f)}${' '.repeat(Math.max(2, 18 - f.length))}${d}`);
@@ -1633,20 +1738,20 @@ async function main() {
       cmdList(flags);
       return;
     case 'run':
-      await cmdRun(flags, rest[0], rest[1], rest.slice(2));
+      await cmdRun(flags, rest[0], rest.slice(1));
       return;
     case 'start':
-      await cmdRun(flags, 'start', rest[0], rest.slice(1));
+      await cmdRun(flags, 'start', rest);
       return;
     case 'install':
-      await cmdRun(flags, 'install', rest[0], rest.slice(1));
+      await cmdRun(flags, 'install', rest);
       return;
     case 'workspace':
     case 'code':
-      await cmdWorkspace(flags, rest[0]);
+      await cmdWorkspace(flags, rest);
       return;
     case 'claude':
-      await cmdClaude(flags, rest[0]);
+      await cmdClaude(flags, rest);
       return;
     case 'add':
       await cmdAdd(flags);
@@ -1665,7 +1770,7 @@ async function main() {
       cmdDir(flags, rest[0]);
       return;
     case 'graph':
-      cmdGraph(flags, rest[0]);
+      cmdGraph(flags, rest);
       return;
     case 'config':
       cmdConfig(flags, rest[0]);
