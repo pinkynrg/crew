@@ -10,7 +10,9 @@ import {
   writeFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   statSync,
+  unlinkSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve, isAbsolute } from 'node:path';
@@ -153,7 +155,8 @@ function placeholdersIn(str) {
   return [...set];
 }
 function substitute(str, values) {
-  return str.replace(PLACEHOLDER_RE, (_, k) => shellQuote(values[k]));
+  // Unknown placeholders are left intact (e.g. crew fills {envfile} per-project later).
+  return str.replace(PLACEHOLDER_RE, (m, k) => (k in values ? shellQuote(values[k]) : m));
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +171,6 @@ function defaultConfig() {
     workspaceName: 'crew',
     longRunning: [...DEFAULT_LONG_RUNNING],
     projects: {},
-    groups: {},
   };
 }
 
@@ -224,8 +226,9 @@ function migrate(cfg) {
     cfg.projects = {};
     changed = true;
   }
-  if (!cfg.groups) {
-    cfg.groups = {};
+  // Groups were removed in favour of the on-the-fly picker + remembered selection; drop any.
+  if (cfg.groups) {
+    delete cfg.groups;
     changed = true;
   }
   if (!cfg.workspaceName) {
@@ -318,7 +321,6 @@ function loadMerged(flags) {
     if (local.workspaceName) merged.workspaceName = local.workspaceName;
     if (Array.isArray(local.longRunning)) merged.longRunning = local.longRunning;
     Object.assign(merged.projects, local.projects || {});
-    Object.assign(merged.groups, local.groups || {});
     merged.guards = { ...(merged.guards || {}), ...(local.guards || {}) };
     localUsed = localPath;
   }
@@ -326,31 +328,150 @@ function loadMerged(flags) {
 }
 
 // ---------------------------------------------------------------------------
-// Target resolution — group FIRST, then single project (bare project = group of one).
+// Selection — a set of projects chosen per-run: either named explicitly on the CLI, or
+// picked interactively (preselected with the last selection). No groups; the remembered
+// selection replaces them. `label` names the set for display.
 // ---------------------------------------------------------------------------
-function resolveTarget(cfg, name) {
-  if (cfg.groups && cfg.groups[name]) {
-    const members = cfg.groups[name];
-    const missing = members.filter((p) => !cfg.projects[p]);
-    if (missing.length)
-      fail(`group '${name}' references unknown project(s): ${missing.join(', ')}`);
-    return {
-      kind: 'group',
-      name,
-      members: members.map((p) => ({ name: p, project: cfg.projects[p] })),
-    };
+function membersFor(cfg, names) {
+  const known = Object.keys(cfg.projects || {});
+  const missing = names.filter((n) => !cfg.projects[n]);
+  if (missing.length)
+    fail(
+      `unknown project(s): ${missing.join(', ')}.\n` +
+        `  projects: ${known.join(', ') || '(none) — run: crew add'}`
+    );
+  return names.map((n) => ({ name: n, project: cfg.projects[n] }));
+}
+
+// The remembered selection is global (shared by start/workspace/claude/run) and machine-
+// local (local.json beside the config) — ephemeral per-machine state, never committed.
+function loadLastSelection(flags) {
+  const s = loadMachine(flags).lastSelection;
+  return Array.isArray(s) ? s : [];
+}
+function saveLastSelection(flags, names) {
+  try {
+    writeMachine(flags, { ...loadMachine(flags), lastSelection: names });
+  } catch {
+    /* read-only fs — selection just won't persist */
   }
-  if (cfg.projects && cfg.projects[name]) {
-    return { kind: 'project', name, members: [{ name, project: cfg.projects[name] }] };
+}
+
+// Open the multiselect picker (preselected with the remembered selection) and return the
+// chosen members, or null if cancelled / nothing chosen. Selection is ALWAYS interactive —
+// projects are never named on the CLI. Persists the chosen set globally. opts.connectivity
+// adds the live wiring-connectivity footer (for co-running sets).
+async function selectMembers(flags, cfg, opts = {}) {
+  const known = Object.keys(cfg.projects || {});
+  if (!known.length) fail('no projects configured yet — run: crew add');
+  if (!canInteractive()) fail('crew needs an interactive terminal to pick projects');
+  const paint = projectColors(cfg);
+  // Precompute the graph once so the live footer is a pure in-memory lookup per keypress.
+  const edges = opts.connectivity ? dependencyEdges(cfg, Object.entries(cfg.projects)) : null;
+  const picked = await menu({
+    title: 'Select projects',
+    items: known,
+    multi: true,
+    preselected: loadLastSelection(flags).filter((n) => cfg.projects[n]),
+    label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)),
+    footer: edges ? (sel) => connectivityStatus(cfg, edges, sel, true) : null,
+  });
+  if (!picked || !picked.length) {
+    console.log(c.dim('nothing selected'));
+    return null;
   }
-  const groups = Object.keys(cfg.groups || {});
-  const projects = Object.keys(cfg.projects || {});
-  fail(
-    `unknown target '${name}'.\n` +
-      `  groups:   ${groups.join(', ') || '(none)'}\n` +
-      `  projects: ${projects.join(', ') || '(none)'}` +
-      (groups.length || projects.length ? '' : '\n  Nothing configured yet — run: crew add')
-  );
+  saveLastSelection(flags, picked);
+  return membersFor(cfg, picked);
+}
+
+// Directed dependency edges among the given [name, project] entries: name -> Set(peer).
+// Same rule as `crew graph` (exact hostname match).
+function dependencyEdges(cfg, entries) {
+  const meta = {};
+  for (const [name, project] of entries) {
+    let dir;
+    try {
+      dir = resolveProjectPath(project.path);
+    } catch {
+      dir = null;
+    }
+    meta[name] = { files: dir ? envFilesFor(dir) : [], ...projectIdentity(project) };
+  }
+  const edges = new Map(entries.map(([n]) => [n, new Set()]));
+  for (const [name] of entries) {
+    const seen = new Map();
+    for (const f of meta[name].files) {
+      let text = '';
+      try {
+        text = readFileSync(f.path, 'utf8');
+      } catch {
+        /* skip */
+      }
+      for (const u of text.match(URL_RE) || []) {
+        const p = urlHostPath(u);
+        if (p) seen.set(p.host + '\n' + p.path, p);
+      }
+    }
+    for (const { host, path } of seen.values()) {
+      let best = null;
+      let bestLen = 0;
+      for (const [t] of entries)
+        for (const tok of meta[t].tokens) {
+          const len = tokenMatchLen(host, path, tok);
+          if (len > bestLen) {
+            bestLen = len;
+            best = t;
+          }
+        }
+      if (best && best !== name) edges.get(name).add(best);
+    }
+  }
+  return edges;
+}
+
+// Connected components (undirected) of the induced dependency subgraph over `names` — using
+// a precomputed directed `edges` map, so this is pure/cheap enough to call on every keypress.
+function componentsFrom(edges, names) {
+  const set = new Set(names);
+  const adj = new Map(names.map((n) => [n, new Set()]));
+  for (const from of names)
+    for (const to of edges.get(from) || [])
+      if (set.has(to)) {
+        adj.get(from).add(to);
+        adj.get(to).add(from);
+      }
+  const seen = new Set();
+  const comps = [];
+  for (const n of names) {
+    if (seen.has(n)) continue;
+    const stack = [n];
+    const comp = [];
+    seen.add(n);
+    while (stack.length) {
+      const x = stack.pop();
+      comp.push(x);
+      for (const y of adj.get(x)) if (!seen.has(y)) (seen.add(y), stack.push(y));
+    }
+    comps.push(comp);
+  }
+  return comps;
+}
+
+// Single-line connectivity status for a selection, using precomputed `edges`. Empty when
+// there's nothing to say (unless verbose, which also emits the <2 hint and the ✓ line).
+// Disconnected => one inline line listing the islands (they run with no local wiring between).
+function connectivityStatus(cfg, edges, names, verbose = false) {
+  const valid = names.filter((n) => cfg.projects[n]);
+  if (valid.length < 2) return verbose ? c.dim('  select 2+ projects to check local wiring') : '';
+  const comps = componentsFrom(edges, valid);
+  if (comps.length <= 1)
+    return verbose ? '  ' + c.green('✓') + c.dim(' connected') : '';
+  const paint = projectColors(cfg);
+  const islands = comps
+    .sort((a, b) => b.length - a.length)
+    .map((comp) => comp.map((n) => paint.get(n)(n)).join(c.dim('·')))
+    .join(c.dim('  |  '));
+  return '  ' + c.yellow('⚠ not connected:') + ' ' + islands;
 }
 
 // Verify every member's path exists. Names the offending project.
@@ -398,10 +519,13 @@ function resolveRun(cfg, task, members, args) {
   if (runnable.length === 0)
     fail(`no project in target can run task '${task}' (all run-less for this task)`);
 
-  // Union of placeholders across all runnable commands, excluding auto-filled {task}.
+  // Reserved placeholders crew fills itself (not from user args): {task} = the task name;
+  // {envfile} = the per-project wired env file crew materializes at start (see cmdRun).
+  const RESERVED = new Set(['task', 'envfile']);
+  // Union of placeholders across all runnable commands, excluding the reserved ones.
   const union = new Set();
   for (const r of runnable)
-    for (const p of placeholdersIn(r.template)) if (p !== 'task') union.add(p);
+    for (const p of placeholdersIn(r.template)) if (!RESERVED.has(p)) union.add(p);
 
   // Parse user args: key=value fills {key}; bare positional fills a remaining one.
   const keyVals = {};
@@ -433,18 +557,26 @@ function resolveRun(cfg, task, members, args) {
     if (i < positionals.length) values[k] = positionals[i];
   });
 
-  // Strict: every placeholder in every runnable command must be satisfied.
+  // Strict: every placeholder in every runnable command must be satisfied (reserved ones
+  // are crew-filled, so exempt: {task} is in values; {envfile} is substituted later).
   const unresolved = new Set();
   for (const r of runnable)
     for (const p of placeholdersIn(r.template))
-      if (p !== 'task' && !(p in values)) unresolved.add(p);
+      if (!RESERVED.has(p) && !(p in values)) unresolved.add(p);
   if (unresolved.size)
     fail(
       `unresolved placeholder(s): ${[...unresolved].join(', ')}. ` +
         `Provide as a positional or key=value.`
     );
 
-  for (const r of runnable) r.resolved = substitute(r.template, values);
+  for (const r of runnable) {
+    r.resolved = substitute(r.template, values); // {envfile} left intact for cmdRun
+    // Resolve the base env-file path (if declared) with the same values — raw (no shell
+    // quoting): it's a filesystem path crew reads, not a shell token.
+    r.envFile = r.project.env
+      ? r.project.env.replace(PLACEHOLDER_RE, (m, k) => (k in values ? values[k] : m))
+      : null;
+  }
   return { runnable, skipped };
 }
 
@@ -455,11 +587,16 @@ function resolveRun(cfg, task, members, args) {
 // the whole group by pgid — catching grandchildren that reparent away (e.g. a dev
 // server's autoreload child) which a ppid-walking tree-kill would miss. Two modes:
 // kill-others (long-running) and wait-all (run-to-completion), with SIGTERM -> grace
-// -> SIGKILL escalation and double-Ctrl-C force-kill. crew never forwards stdin, so
+// -> SIGKILL escalation; a second Ctrl-C force-kills, but only after a window (see
+// SIGINT_FORCE_AFTER_MS) so an impatient double-tap can't skip teardown. crew never forwards stdin, so
 // detaching the children (which removes them from the TTY foreground group) is safe;
 // we forward SIGINT/SIGTERM/SIGHUP to each group ourselves.
 // ---------------------------------------------------------------------------
 const KILL_GRACE_MS = Number(process.env.CREW_KILL_GRACE_MS) || 5000;
+// A second Ctrl-C only force-kills once this long has passed since the first — so an
+// impatient double-tap can't skip the graceful group teardown (which orphans supervisord/
+// gunicorn-style children). Within the window, extra Ctrl-C is ignored with a nudge.
+const SIGINT_FORCE_AFTER_MS = Number(process.env.CREW_FORCE_AFTER_MS) || 10000;
 
 // exitCode is a number (normal exit) or a signal-name string (killed). Aggregate:
 // first non-zero numeric wins; else 130 if anything was signalled; else 0/1.
@@ -481,7 +618,7 @@ function runFanout(commands, { killOthers, announceExits }) {
     const spawned = [];
     const timers = [];
     let aborting = false;
-    let sigints = 0;
+    let firstSigintAt = 0;
 
     // Shared line-aware logger: prefix only at line starts; when a different command
     // interrupts an unterminated line, close it first (standard prefixed-logger behavior).
@@ -557,8 +694,18 @@ function runFanout(commands, { killOthers, announceExits }) {
     const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
     const handlers = SIGNALS.map((sig) => {
       const h = () => {
-        if (sig === 'SIGINT' && ++sigints >= 2) return forceKill();
-        tearDown(sig === 'SIGINT' ? 'SIGINT' : 'SIGTERM');
+        if (sig !== 'SIGINT') return tearDown('SIGTERM');
+        const now = Date.now();
+        if (!firstSigintAt) {
+          firstSigintAt = now;
+          return tearDown('SIGINT'); // graceful: SIGTERM group -> grace -> SIGKILL
+        }
+        if (now - firstSigintAt >= SIGINT_FORCE_AFTER_MS) return forceKill();
+        // Still inside the graceful window — ignore the extra Ctrl-C, just nudge.
+        const left = Math.ceil((SIGINT_FORCE_AFTER_MS - (now - firstSigintAt)) / 1000);
+        if (lastWrite.char !== '\n') rawWrite('\n');
+        rawWrite(c.dim(`crew: shutting down… press Ctrl-C again in ${left}s to force-kill\n`));
+        lastWrite.char = '\n';
       };
       process.on(sig, h);
       return [sig, h];
@@ -665,27 +812,96 @@ async function runGuards(cfg, members) {
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
-async function cmdRun(flags, task, targetName, args) {
-  if (!task) fail('run: missing task name. Usage: crew run <task> <target> [args]');
-  if (!targetName) fail(`run: missing target. Usage: crew run ${task} <target> [args]`);
-  const { cfg } = loadMerged(flags);
-  const target = resolveTarget(cfg, targetName);
-  validateMemberPaths(target.members);
+// Local service wiring: for each runnable whose command uses {envfile}, load its base env
+// (project.env), rewrite any URL pointing at a CO-RUNNING peer to that peer's `local`
+// origin, and materialize a FRESH temp file per run (stateless — regenerated every start,
+// deleted on teardown). {envfile} in the command is replaced with the temp path. Peers not
+// in the running set (or without a `local`) stay remote. dry => annotate only, no writes.
+function wireRun(userPath, runnable, members, { dry }) {
+  const peers = members
+    .filter((m) => m.project.local)
+    .map((m) => ({ name: m.name, tokens: projectIdentity(m.project).tokens, origin: originOf(m.project.local) || m.project.local }));
+  const tmpDir = join(crewHomeFor(userPath), 'tmp');
+  const tempPaths = [];
+  for (const r of runnable) {
+    if (!r.resolved.includes('{envfile}')) continue;
+    if (!r.envFile) fail(`project '${r.name}' uses {envfile} but has no "env" field in config`);
+    const basePath = resolve(projectDir(r.project), r.envFile);
+    if (!pathExists(basePath)) fail(`project '${r.name}': env file not found: ${basePath}`);
+    const myPeers = peers.filter((p) => p.name !== r.name);
+    let baseText = '';
+    try {
+      baseText = readFileSync(basePath, 'utf8');
+    } catch (e) {
+      fail(`project '${r.name}': cannot read env file ${basePath}: ${e.message}`);
+    }
+    if (dry) {
+      const hit = new Set();
+      baseText.replace(URL_RE, (u) => {
+        const p = urlHostPath(u);
+        if (!p) return u;
+        let b = null;
+        let bl = 0;
+        for (const pe of myPeers)
+          for (const t of pe.tokens) {
+            const l = tokenMatchLen(p.host, p.path, t);
+            if (l > bl) (bl = l), (b = pe);
+          }
+        if (b) hit.add(b.name);
+        return u;
+      });
+      r._wired = [...hit];
+      r.resolved = r.resolved.replace(/\{envfile\}/g, shellQuote(`<wired ${r.envFile}>`));
+      continue;
+    }
+    mkdirSync(tmpDir, { recursive: true });
+    const out = join(tmpDir, `${sanitize(r.name)}.env`);
+    writeFileSync(out, wireText(baseText, myPeers));
+    tempPaths.push(out);
+    r.resolved = r.resolved.replace(/\{envfile\}/g, shellQuote(out));
+  }
+  return { cleanup: () => tempPaths.forEach((p) => { try { unlinkSync(p); } catch {} }) };
+}
 
-  const { runnable, skipped } = resolveRun(cfg, task, target.members, args);
-  for (const s of skipped) console.log(`skipping ${s} (no task '${task}')`);
-
+async function cmdRun(flags, task, rest) {
+  const { cfg, userPath } = loadMerged(flags);
+  // Only key=value placeholder args are consumed; projects are chosen in the picker.
+  const args = rest.filter((a) => a.includes('='));
+  const bare = rest.filter((a) => !a.includes('='));
+  if (bare.length) warn(`ignoring '${bare.join(' ')}' — projects are chosen in the picker`);
   const isLong = (cfg.longRunning || []).includes(task);
   const mode = isLong ? 'long-running' : 'run-to-completion';
+  // For a co-running local set the picker shows a live wiring-connectivity footer.
+  const members = await selectMembers(flags, cfg, { connectivity: isLong });
+  if (!members) return;
+  validateMemberPaths(members);
 
+  // Restate the connectivity result once (the picker footer is erased on close; and the
+  // explicit-names path has no picker), so a disconnected run is visible in scrollback.
+  if (isLong) {
+    const edges = dependencyEdges(cfg, Object.entries(cfg.projects));
+    const w = connectivityStatus(cfg, edges, members.map((m) => m.name));
+    if (w) console.log(w);
+  }
+
+  const { runnable, skipped } = resolveRun(cfg, task, members, args);
+  for (const s of skipped) console.log(`skipping ${s} (no task '${task}')`);
+
+  // Materialize wired env files (fills {envfile}); fresh per run, cleaned up after.
+  const { cleanup } = wireRun(userPath, runnable, members, { dry: flags.dryRun });
+
+  const label = members.map((m) => m.name).join(', ');
   const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
 
   if (flags.dryRun) {
-    console.log(`# task '${task}' on ${target.kind} '${target.name}' — mode: ${mode}`);
+    console.log(`# task '${task}' on: ${label} — mode: ${mode}`);
     const guardNames = [...new Set(runnable.flatMap((r) => r.project.guards || []))];
     if (guardNames.length) console.log(`# guards: ${guardNames.join(', ')}`);
-    for (const r of runnable)
+    for (const r of runnable) {
+      if (r._wired && r._wired.length)
+        console.log(`  ${c.dim('# ' + r.name + ' wired to localhost: ' + r._wired.join(', '))}`);
       console.log(`  ${r.name}: cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
+    }
     return;
   }
 
@@ -701,10 +917,12 @@ async function cmdRun(flags, task, targetName, args) {
   if (isLong) {
     // LONG-RUNNING: stream; the first exit (any) tears the whole group down; Ctrl-C too.
     const results = await runFanout(commands, { killOthers: true, announceExits: true });
+    cleanup(); // remove the wired temp env files
     process.exit(exitCodeFromEvents(results));
   } else {
     // RUN-TO-COMPLETION: wait for all (no kill-others), then a pass/fail summary.
     const results = await runFanout(commands, { killOthers: false, announceExits: false });
+    cleanup();
     console.log(`\ncrew: task '${task}' results`);
     const byName = new Map(results.map((e) => [e.name, e.exitCode]));
     let anyFailed = false;
@@ -718,12 +936,19 @@ async function cmdRun(flags, task, targetName, args) {
   }
 }
 
-async function cmdWorkspace(flags, targetName) {
-  if (!targetName) fail('workspace: missing target. Usage: crew workspace <target> [--fileless]');
+// A stable id for a selection: sorted member names joined — same set => same id regardless
+// of pick order, so workspace files / claude sessions stay tied to the set, not the order.
+function selectionLabel(members) {
+  return sanitize(members.map((m) => m.name).sort().join('+')) || 'selection';
+}
+
+async function cmdWorkspace(flags, rest) {
   const { cfg, userPath } = loadMerged(flags);
-  const target = resolveTarget(cfg, targetName);
-  validateMemberPaths(target.members);
-  const dirs = dirList(target.members);
+  if (rest.length) warn(`ignoring '${rest.join(' ')}' — projects are chosen in the picker`);
+  const members = await selectMembers(flags, cfg);
+  if (!members) return;
+  validateMemberPaths(members);
+  const dirs = dirList(members);
 
   if (flags.fileless) {
     if (flags.dryRun) {
@@ -737,7 +962,7 @@ async function cmdWorkspace(flags, targetName) {
   }
 
   const wsDir = join(crewHomeFor(userPath), 'workspaces');
-  const wsFile = join(wsDir, `${sanitize(target.name)}.code-workspace`);
+  const wsFile = join(wsDir, `${selectionLabel(members)}.code-workspace`);
   const wsJson = { folders: dirs.map((p) => ({ path: p })), settings: {} };
 
   if (flags.dryRun) {
@@ -751,19 +976,19 @@ async function cmdWorkspace(flags, targetName) {
   launch('code', [wsFile]);
 }
 
-async function cmdClaude(flags, targetName) {
-  if (!targetName) fail('claude: missing target. Usage: crew claude <target>');
+async function cmdClaude(flags, rest) {
   const { cfg, userPath } = loadMerged(flags);
-  const target = resolveTarget(cfg, targetName);
-  validateMemberPaths(target.members);
-  const dirs = dirList(target.members);
+  if (rest.length) warn(`ignoring '${rest.join(' ')}' — projects are chosen in the picker`);
+  const members = await selectMembers(flags, cfg);
+  if (!members) return;
+  validateMemberPaths(members);
+  const dirs = dirList(members);
 
-  // Stable, crew-owned cwd per target. Claude Code keys its history off the cwd path
-  // (~/.claude/projects/<cwd-slug>/), so a fixed dir keeps history tied to the TARGET
-  // NAME — not the first member — surviving any reordering of the group's projects,
-  // and keeps it out of any single project's folder. All projects stay reachable via
-  // the --add-dir list below.
-  const cwd = join(crewHomeFor(userPath), 'sessions', sanitize(target.name));
+  // Stable, crew-owned cwd per selection. Claude Code keys its history off the cwd path
+  // (~/.claude/projects/<cwd-slug>/), so a fixed dir keeps history tied to the SET of
+  // projects (sorted, order-independent) — not the first member — and keeps it out of any
+  // single project's folder. All projects stay reachable via the --add-dir list below.
+  const cwd = join(crewHomeFor(userPath), 'sessions', selectionLabel(members));
   mkdirSync(cwd, { recursive: true });
 
   const cliArgs = [];
@@ -780,11 +1005,10 @@ async function cmdClaude(flags, targetName) {
 function cmdList(flags) {
   const { cfg, localPath } = loadMerged(flags);
   const projects = Object.entries(cfg.projects || {});
-  const groups = Object.entries(cfg.groups || {});
   const longRunning = new Set(cfg.longRunning || []);
   const paint = projectColors(cfg);
-  if (projects.length === 0 && groups.length === 0) {
-    console.log(c.dim('No projects or groups configured yet.'));
+  if (projects.length === 0) {
+    console.log(c.dim('No projects configured yet.'));
     console.log(`Run ${c.cyan('crew add')} to add one.`);
     return;
   }
@@ -824,21 +1048,12 @@ function cmdList(flags) {
       console.log(`      ${c.dim('guards'.padEnd(labelW + 2))}${p.guards.join(', ')}`);
   }
 
-  // --- Groups (members painted with each project's own stable color) --------
-  console.log('\n' + c.bold(c.underline('Groups')));
-  if (groups.length === 0) console.log(c.dim('  (none)'));
-  const known = new Set(Object.keys(cfg.projects || {}));
-  const gW = Math.max(0, ...groups.map(([n]) => n.length));
-  for (const [name, members] of groups) {
-    const mem = members
-      .map((m) => (known.has(m) ? paint.get(m)(m) : c.red(m + '?')))
-      .join(c.dim(', '));
-    console.log(`  ${c.bold(name.padEnd(gW))}  ${c.dim('→')}  ${mem}`);
-  }
-
   // --- Footer ---------------------------------------------------------------
+  const last = loadLastSelection(flags).filter((n) => cfg.projects[n]);
+  if (last.length)
+    console.log('\n' + c.dim('last selection  ') + last.map((n) => paint.get(n)(n)).join(c.dim(', ')));
   const lr = (cfg.longRunning || []).map((t) => c.yellow(t)).join(c.dim(', ')) || c.dim('(none)');
-  console.log('\n' + c.dim('long-running  ') + lr);
+  console.log((last.length ? '' : '\n') + c.dim('long-running  ') + lr);
   console.log(
     c.dim('config        ') +
       c.dim(tildify(userConfigPath(flags))) +
@@ -878,6 +1093,181 @@ function cmdDir(flags, arg) {
   console.log(c.dim(`stored in ${tildify(machinePath)} — machine-local, not committed`));
 }
 
+// Scan <dir>/.envs, parse each file's name as <env>[-<slug>] (slug optional; some projects
+// name files plainly, e.g. `pre`, `qa`). Returns [{env, slug, path}].
+function envFilesFor(dir) {
+  const envsDir = join(dir, '.envs');
+  let names = [];
+  try {
+    names = readdirSync(envsDir).filter((n) => !n.startsWith('.'));
+  } catch {
+    return [];
+  }
+  return names.map((name) => {
+    const base = name.replace(/\.env$/, '');
+    const dash = base.indexOf('-');
+    const env = dash > 0 ? base.slice(0, dash) : base;
+    const slug = dash > 0 ? base.slice(dash + 1) : '';
+    return { env, slug, path: join(envsDir, name) };
+  });
+}
+const URL_RE = /\bhttps?:\/\/[^\s"'`)}<]+/g;
+// Split a URL into host + path (lowercased, scheme/port/query/trailing-slash dropped).
+function urlHostPath(url) {
+  const m = url.match(/^https?:\/\/([^/?#]+)([^?#\s]*)/i);
+  if (!m) return null;
+  const host = m[1].replace(/:\d+$/, '').toLowerCase();
+  const path = (m[2] || '').replace(/\/+$/, '').toLowerCase();
+  return { host, path };
+}
+// A match token is a COMPLETE hostname (perfect string match) — no globs, no paths. It
+// matches a URL when the URL's host equals it (case-insensitive). Exact strings mean no
+// cross-service collisions: `api.getbee.io` matches only that host, never `rge-api.getbee.io`.
+// List every host a service is reached by, including env variants (qa-…, pre-…). Returns the
+// token length on match (0 otherwise) — the length keeps the "most specific wins" caller API,
+// though exact matching makes overlaps impossible in practice.
+function tokenMatchLen(host, path, tok) {
+  tok = String(tok).toLowerCase();
+  return tok && tok === host ? tok.length : 0;
+}
+
+// The scheme://host[:port] prefix of a URL (drops path/query/fragment). '' if not a URL.
+function originOf(url) {
+  const m = String(url).match(/^https?:\/\/[^/?#\s]+/i);
+  return m ? m[0] : '';
+}
+// Rewrite env-file text for local wiring: every URL whose host/path matches a co-running
+// peer's tokens has its origin swapped to that peer's local origin (path/query preserved).
+// Most-specific token wins (gateway paths). Peers absent from `peers` stay remote. `peers`
+// = [{ tokens, origin }]. Format-preserving — only URL origins change.
+function wireText(text, peers) {
+  return text.replace(URL_RE, (url) => {
+    const p = urlHostPath(url);
+    if (!p) return url;
+    let best = null;
+    let bestLen = 0;
+    for (const peer of peers)
+      for (const tok of peer.tokens) {
+        const len = tokenMatchLen(p.host, p.path, tok);
+        if (len > bestLen) {
+          bestLen = len;
+          best = peer;
+        }
+      }
+    if (!best) return url;
+    const o = originOf(url);
+    return o ? best.origin + url.slice(o.length) : url;
+  });
+}
+
+// crew graph [target] — read-only dependency graph derived from env files (no wiring).
+// Each project's id comes ONLY from config `match` (complete hostnames, exact string match);
+// edge P→T when a URL in P's envs has a host equal to one of T's match hosts (tokenMatchLen).
+// Optional config `internalDomains: [..]` only affects the cosmetic "other hosts" list.
+// localhost URLs match no id, so they drop out.
+//
+// No auto-guessing (folder/filename heuristics were dropped): a project with no `match` has
+// no id, so nothing can point at it — it's flagged ⚠ until you add one.
+function projectIdentity(project) {
+  const tokens = Array.isArray(project.match) ? project.match.filter(Boolean) : [];
+  return { tokens, source: tokens.length ? 'match' : 'none' };
+}
+function cmdGraph(flags, names) {
+  const { cfg } = loadMerged(flags);
+  const paint = projectColors(cfg);
+  const projects =
+    names && names.length
+      ? membersFor(cfg, names).map((m) => [m.name, m.project])
+      : Object.entries(cfg.projects || {});
+  const domains = Array.isArray(cfg.internalDomains) ? cfg.internalDomains : [];
+
+  const meta = {};
+  for (const [name, project] of projects) {
+    let dir;
+    try {
+      dir = resolveProjectPath(project.path);
+    } catch {
+      dir = null;
+    }
+    meta[name] = { files: dir ? envFilesFor(dir) : [], ...projectIdentity(project) };
+  }
+  const inDomain = (host) => domains.some((d) => host === d || host.endsWith('.' + d) || host.endsWith(d));
+
+  console.log(c.bold('Dependency graph') + c.dim('  — edges auto-discovered from .envs, no wiring'));
+  console.log(
+    c.dim(
+      [
+        'How it works:',
+        '  1. Give each project an id so crew can recognize it when another project\'s URL',
+        '     points at it: `match` = the complete hostname(s) it is served under (exact',
+        '     strings — list every env variant). E.g. match: ["api.example.com",',
+        '     "qa-api.example.com"]. No `match` = no id, so nothing can point at it (⚠).',
+        '  2. Read every env file and pull out every http(s):// URL.',
+        '  3. For each URL, compare its host to every `match` string — exact match only, so',
+        '     api.example.com never collides with rge-api.example.com.',
+        '  4. A URL in P whose host equals one of T\'s match hosts → edge P → T.',
+        '  5. URLs matching no project are dropped as 3rd-party (or listed as "other internal"',
+        '     when you set `internalDomains`).',
+      ].join('\n')
+    )
+  );
+  let warned = false;
+  for (const [name] of projects) {
+    const { files, tokens, source } = meta[name];
+    const seen = new Map(); // host\npath -> { host, path } (deduped across this project's envs)
+    for (const f of files) {
+      let text = '';
+      try {
+        text = readFileSync(f.path, 'utf8');
+      } catch {
+        /* skip */
+      }
+      for (const u of text.match(URL_RE) || []) {
+        const p = urlHostPath(u);
+        if (p) seen.set(p.host + '\n' + p.path, p);
+      }
+    }
+    const edges = new Set();
+    const other = new Set();
+    for (const { host, path } of seen.values()) {
+      // Pick the project whose matching token is longest (most specific), so a gateway host
+      // split by path resolves to the deeper path, not a shorter prefix.
+      let best = null;
+      let bestLen = 0;
+      for (const [t] of projects) {
+        for (const tok of meta[t].tokens) {
+          const len = tokenMatchLen(host, path, tok);
+          if (len > bestLen) {
+            bestLen = len;
+            best = t;
+          }
+        }
+      }
+      if (best && best !== name) edges.add(best);
+      else if (!best && domains.length && inDomain(host)) other.add(host); // only when configured
+    }
+
+    const head = c.bold(paint.get(name) ? paint.get(name)(name) : name);
+    if (source === 'none') {
+      warned = true;
+      console.log(`\n${head}  ${c.yellow('⚠ no `match` — no id, peers can\'t link to it')}`);
+    } else {
+      console.log(`\n${head}  ${c.dim('[' + tokens.join(', ') + ']')}`);
+    }
+    if (edges.size) {
+      for (const t of [...edges].sort())
+        console.log(`  ${c.green('→')} ${paint.get(t) ? paint.get(t)(t) : t}`);
+    } else {
+      console.log(`  ${c.dim('→ (no crew-project edges)')}`);
+    }
+    if (other.size) console.log(`  ${c.dim('· other internal: ' + [...other].sort().join(', '))}`);
+  }
+  if (warned)
+    console.log(
+      '\n' + c.yellow('⚠ ') + c.dim('some projects have no `match` — add `match: ["host.example.com"]` (exact hosts) so peers can link to them.')
+    );
+}
+
 function cmdConfig(flags, sub) {
   const path = userConfigPath(flags);
   if (sub === 'path') {
@@ -901,7 +1291,8 @@ function cmdConfig(flags, sub) {
 const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 
 // Prompt for every project field, defaulting to `existing` (empty object when adding).
-// Text fields are inline-editable; type is a picked list; a blank runner/command unsets.
+// Text fields are inline-editable (prefilled with the current value — Enter keeps it, clear
+// to unset); type is a picked list. Any field the wizard doesn't manage is preserved.
 // `guardNames` are the guard names defined in the config (offered as a multi-select).
 async function collectProject(p, existing, guardNames = []) {
   const path0 = await p.ask('Path', existing.path || '');
@@ -926,138 +1317,90 @@ async function collectProject(p, existing, guardNames = []) {
     else delete tasks[t];
   }
 
+  // Service-wiring fields (all optional; Enter to keep, clear to unset).
+  const env = (await p.ask('Env file for {envfile} wiring, e.g. .envs/{env} (empty = none)', existing.env || '')).trim();
+  const local = (await p.ask('Local URL, e.g. http://localhost:3000 (empty = none)', existing.local || '')).trim();
+  const matchStr = (await p.ask('Match host globs (space-separated), e.g. *api.example.com (empty = none)', (existing.match || []).join(' '))).trim();
+  const match = matchStr ? matchStr.split(/\s+/) : [];
+
   let guards = existing.guards || [];
   if (guardNames.length) guards = await p.multiselect('Guards', guardNames, guards);
 
-  const project = { path: path0, type };
-  if (runner) project.runner = runner;
-  if (Object.keys(tasks).length) project.tasks = tasks;
-  if (guards && guards.length) project.guards = guards;
+  // Spread `existing` first so unmanaged/future fields survive; then set/unset the managed ones.
+  const project = { ...existing, path: path0, type };
+  const setOrDel = (k, v, keep) => (keep ? (project[k] = v) : delete project[k]);
+  setOrDel('runner', runner, !!runner);
+  setOrDel('env', env, !!env);
+  setOrDel('local', local, !!local);
+  setOrDel('match', match, match.length > 0);
+  setOrDel('tasks', tasks, Object.keys(tasks).length > 0);
+  setOrDel('guards', guards, guards && guards.length > 0);
   return project;
 }
 
-// Pick an ordered member list from existing projects (multi-select on a TTY).
-async function collectMembers(p, cfg, existing) {
-  const known = Object.keys(cfg.projects || {});
-  if (!known.length) fail('no projects exist yet — add a project first');
-  const members = await p.multiselect('Members', known, existing || []);
-  const missing = members.filter((m) => !cfg.projects[m]);
-  if (missing.length) fail(`unknown project(s): ${missing.join(', ')}. Known: ${known.join(', ')}`);
-  return members;
-}
-
-// crew add — create a NEW project or group entirely via wizard (errors if it exists).
+// crew add — create a NEW project via wizard (errors if it exists).
 async function cmdAdd(flags) {
   const { cfg, path } = loadUserConfig(flags);
   const p = makePrompter();
   try {
-    const kind = await p.select('Add a project or a group?', ['project', 'group'], 'project');
-    const name = (await p.ask(`${kind === 'group' ? 'Group' : 'Project'} name`, '')).trim();
-    if (!name) fail(`add: a ${kind} name is required`);
-    if (cfg.projects[name] || cfg.groups[name])
-      fail(`'${name}' already exists. Use: crew edit ${name}`);
-
-    if (kind === 'group') {
-      const members = await collectMembers(p, cfg, []);
-      if (!members.length) fail('add: a group needs at least one member');
-      cfg.groups[name] = members;
-      writeUserConfig(path, cfg);
-      console.log(`\nSaved group '${name}' -> ${members.join(', ')}`);
-    } else {
-      cfg.projects[name] = await collectProject(p, {}, Object.keys(cfg.guards || {}));
-      writeUserConfig(path, cfg);
-      console.log(`\nSaved project '${name}' to ${path}`);
-    }
+    const name = (await p.ask('Project name', '')).trim();
+    if (!name) fail('add: a project name is required');
+    if (cfg.projects[name]) fail(`'${name}' already exists. Use: crew edit ${name}`);
+    cfg.projects[name] = await collectProject(p, {}, Object.keys(cfg.guards || {}));
+    writeUserConfig(path, cfg);
+    console.log(`\nSaved project '${name}' to ${path}`);
   } finally {
     p.close();
   }
 }
 
-// crew edit [name] — modify an EXISTING project or group via wizard (errors if absent).
+// crew edit [name] — modify an EXISTING project via wizard (errors if absent).
 async function cmdEdit(flags, name) {
   const { cfg, path } = loadUserConfig(flags);
   const projects = Object.keys(cfg.projects || {});
-  const groups = Object.keys(cfg.groups || {});
-  if (!projects.length && !groups.length) fail('edit: nothing to edit yet. Run: crew add');
+  if (!projects.length) fail('edit: nothing to edit yet. Run: crew add');
 
   const p = makePrompter();
   try {
     // No name given: pick from a list — arrow keys when interactive, else typed.
     if (!name) {
-      const items = [
-        ...projects.map((n) => ({ name: n, kind: 'project' })),
-        ...groups.map((n) => ({ name: n, kind: 'group' })),
-      ];
       if (canInteractive()) {
         const picked = await menu({
-          title: 'Edit which?',
-          items,
-          label: (it, cur) => `${cur ? c.bold(it.name) : it.name} ${c.dim('— ' + it.kind)}`,
+          title: 'Edit which project?',
+          items: projects,
+          label: (n, cur) => (cur ? c.bold(n) : n),
         });
         if (!picked) {
           console.log('edit: cancelled');
           return;
         }
-        name = picked.name;
+        name = picked;
       } else {
-        console.log('Projects: ' + (projects.join(', ') || '(none)'));
-        console.log('Groups:   ' + (groups.join(', ') || '(none)'));
+        console.log('Projects: ' + projects.join(', '));
         name = (await p.ask('Name to edit', '')).trim();
       }
     }
     if (!name) fail('edit: a name is required');
+    if (!cfg.projects[name]) fail(`no such project '${name}'. Run: crew add`);
 
-    const isGroup = !!cfg.groups[name];
-    const isProject = !!cfg.projects[name];
-    if (!isGroup && !isProject) fail(`no such project or group '${name}'. Run: crew add`);
-
-    if (isGroup) {
-      const members = await collectMembers(p, cfg, cfg.groups[name]);
-      if (!members.length) fail('edit: a group needs at least one member');
-      cfg.groups[name] = members;
-      writeUserConfig(path, cfg);
-      console.log(`\nUpdated group '${name}' -> ${members.join(', ')}`);
-    } else {
-      cfg.projects[name] = await collectProject(p, cfg.projects[name], Object.keys(cfg.guards || {}));
-      writeUserConfig(path, cfg);
-      console.log(`\nUpdated project '${name}' in ${path}`);
-    }
+    cfg.projects[name] = await collectProject(p, cfg.projects[name], Object.keys(cfg.guards || {}));
+    writeUserConfig(path, cfg);
+    console.log(`\nUpdated project '${name}' in ${path}`);
   } finally {
     p.close();
   }
 }
 
-// Names are unique across projects and groups, so one command removes either.
 async function cmdRemove(flags, name) {
   if (!name) fail('remove: missing name. Usage: crew remove <name>');
   const { cfg, path } = loadUserConfig(flags);
-  const isGroup = !!cfg.groups[name];
-  const isProject = !!cfg.projects[name];
-  if (isGroup && isProject)
-    fail(`'${name}' exists as both a group and a project (legacy config); edit ${path} by hand.`);
-  if (!isGroup && !isProject)
-    fail(
-      `no such project or group '${name}'.\n` +
-        `  projects: ${Object.keys(cfg.projects).join(', ') || '(none)'}\n` +
-        `  groups:   ${Object.keys(cfg.groups).join(', ') || '(none)'}`
-    );
+  if (!cfg.projects[name])
+    fail(`no such project '${name}'.\n  projects: ${Object.keys(cfg.projects).join(', ') || '(none)'}`);
 
-  const kind = isGroup ? 'group' : 'project';
-  if (!(await confirm(flags, `Delete ${kind} '${name}'?`))) return;
-
-  let referencing = [];
-  if (isGroup) {
-    delete cfg.groups[name];
-  } else {
-    delete cfg.projects[name];
-    referencing = Object.entries(cfg.groups)
-      .filter(([, m]) => m.includes(name))
-      .map(([g]) => g);
-  }
+  if (!(await confirm(flags, `Delete project '${name}'?`))) return;
+  delete cfg.projects[name];
   writeUserConfig(path, cfg);
-  console.log(`Removed ${kind} '${name}'`);
-  if (referencing.length)
-    console.log(`NOTE: still referenced by group(s): ${referencing.join(', ')}`);
+  console.log(`Removed project '${name}'`);
 }
 
 // crew guards [target]           -> list all guards (or a target's), with usage
@@ -1086,12 +1429,12 @@ function printGuard(reg, n) {
   console.log(`      ${c.dim('command')}  ${g.command || c.dim('(none)')}`);
   if (g.message) console.log(`      ${c.dim('message')}  ${g.message}`);
 }
-function guardList(cfg, targetName) {
+function guardList(cfg, projectName) {
   const reg = cfg.guards || {};
-  if (targetName) {
-    const target = resolveTarget(cfg, targetName);
-    const used = [...new Set(target.members.flatMap((m) => m.project.guards || []))];
-    console.log(c.bold(c.underline(`Guards for ${target.kind} '${target.name}'`)));
+  if (projectName) {
+    const members = membersFor(cfg, [projectName]);
+    const used = [...new Set(members.flatMap((m) => m.project.guards || []))];
+    console.log(c.bold(c.underline(`Guards for project '${projectName}'`)));
     if (!used.length) return void console.log(c.dim('  (none)'));
     for (const n of used) printGuard(reg, n);
     return;
@@ -1193,7 +1536,9 @@ function canInteractive() {
 // Arrow-key menu (needs an interactive TTY). Single-select returns the chosen item;
 // multi-select returns the checked items in toggle order. Esc/q/Ctrl-C -> null.
 // Up/Down (or k/j) move; Space toggles (multi); Enter confirms.
-function menu({ title, items, label, multi = false, start = 0, preselected = [] }) {
+// `footer(selection)` (optional) returns a live status block redrawn on every keypress —
+// `selection` is the checked items (multi) or the highlighted item. May be multi-line.
+function menu({ title, items, label, multi = false, start = 0, preselected = [], footer = null }) {
   return new Promise((resolve) => {
     const stdin = process.stdin;
     const out = process.stdout;
@@ -1210,14 +1555,25 @@ function menu({ title, items, label, multi = false, start = 0, preselected = [] 
     out.write(`${title}${c.dim(hint)}\n`);
     out.write('\x1b[?25l'); // hide cursor
 
+    let prevLines = 0; // lines drawn last render (items + footer), for cursor rewind
     const render = (first) => {
-      if (!first) out.write(`\x1b[${items.length}A`);
+      if (!first) {
+        out.write(`\x1b[${prevLines}A`); // back to the top of the block
+        out.write('\x1b[0J'); // erase it (items + any stale footer)
+      }
+      let lines = 0;
       items.forEach((it, i) => {
         const cursor = i === idx;
         const ptr = cursor ? c.cyan('❯ ') : '  ';
         const box = multi ? (checked.has(it) ? c.green('◉ ') : '◯ ') : '';
-        out.write(`\x1b[2K${ptr}${box}${label(it, cursor)}\n`);
+        out.write(`${ptr}${box}${label(it, cursor)}\n`);
+        lines++;
       });
+      if (footer) {
+        const f = footer(multi ? order : items[idx]);
+        if (f) for (const fl of f.split('\n')) (out.write(fl + '\n'), lines++);
+      }
+      prevLines = lines;
     };
     render(true);
 
@@ -1358,18 +1714,18 @@ function help() {
   };
   const ACTIONS = [
     ['help', '', 'Show this help (no args / -h / --help)'],
-    ['list', '', 'List projects and groups (alias: ls)'],
-    ['install', '<project|group>', 'Run the install task (= crew run install)'],
-    ['start', '<project|group> [args]', 'Run the start task (= crew run start)'],
-    ['workspace', '<project|group>', 'Open as one VSCode window (alias: code)'],
-    ['claude', '<project|group>', 'Launch Claude Code once (deduped dirs)'],
-    ['run', '<task> <project|group> [args]', 'Fan any task across a project/group'],
+    ['list', '', 'List projects (alias: ls)'],
+    ['install', '', 'Pick projects, run their install task'],
+    ['start', '[args]', 'Pick projects, run their start task (local wiring)'],
+    ['workspace', '', 'Pick projects, open as one VSCode window (alias: code)'],
+    ['claude', '', 'Pick projects, launch Claude Code once (deduped dirs)'],
+    ['graph', '[project...]', 'Show the dependency graph derived from .envs'],
   ];
   const CONFIG = [
-    ['add', '', 'Wizard: create a new project or group'],
-    ['edit', '[name]', 'Wizard: modify an existing project or group'],
-    ['remove', '<name>', 'Delete a project or group (-y, alias rm)'],
-    ['guards', '[target]', 'List/manage guards (add/remove/link/unlink)'],
+    ['add', '', 'Wizard: create a new project'],
+    ['edit', '[name]', 'Wizard: modify an existing project'],
+    ['remove', '<name>', 'Delete a project (-y, alias rm)'],
+    ['guards', '[project]', 'List/manage guards (add/remove/link/unlink)'],
     ['dir', '[path]', 'Show/set the projects directory'],
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
   ];
@@ -1382,21 +1738,11 @@ function help() {
     ['-h, --help', 'This help'],
     ['-v, --version', 'Print version'],
   ];
-  const EXAMPLES = [
-    'crew add',
-    'crew edit full',
-    'crew run install full',
-    'crew run build api',
-    'crew start checkout env=qa',
-    'crew workspace full',
-    'crew claude full',
-  ];
-
   const L = [];
   L.push(`${c.bold('crew')} ${PKG.version} — fan a task across a group of local projects`);
   L.push('');
   L.push(c.bold('USAGE'));
-  L.push('  crew <command> [project|group] [args] [flags]');
+  L.push('  crew <command> [args] [flags]');
   L.push('');
   L.push(c.bold('ACTIONS'));
   for (const [n, r, d] of ACTIONS) L.push(cmd(n, r, d));
@@ -1404,21 +1750,19 @@ function help() {
   L.push(c.bold('CONFIG'));
   for (const [n, r, d] of CONFIG) L.push(cmd(n, r, d));
   L.push('');
-  L.push(c.bold('PROJECT | GROUP'));
-  L.push('  A single project name OR a group name (a bare project = a group of one).');
-  L.push('  Resolved group-first, then project. Names are unique across the two.');
+  L.push(c.bold('SELECTION'));
+  L.push('  start/install/workspace/claude always open an interactive multiselect');
+  L.push('  (preselected with your last pick). The chosen set is remembered globally and');
+  L.push('  reused across them. For a co-running set, start warns live if the selection');
+  L.push('  isn\'t connected in the dependency graph.');
   L.push('');
   L.push(c.bold('TASKS'));
-  L.push('  A task resolves per project: tasks[<task>] -> runner with {task} -> skip.');
-  L.push('  Long-running tasks (config.longRunning, default: start/dev/watch) stream and');
-  L.push('  tear down together on Ctrl-C. Others run to completion, then report pass/fail.');
-  L.push('  Placeholders {name} are filled by args: bare positional or key=value (strict).');
+  L.push('  Per project: tasks[<task>] -> runner with {task}. start/dev/watch stream and');
+  L.push('  tear down together on Ctrl-C; others run to completion, then report pass/fail.');
+  L.push('  Pass placeholder values ({name}) as key=value args, e.g. crew start env=qa.');
   L.push('');
   L.push(c.bold('FLAGS'));
   for (const [f, d] of FLAGS) L.push(`  ${c.cyan(f)}${' '.repeat(Math.max(2, 18 - f.length))}${d}`);
-  L.push('');
-  L.push(c.bold('EXAMPLES'));
-  for (const e of EXAMPLES) L.push('  ' + e);
   console.log(L.join('\n'));
 }
 
@@ -1476,21 +1820,18 @@ async function main() {
     case 'ls':
       cmdList(flags);
       return;
-    case 'run':
-      await cmdRun(flags, rest[0], rest[1], rest.slice(2));
-      return;
     case 'start':
-      await cmdRun(flags, 'start', rest[0], rest.slice(1));
+      await cmdRun(flags, 'start', rest);
       return;
     case 'install':
-      await cmdRun(flags, 'install', rest[0], rest.slice(1));
+      await cmdRun(flags, 'install', rest);
       return;
     case 'workspace':
     case 'code':
-      await cmdWorkspace(flags, rest[0]);
+      await cmdWorkspace(flags, rest);
       return;
     case 'claude':
-      await cmdClaude(flags, rest[0]);
+      await cmdClaude(flags, rest);
       return;
     case 'add':
       await cmdAdd(flags);
@@ -1507,6 +1848,9 @@ async function main() {
       return;
     case 'dir':
       cmdDir(flags, rest[0]);
+      return;
+    case 'graph':
+      cmdGraph(flags, rest);
       return;
     case 'config':
       cmdConfig(flags, rest[0]);

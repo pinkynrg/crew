@@ -2,6 +2,12 @@
 
 Guidance for working in this repo.
 
+## Commits & PRs
+
+- Never sign anything: no `Co-Authored-By` trailer, no "Generated with" line, no
+  agent/tool attribution of any kind in commit messages or PR bodies.
+- Single-line commit messages only — no body.
+
 ## What crew is
 
 A single-file macOS CLI that fans a **named task** out across a group of local
@@ -40,15 +46,25 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 - `projectsDir` (machine-local — stored in `local.json` beside the config, set via
   `crew dir <path>`, never in the committable `config.json`): relative project `path`s
   resolve against it; `~`/absolute paths are used as-is. So `config.json`
-  (projects/groups/guards, relative paths) is directly committable; a legacy `projectsDir`
+  (projects/guards, relative paths) is directly committable; a legacy `projectsDir`
   in `config.json` auto-migrates to `local.json` on load. `local.json` reads from beside
-  the resolved config (works with `--config`); gitignore it when committing.
+  the resolved config (works with `--config`); gitignore it when committing. `local.json`
+  also holds `lastSelection` (the remembered picker selection).
+- No groups, no `run` command. `start`/`install`/`workspace`/`claude` act on a **selection**
+  chosen via an interactive multiselect (`selectMembers`, preselected with `lastSelection`);
+  projects are never named on the CLI (bare CLI tokens are ignored with a warning; only
+  `key=value` args are consumed). The picked set is saved to `lastSelection` (global,
+  machine-local) and reused across the four. A legacy `groups` key is dropped on load.
+- `match` (per project): the project's complete deployed hostname(s) as **exact strings**
+  (list every env variant); matched by exact host equality (`tokenMatchLen`) — no globs, no
+  collisions (`api.getbee.io` never matches `rge-api.getbee.io`). `crew graph` derives edges
+  from `.envs/*` URLs; `crew start` warns when a co-running selection isn't connected.
 - Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip.
 - `guards`: top-level `guards: {name: {command, message}}` registry; a project lists names
   in `project.guards` (many-to-many). Before a run, the target's guards are deduped by
   name, run once each in parallel (pass = exit 0); any failure prints its message and
-  aborts. `--skip-guards` bypasses. Only `run`/`start`/`install` gate on them. Managed via
-  the `crew guards` command group (list/add/remove/link/unlink, all select-driven). The v1
+  aborts. `--skip-guards` bypasses. Only `start`/`install` gate on them. Managed via
+  the `crew guards` command (list/add/remove/link/unlink, all select-driven). The v1
   `checks` key auto-migrates to `guards` on load.
 - Two execution modes by `config.longRunning`: long-running (streamed, first exit or
   Ctrl-C tears the whole group down) vs run-to-completion (wait all, no kill-others,
@@ -67,10 +83,12 @@ No test framework. Verify manually against a throwaway config:
 ```sh
 node --check bin/crew.js
 node bin/crew.js --config /tmp/x.json list
-node bin/crew.js --config /tmp/x.json run <task> <target> --dry-run
+node bin/crew.js --config /tmp/x.json graph            # read-only, no TTY needed
 ```
 
-Prefer `--dry-run` to inspect resolved commands without executing.
+`start`/`install`/`workspace`/`claude` open the picker, so they need an interactive TTY
+(non-TTY = clear error). Use `--dry-run` in a real terminal to inspect resolved commands
+(incl. `{envfile}` wiring); `list`/`graph` work non-interactively.
 
 ## Non-goals
 
