@@ -50,19 +50,20 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   in `config.json` auto-migrates to `local.json` on load. `local.json` reads from beside
   the resolved config (works with `--config`); gitignore it when committing. `local.json`
   also holds `lastSelection` (the remembered picker selection).
-- No groups. A command acts on a **selection** of projects: explicit names on the CLI, or
-  an interactive multiselect (preselected with `lastSelection`) when none are given
-  (`selectMembers`). The picked set is saved to `lastSelection` (global, machine-local) and
-  reused across start/workspace/claude/run. A legacy `groups` key is dropped on load.
-- `match` (per project): whole-host glob(s) identifying the project's deployed hostname(s),
-  `*` where the URL varies, optional `/path` to split a gateway host. `crew graph` derives
-  edges from `.envs/*` URLs (most-specific token wins; see `tokenMatchLen`). `crew start`
-  warns when a co-running selection isn't connected in that graph.
+- No groups, no `run` command. `start`/`install`/`workspace`/`claude` act on a **selection**
+  chosen via an interactive multiselect (`selectMembers`, preselected with `lastSelection`);
+  projects are never named on the CLI (bare CLI tokens are ignored with a warning; only
+  `key=value` args are consumed). The picked set is saved to `lastSelection` (global,
+  machine-local) and reused across the four. A legacy `groups` key is dropped on load.
+- `match` (per project): the project's complete deployed hostname(s) as **exact strings**
+  (list every env variant); matched by exact host equality (`tokenMatchLen`) — no globs, no
+  collisions (`api.getbee.io` never matches `rge-api.getbee.io`). `crew graph` derives edges
+  from `.envs/*` URLs; `crew start` warns when a co-running selection isn't connected.
 - Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip.
 - `guards`: top-level `guards: {name: {command, message}}` registry; a project lists names
   in `project.guards` (many-to-many). Before a run, the target's guards are deduped by
   name, run once each in parallel (pass = exit 0); any failure prints its message and
-  aborts. `--skip-guards` bypasses. Only `run`/`start`/`install` gate on them. Managed via
+  aborts. `--skip-guards` bypasses. Only `start`/`install` gate on them. Managed via
   the `crew guards` command (list/add/remove/link/unlink, all select-driven). The v1
   `checks` key auto-migrates to `guards` on load.
 - Two execution modes by `config.longRunning`: long-running (streamed, first exit or
@@ -82,10 +83,12 @@ No test framework. Verify manually against a throwaway config:
 ```sh
 node --check bin/crew.js
 node bin/crew.js --config /tmp/x.json list
-node bin/crew.js --config /tmp/x.json run <task> <target> --dry-run
+node bin/crew.js --config /tmp/x.json graph            # read-only, no TTY needed
 ```
 
-Prefer `--dry-run` to inspect resolved commands without executing.
+`start`/`install`/`workspace`/`claude` open the picker, so they need an interactive TTY
+(non-TTY = clear error). Use `--dry-run` in a real terminal to inspect resolved commands
+(incl. `{envfile}` wiring); `list`/`graph` work non-interactively.
 
 ## Non-goals
 

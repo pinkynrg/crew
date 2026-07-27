@@ -357,20 +357,14 @@ function saveLastSelection(flags, names) {
   }
 }
 
-// Resolve the project set for a command: use explicit CLI names, else open the multiselect
-// picker (preselected with the remembered selection). Persists the chosen set globally.
-// opts.connectivity shows a live wiring-connectivity footer in the picker (for co-running
-// sets). Returns members [] or null if the picker was cancelled / nothing chosen.
-async function selectMembers(flags, cfg, names, opts = {}) {
+// Open the multiselect picker (preselected with the remembered selection) and return the
+// chosen members, or null if cancelled / nothing chosen. Selection is ALWAYS interactive —
+// projects are never named on the CLI. Persists the chosen set globally. opts.connectivity
+// adds the live wiring-connectivity footer (for co-running sets).
+async function selectMembers(flags, cfg, opts = {}) {
   const known = Object.keys(cfg.projects || {});
   if (!known.length) fail('no projects configured yet — run: crew add');
-  if (names.length) {
-    const members = membersFor(cfg, names);
-    saveLastSelection(flags, names);
-    return members;
-  }
-  if (!canInteractive())
-    fail('no projects given and not an interactive terminal — pass names, e.g. crew start rge-be rge-fe');
+  if (!canInteractive()) fail('crew needs an interactive terminal to pick projects');
   const paint = projectColors(cfg);
   // Precompute the graph once so the live footer is a pure in-memory lookup per keypress.
   const edges = opts.connectivity ? dependencyEdges(cfg, Object.entries(cfg.projects)) : null;
@@ -391,7 +385,7 @@ async function selectMembers(flags, cfg, names, opts = {}) {
 }
 
 // Directed dependency edges among the given [name, project] entries: name -> Set(peer).
-// Same rule as `crew graph` (whole-host glob, most-specific token wins).
+// Same rule as `crew graph` (exact hostname match).
 function dependencyEdges(cfg, entries) {
   const meta = {};
   for (const [name, project] of entries) {
@@ -870,15 +864,15 @@ function wireRun(userPath, runnable, members, { dry }) {
 }
 
 async function cmdRun(flags, task, rest) {
-  if (!task) fail('run: missing task name. Usage: crew run <task> [project...] [args]');
   const { cfg, userPath } = loadMerged(flags);
-  // rest = bare project names + key=value placeholder args. No names -> picker.
-  const names = rest.filter((a) => !a.includes('='));
+  // Only key=value placeholder args are consumed; projects are chosen in the picker.
   const args = rest.filter((a) => a.includes('='));
+  const bare = rest.filter((a) => !a.includes('='));
+  if (bare.length) warn(`ignoring '${bare.join(' ')}' — projects are chosen in the picker`);
   const isLong = (cfg.longRunning || []).includes(task);
   const mode = isLong ? 'long-running' : 'run-to-completion';
   // For a co-running local set the picker shows a live wiring-connectivity footer.
-  const members = await selectMembers(flags, cfg, names, { connectivity: isLong });
+  const members = await selectMembers(flags, cfg, { connectivity: isLong });
   if (!members) return;
   validateMemberPaths(members);
 
@@ -950,7 +944,8 @@ function selectionLabel(members) {
 
 async function cmdWorkspace(flags, rest) {
   const { cfg, userPath } = loadMerged(flags);
-  const members = await selectMembers(flags, cfg, rest.filter((a) => !a.includes('=')));
+  if (rest.length) warn(`ignoring '${rest.join(' ')}' — projects are chosen in the picker`);
+  const members = await selectMembers(flags, cfg);
   if (!members) return;
   validateMemberPaths(members);
   const dirs = dirList(members);
@@ -983,7 +978,8 @@ async function cmdWorkspace(flags, rest) {
 
 async function cmdClaude(flags, rest) {
   const { cfg, userPath } = loadMerged(flags);
-  const members = await selectMembers(flags, cfg, rest.filter((a) => !a.includes('=')));
+  if (rest.length) warn(`ignoring '${rest.join(' ')}' — projects are chosen in the picker`);
+  const members = await selectMembers(flags, cfg);
   if (!members) return;
   validateMemberPaths(members);
   const dirs = dirList(members);
@@ -1124,24 +1120,15 @@ function urlHostPath(url) {
   const path = (m[2] || '').replace(/\/+$/, '').toLowerCase();
   return { host, path };
 }
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const glob = (s) => s.split('*').map(escapeRe).join('.*'); // `*` = any run of chars
-// A match token is a WHOLE-host glob, optionally with a `/path` prefix. Split at the first
-// `/`: the host part must match the ENTIRE URL host (anchored both ends) — write `*` exactly
-// where the URL varies, e.g. `*svc.foo.io` (env prefix) or `svc-api*.foo.io` (env infix).
-// Because it must reach the end of the host, `*bee-sdk-mcp.getbee.io` matches
-// `qa-bee-sdk-mcp.getbee.io` but NOT `vpc-…-bee-sdk-mcp-….amazonaws.com`. The path part (if
-// any) is matched as a prefix, so a shared gateway host is split by path. Returns the matched
-// token's length (0 = no match) so the caller keeps the most specific token when several hit.
+// A match token is a COMPLETE hostname (perfect string match) — no globs, no paths. It
+// matches a URL when the URL's host equals it (case-insensitive). Exact strings mean no
+// cross-service collisions: `api.getbee.io` matches only that host, never `rge-api.getbee.io`.
+// List every host a service is reached by, including env variants (qa-…, pre-…). Returns the
+// token length on match (0 otherwise) — the length keeps the "most specific wins" caller API,
+// though exact matching makes overlaps impossible in practice.
 function tokenMatchLen(host, path, tok) {
   tok = String(tok).toLowerCase();
-  if (!tok) return 0;
-  const slash = tok.indexOf('/');
-  const hostPat = slash === -1 ? tok : tok.slice(0, slash);
-  const pathPat = slash === -1 ? '' : tok.slice(slash);
-  if (!new RegExp('^' + glob(hostPat) + '$').test(host)) return 0;
-  if (pathPat && !new RegExp('^' + glob(pathPat)).test(path)) return 0;
-  return tok.length;
+  return tok && tok === host ? tok.length : 0;
 }
 
 // The scheme://host[:port] prefix of a URL (drops path/query/fragment). '' if not a URL.
@@ -1174,10 +1161,10 @@ function wireText(text, peers) {
 }
 
 // crew graph [target] — read-only dependency graph derived from env files (no wiring).
-// Each project's id comes ONLY from config `match` (whole-host glob patterns); edge P→T
-// when a URL in P's envs matches one of T's patterns (see tokenMatchLen; most-specific
-// token wins). Optional config `internalDomains: [..]` only affects the cosmetic "other
-// hosts" list. localhost URLs match no id, so they drop out.
+// Each project's id comes ONLY from config `match` (complete hostnames, exact string match);
+// edge P→T when a URL in P's envs has a host equal to one of T's match hosts (tokenMatchLen).
+// Optional config `internalDomains: [..]` only affects the cosmetic "other hosts" list.
+// localhost URLs match no id, so they drop out.
 //
 // No auto-guessing (folder/filename heuristics were dropped): a project with no `match` has
 // no id, so nothing can point at it — it's flagged ⚠ until you add one.
@@ -1212,14 +1199,13 @@ function cmdGraph(flags, names) {
       [
         'How it works:',
         '  1. Give each project an id so crew can recognize it when another project\'s URL',
-        '     points at it: a `match` glob for its WHOLE hostname, with `*` written exactly',
-        '     where the URL varies. E.g. qa-billing.example.com → match: ["*billing.example.com"].',
-        '     No `match` = no id, so nothing can point at it (⚠).',
+        '     points at it: `match` = the complete hostname(s) it is served under (exact',
+        '     strings — list every env variant). E.g. match: ["api.example.com",',
+        '     "qa-api.example.com"]. No `match` = no id, so nothing can point at it (⚠).',
         '  2. Read every env file and pull out every http(s):// URL.',
-        '  3. For each URL, test every `match` glob against its host. The glob must match the',
-        '     WHOLE host, so `*billing.example.com` matches qa-billing.example.com but never',
-        '     vpc-…-billing-….amazonaws.com. Add a `/path` to a token to split a gateway host.',
-        '  4. The project with the longest (most specific) matching token gets the edge P → T.',
+        '  3. For each URL, compare its host to every `match` string — exact match only, so',
+        '     api.example.com never collides with rge-api.example.com.',
+        '  4. A URL in P whose host equals one of T\'s match hosts → edge P → T.',
         '  5. URLs matching no project are dropped as 3rd-party (or listed as "other internal"',
         '     when you set `internalDomains`).',
       ].join('\n')
@@ -1278,7 +1264,7 @@ function cmdGraph(flags, names) {
   }
   if (warned)
     console.log(
-      '\n' + c.yellow('⚠ ') + c.dim('some projects have no `match` — add `match: ["*host.example.com"]` so peers can link to them.')
+      '\n' + c.yellow('⚠ ') + c.dim('some projects have no `match` — add `match: ["host.example.com"]` (exact hosts) so peers can link to them.')
     );
 }
 
@@ -1305,7 +1291,8 @@ function cmdConfig(flags, sub) {
 const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 
 // Prompt for every project field, defaulting to `existing` (empty object when adding).
-// Text fields are inline-editable; type is a picked list; a blank runner/command unsets.
+// Text fields are inline-editable (prefilled with the current value — Enter keeps it, clear
+// to unset); type is a picked list. Any field the wizard doesn't manage is preserved.
 // `guardNames` are the guard names defined in the config (offered as a multi-select).
 async function collectProject(p, existing, guardNames = []) {
   const path0 = await p.ask('Path', existing.path || '');
@@ -1330,13 +1317,24 @@ async function collectProject(p, existing, guardNames = []) {
     else delete tasks[t];
   }
 
+  // Service-wiring fields (all optional; Enter to keep, clear to unset).
+  const env = (await p.ask('Env file for {envfile} wiring, e.g. .envs/{env} (empty = none)', existing.env || '')).trim();
+  const local = (await p.ask('Local URL, e.g. http://localhost:3000 (empty = none)', existing.local || '')).trim();
+  const matchStr = (await p.ask('Match host globs (space-separated), e.g. *api.example.com (empty = none)', (existing.match || []).join(' '))).trim();
+  const match = matchStr ? matchStr.split(/\s+/) : [];
+
   let guards = existing.guards || [];
   if (guardNames.length) guards = await p.multiselect('Guards', guardNames, guards);
 
-  const project = { path: path0, type };
-  if (runner) project.runner = runner;
-  if (Object.keys(tasks).length) project.tasks = tasks;
-  if (guards && guards.length) project.guards = guards;
+  // Spread `existing` first so unmanaged/future fields survive; then set/unset the managed ones.
+  const project = { ...existing, path: path0, type };
+  const setOrDel = (k, v, keep) => (keep ? (project[k] = v) : delete project[k]);
+  setOrDel('runner', runner, !!runner);
+  setOrDel('env', env, !!env);
+  setOrDel('local', local, !!local);
+  setOrDel('match', match, match.length > 0);
+  setOrDel('tasks', tasks, Object.keys(tasks).length > 0);
+  setOrDel('guards', guards, guards && guards.length > 0);
   return project;
 }
 
@@ -1717,11 +1715,10 @@ function help() {
   const ACTIONS = [
     ['help', '', 'Show this help (no args / -h / --help)'],
     ['list', '', 'List projects (alias: ls)'],
-    ['install', '[project...]', 'Run the install task (= crew run install)'],
-    ['start', '[project...] [args]', 'Run the start task (= crew run start)'],
-    ['workspace', '[project...]', 'Open as one VSCode window (alias: code)'],
-    ['claude', '[project...]', 'Launch Claude Code once (deduped dirs)'],
-    ['run', '<task> [project...] [args]', 'Fan any task across the selected projects'],
+    ['install', '', 'Pick projects, run their install task'],
+    ['start', '[args]', 'Pick projects, run their start task (local wiring)'],
+    ['workspace', '', 'Pick projects, open as one VSCode window (alias: code)'],
+    ['claude', '', 'Pick projects, launch Claude Code once (deduped dirs)'],
     ['graph', '[project...]', 'Show the dependency graph derived from .envs'],
   ];
   const CONFIG = [
@@ -1741,21 +1738,11 @@ function help() {
     ['-h, --help', 'This help'],
     ['-v, --version', 'Print version'],
   ];
-  const EXAMPLES = [
-    'crew add',
-    'crew start                 # pick projects (preselected = last run)',
-    'crew start rge-be rge-fe   # explicit set, no picker',
-    'crew run build api',
-    'crew start rge-be env=qa',
-    'crew workspace',
-    'crew claude',
-  ];
-
   const L = [];
   L.push(`${c.bold('crew')} ${PKG.version} — fan a task across a group of local projects`);
   L.push('');
   L.push(c.bold('USAGE'));
-  L.push('  crew <command> [project...] [args] [flags]');
+  L.push('  crew <command> [args] [flags]');
   L.push('');
   L.push(c.bold('ACTIONS'));
   for (const [n, r, d] of ACTIONS) L.push(cmd(n, r, d));
@@ -1764,23 +1751,18 @@ function help() {
   for (const [n, r, d] of CONFIG) L.push(cmd(n, r, d));
   L.push('');
   L.push(c.bold('SELECTION'));
-  L.push('  Name one or more projects, or omit them to pick interactively (multiselect,');
-  L.push('  preselected with your last selection). The chosen set is remembered globally');
-  L.push('  and reused across start/workspace/claude/run. For a co-running set, start warns');
-  L.push('  if the selection isn\'t connected in the dependency graph.');
+  L.push('  start/install/workspace/claude always open an interactive multiselect');
+  L.push('  (preselected with your last pick). The chosen set is remembered globally and');
+  L.push('  reused across them. For a co-running set, start warns live if the selection');
+  L.push('  isn\'t connected in the dependency graph.');
   L.push('');
   L.push(c.bold('TASKS'));
-  L.push('  A task resolves per project: tasks[<task>] -> runner with {task} -> skip.');
-  L.push('  Long-running tasks (config.longRunning, default: start/dev/watch) stream and');
-  L.push('  tear down together on Ctrl-C. Others run to completion, then report pass/fail.');
-  L.push('  Placeholders {name} are filled by key=value args (strict); bare tokens are');
-  L.push('  project names, not values.');
+  L.push('  Per project: tasks[<task>] -> runner with {task}. start/dev/watch stream and');
+  L.push('  tear down together on Ctrl-C; others run to completion, then report pass/fail.');
+  L.push('  Pass placeholder values ({name}) as key=value args, e.g. crew start env=qa.');
   L.push('');
   L.push(c.bold('FLAGS'));
   for (const [f, d] of FLAGS) L.push(`  ${c.cyan(f)}${' '.repeat(Math.max(2, 18 - f.length))}${d}`);
-  L.push('');
-  L.push(c.bold('EXAMPLES'));
-  for (const e of EXAMPLES) L.push('  ' + e);
   console.log(L.join('\n'));
 }
 
@@ -1837,9 +1819,6 @@ async function main() {
     case 'list':
     case 'ls':
       cmdList(flags);
-      return;
-    case 'run':
-      await cmdRun(flags, rest[0], rest.slice(1));
       return;
     case 'start':
       await cmdRun(flags, 'start', rest);

@@ -53,29 +53,29 @@ yourself:
 | 2 | `crew workspace` | one multi-root VSCode window |
 | 3 | `crew claude` | an interactive Claude Code session |
 
-Each opens a **multiselect picker** (or takes explicit project names) and reuses your last
+Each opens a **multiselect picker** (preselected with your last pick) and remembers the
 selection, so tabs 2 and 3 open the same set you started.
 
 ## Quick start
 
 ```sh
-crew add                        # wizard: create a project (run once per project)
-crew start                      # pick projects to run locally (remembers your pick)
-crew start rge-be rge-fe        # …or name them explicitly (no picker)
-crew run install rge-be rge-fe  # install those (waits, reports pass/fail)
-crew workspace                  # open the remembered set as one VSCode window
-crew claude                     # launch Claude Code over the remembered set
-crew edit                       # wizard: change a project later
+crew add          # wizard: create a project (run once per project)
+crew install      # pick projects, install them (waits, reports pass/fail)
+crew start        # pick projects to run locally (remembers your pick)
+crew start env=qa # same, passing a placeholder value to the start task
+crew workspace    # open the remembered set as one VSCode window
+crew claude       # launch Claude Code over the remembered set
+crew edit         # wizard: change a project later
 ```
 
 ## Concepts
 
 - **Projects** are the only building block — there are **no named groups**. You choose a
-  **set of projects per run**: name them on the CLI, or omit them to pick from an
-  interactive **multiselect** (preselected with your last pick).
+  **set of projects per run** from an interactive **multiselect** (preselected with your
+  last pick); projects are never named on the CLI.
 - The chosen set is **remembered globally** (machine-local `local.json`) and reused across
-  `start`/`workspace`/`claude`/`run` — so `crew workspace` right after `crew start` opens
-  the same set. `crew list` shows the current remembered selection.
+  `start`/`install`/`workspace`/`claude` — so `crew workspace` right after `crew start`
+  opens the same set. `crew list` shows the current remembered selection.
 - Paths are `~`-expanded and resolved relative to the current directory. Before any command
   acts, crew verifies each selected project's `path` exists and fails naming the offender.
 - Folder lists (workspace folders, `claude --add-dir`) are **deduped by resolved absolute
@@ -130,30 +130,26 @@ runs nothing.
 
 Here `api` runs any task through `make {task}`, `web` through `npm run {task}`, `worker`
 has an explicit `tasks.start` override with an `{env}` placeholder, and `docs` is
-run-less (skipped by `run`, kept for `workspace`/`claude`).
+run-less (skipped for that task, kept for `workspace`/`claude`).
 
 ### Placeholders & args (strict)
 
-Resolved commands may contain `{name}` placeholders. `{task}` is filled automatically
-from the task name; everything else comes from your `key=value` args (`key=value` fills
-`{key}` by name). Bare command-line tokens are **project names** for the selection, not
-placeholder values.
+Resolved commands may contain `{name}` placeholders. `{task}` is filled automatically from
+the task name; `{envfile}` is filled by crew (see wiring below); everything else comes from
+your `key=value` args (`key=value` fills `{key}` by name). Projects are chosen in the
+picker — any bare command-line token is ignored (with a yellow warning).
 
 Resolution rules:
 
 - every placeholder must be satisfied, else a **red error** lists the unresolved ones and
   nothing runs;
-- a `key=value` that matches no placeholder in the target is **skipped with a yellow
-  warning** (so `crew start backend env=local` still runs when backend has no `{env}`);
+- a `key=value` that matches no placeholder is **skipped with a yellow warning** (so
+  `crew start env=local` still runs when nothing has an `{env}`);
 - substituted values are shell-quoted, so spaces and metacharacters are safe.
 
 ```sh
-crew start worker env=qa      # fills {env} in worker's tasks.start
-crew start web worker env=qa  # name several projects; env=qa applies to each
+crew start env=qa   # opens the picker, then fills {env} in each project's start
 ```
-
-With the picker, bare tokens on the command line are treated as **project names**, so pass
-placeholder values as `key=value` (e.g. `env=qa`).
 
 crew hardcodes no task names or values beyond the `longRunning` list — no baked-in
 `local`/`pre`/`qa`/`pro` vocabulary.
@@ -164,25 +160,24 @@ crew hardcodes no task names or values beyond the `longRunning` list — no bake
 who calls whom — with no manual edge list. It powers the connectivity check `crew start`
 does on a co-running set.
 
-Give each project a `match`: one or more **whole-host globs** naming the hostname(s) it's
-served under, with `*` written exactly where the URL varies. An edge `P → T` is drawn when a
-URL in P's env files matches one of T's `match` globs.
+Give each project a `match`: the **complete hostname(s)** it's served under — **exact
+strings**, listing every env variant. An edge `P → T` is drawn when a URL in P's env files
+has a host equal to one of T's `match` strings.
 
 ```json
 "projects": {
   "api": {
     "path": "api", "runner": "make {task}",
-    "match": ["*api.example.com", "*api.example.com/v1"]
+    "match": ["api.example.com", "qa-api.example.com", "pre-api.example.com"]
   }
 }
 ```
 
-- The host part must match the **whole** host, so `*api.example.com` matches
-  `qa-api.example.com` but never `vpc-…-api-….amazonaws.com` (a fragment buried mid-host).
-- Add a `/path` to a token to split a shared **gateway** host by path; when several tokens
-  match a URL, the **most specific** (longest) wins.
+- **Exact match**, so `api.example.com` matches only that host — never
+  `rge-api.example.com` or `vpc-…-api-….amazonaws.com`. No globs, no collisions.
+- List each env variant (`qa-`, `pre-`, …); add new ones when envs appear.
 - A project with no `match` has no id, so nothing can point at it — `crew graph` flags it.
-  crew derives nothing from folder/file/env names; the pattern is the whole rule.
+  crew derives nothing from folder/file/env names; the exact hosts are the whole rule.
 
 When you `crew start` a set, crew warns if the selection isn't connected in this graph
 (`crew graph` restricted to the chosen projects) — i.e. you're running projects that won't
@@ -216,18 +211,17 @@ process-group signal reaches them regardless of reparenting. POSIX only (macOS +
 Actions:
 
 ```
-crew help                                 usage (also: no args, -h, --help)
-crew list                                 list projects                      (alias: ls)
-crew install [project...]                 = crew run install
-crew start [project...] [args]            = crew run start
-crew workspace [project...] [--fileless]  open one multi-root VSCode window   (alias: code)
-crew claude [project...]                  launch Claude Code once, deduped --add-dir
-crew run <task> [project...] [args]       fan any <task> across the selected projects
-crew graph [project...]                   dependency graph derived from .envs files
+crew help                       usage (also: no args, -h, --help)
+crew list                       list projects                      (alias: ls)
+crew install                    pick projects, run their install task
+crew start [args]               pick projects, run their start task (local wiring)
+crew workspace [--fileless]     pick projects, open one VSCode window (alias: code)
+crew claude                     pick projects, launch Claude Code once (--add-dir)
+crew graph [project...]         dependency graph derived from .envs files
 ```
 
-Omit the project names on any acting command to pick them interactively (multiselect,
-preselected with your last selection). The selection is remembered globally.
+`start`/`install`/`workspace`/`claude` always open the interactive multiselect
+(preselected with your last pick); the selection is remembered globally.
 
 Config:
 
@@ -246,7 +240,7 @@ without running.
 
 ## Guards
 
-A project can require named **guards** — preconditions verified before `crew run`/`start`
+A project can require named **guards** — preconditions verified before `crew start`/`install`
 does anything. crew stays agnostic: a guard is just a shell command, and it **passes iff
 it exits 0**. Guards live in a top-level registry and attach to projects many-to-many:
 
@@ -281,7 +275,7 @@ guards: aws, vpn
 crew: guard failed — nothing started.
 ```
 
-Bypass with `--skip-guards`. Guards only gate `run`/`start`/`install` — `workspace` and
+Bypass with `--skip-guards`. Guards only gate `start`/`install` — `workspace` and
 `claude` don't run them.
 
 ### Managing guards
@@ -309,9 +303,7 @@ dir — **not** your project — at:
 ```
 
 `<selection>` is the sorted member names joined — the same set produces the same file
-regardless of pick order.
-
-then opens it with `code <that file>`. This keeps the workspace file invisible in your
+regardless of pick order. crew opens it with `code <that file>`. This keeps the workspace file invisible in your
 project explorer and out of git, while staying deterministic and reopenable: the file is
 regenerated on every invocation to reflect the current config, and `code <file>` focuses
 an existing window for that workspace instead of duplicating it.
