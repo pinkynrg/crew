@@ -232,6 +232,7 @@ crew remove <name>                     delete a project (confirm; -y) (alias: rm
 crew guards [project]                  list/manage guards (add/remove/link/unlink)
 crew dir [path]                        show/set the projects dir (relative paths resolve here)
 crew config [path|edit]                print merged config / its path / open in $EDITOR
+crew pull <url>                        fetch config.json from a URL, install it (backs up current)
 ```
 
 Global flags: `--dry-run`, `--skip-guards`, `--config <path>`, `-y/--yes`, `-h/--help`,
@@ -379,9 +380,11 @@ Because `config.json` never contains machine-specific data, it's directly commit
 
 1. Keep `projects`/`guards` on relative paths (`crew dir` + `crew add`/`edit` do this).
 2. Commit `config.json` (in a repo, or `git init` inside `~/.config/crew`). **Gitignore
-   `local.json`** (and `workspaces/`, `sessions/`) — those are machine-local/generated.
-3. A teammate drops `config.json` at `~/.config/crew/config.json` (clone/symlink) and runs
-   `crew dir <their-path>` once. Everything resolves; no absolute paths are ever shared.
+   `local.json`** (and `workspaces/`, `sessions/`, `tmp/`) — those are machine-local/generated.
+3. A teammate installs it — clone/symlink to `~/.config/crew/config.json`, or fetch it
+   straight from the repo with `crew pull <raw-url>` (backs up any current config; a private
+   repo needs a token/PAT in the URL). Then `crew dir <their-path>` once and everything
+   resolves; no absolute paths are ever shared.
 
 `--config <path>` works too: `local.json` is always read from **beside** the config file,
 so an isolated config keeps its own machine settings.

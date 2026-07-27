@@ -43,6 +43,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 
 - User-level: `~/.config/crew/config.json` (v2 schema). Project-local `./.crew.json`
   merges on top. v1 configs migrate to v2 on load (`start.command` -> `tasks.start`).
+  `crew pull <url>` fetches a `config.json` from a URL (zero-dep `node:http(s)`, follows
+  redirects, validates it has `projects`) and installs it, backing up the current one to
+  `config.json.bak`; `local.json` is untouched.
 - `projectsDir` (machine-local — stored in `local.json` beside the config, set via
   `crew dir <path>`, never in the committable `config.json`): relative project `path`s
   resolve against it; `~`/absolute paths are used as-is. So `config.json`

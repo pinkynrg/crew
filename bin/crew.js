@@ -18,6 +18,8 @@ import { homedir } from 'node:os';
 import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
+import { get as httpsGet } from 'node:https';
+import { get as httpGet } from 'node:http';
 import { emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 import { createRequire } from 'node:module';
@@ -1289,6 +1291,63 @@ function cmdConfig(flags, sub) {
   console.log(JSON.stringify(cfg, null, 2));
 }
 
+// GET a URL as text, following redirects (GitHub raw -> CDN). Zero-dep (node:http/https).
+function fetchUrl(url, redirects = 5) {
+  return new Promise((resolve, reject) => {
+    const get = url.startsWith('https:') ? httpsGet : httpGet;
+    get(url, { headers: { 'User-Agent': 'crew' } }, (res) => {
+      const { statusCode, headers } = res;
+      if (statusCode >= 300 && statusCode < 400 && headers.location) {
+        res.resume();
+        if (redirects <= 0) return reject(new Error('too many redirects'));
+        return resolve(fetchUrl(new URL(headers.location, url).toString(), redirects - 1));
+      }
+      if (statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`HTTP ${statusCode}`));
+      }
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (data += c));
+      res.on('end', () => resolve(data));
+    }).on('error', reject);
+  });
+}
+
+// crew pull <url> — fetch a config.json from a URL and install it as the user config
+// (backing up the current one). local.json (projects dir, last selection) is untouched.
+async function cmdPull(flags, url) {
+  if (!url || !/^https?:\/\//i.test(url))
+    fail('pull: usage: crew pull <url-to-config.json>');
+  const path = userConfigPath(flags);
+  let text;
+  try {
+    text = await fetchUrl(url);
+  } catch (e) {
+    fail(`pull: could not fetch config: ${e.message}`);
+  }
+  let cfg;
+  try {
+    cfg = JSON.parse(text);
+  } catch {
+    fail('pull: response is not valid JSON (check the URL / token)');
+  }
+  if (!cfg || typeof cfg !== 'object' || typeof cfg.projects !== 'object')
+    fail('pull: that JSON is not a crew config (missing "projects")');
+
+  mkdirSync(dirname(path), { recursive: true });
+  let backed = false;
+  if (pathExists(path)) {
+    writeFileSync(path + '.bak', readFileSync(path));
+    backed = true;
+  }
+  writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n');
+  const n = Object.keys(cfg.projects || {}).length;
+  console.log(`Loaded config → ${tildify(path)} ${c.dim(`(${n} project${n === 1 ? '' : 's'})`)}`);
+  if (backed) console.log(c.dim(`  previous saved as ${tildify(path + '.bak')}`));
+  console.log(c.dim('  set your projects dir if needed: crew dir <path>'));
+}
+
 const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 
 // Prompt for every project field, defaulting to `existing` (empty object when adding).
@@ -1729,6 +1788,7 @@ function help() {
     ['guards', '[project]', 'List/manage guards (add/remove/link/unlink)'],
     ['dir', '[path]', 'Show/set the projects directory'],
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
+    ['pull', '<url>', 'Load config.json from a URL (backs up current)'],
   ];
   const FLAGS = [
     ['--dry-run', 'Show what would run without executing'],
@@ -1855,6 +1915,9 @@ async function main() {
       return;
     case 'config':
       cmdConfig(flags, rest[0]);
+      return;
+    case 'pull':
+      await cmdPull(flags, rest[0]);
       return;
     default:
       console.error(c.red(`crew: unknown command '${cmd}'`) + '\n');
