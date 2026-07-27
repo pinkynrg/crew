@@ -978,17 +978,18 @@ async function cmdWorkspace(flags, rest) {
 
 async function cmdClaude(flags, rest) {
   const { cfg, userPath } = loadMerged(flags);
-  if (rest.length) warn(`ignoring '${rest.join(' ')}' — projects are chosen in the picker`);
+  // Optional first bare arg = a session name for the chat history (always kept under crew's
+  // sessions dir). Omitted => a stable name auto-derived from the selected projects.
+  const session = rest.filter((a) => !a.includes('='))[0];
   const members = await selectMembers(flags, cfg);
   if (!members) return;
   validateMemberPaths(members);
   const dirs = dirList(members);
 
-  // Stable, crew-owned cwd per selection. Claude Code keys its history off the cwd path
-  // (~/.claude/projects/<cwd-slug>/), so a fixed dir keeps history tied to the SET of
-  // projects (sorted, order-independent) — not the first member — and keeps it out of any
-  // single project's folder. All projects stay reachable via the --add-dir list below.
-  const cwd = join(crewHomeFor(userPath), 'sessions', selectionLabel(members));
+  // Claude Code keys its history off the cwd path (~/.claude/projects/<cwd-slug>/), so a
+  // fixed, crew-owned cwd keeps history tied to the session name — not any single project's
+  // dir. All projects stay reachable via the --add-dir list below.
+  const cwd = join(crewHomeFor(userPath), 'sessions', session ? sanitize(session) : selectionLabel(members));
   mkdirSync(cwd, { recursive: true });
 
   const cliArgs = [];
@@ -1718,7 +1719,7 @@ function help() {
     ['install', '', 'Pick projects, run their install task'],
     ['start', '[args]', 'Pick projects, run their start task (local wiring)'],
     ['workspace', '', 'Pick projects, open as one VSCode window (alias: code)'],
-    ['claude', '', 'Pick projects, launch Claude Code once (deduped dirs)'],
+    ['claude', '[session]', 'Pick projects, launch Claude Code (names the chat history, else auto)'],
     ['graph', '[project...]', 'Show the dependency graph derived from .envs'],
   ];
   const CONFIG = [

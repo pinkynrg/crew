@@ -327,6 +327,10 @@ the cwd is fixed to the *sorted set of names* — not the first member — your 
 for a given set is stable: picking the same projects in any order reuses the same history,
 and it never lives inside one project's folder.
 
+Name the chat history with an optional **session name**: `crew claude billing-work` keeps
+history in `~/.config/crew/sessions/billing-work/`. Omit it to get a name auto-derived from
+the selected projects. (It's a name, not a path — always kept under crew's sessions dir.)
+
 Note: the working dir is a crew-owned folder, not a project checkout, so there's no cwd
 `CLAUDE.md`/git at the root — each project brings its own via `--add-dir`. Switching to
 this scheme starts history under the new stable path; any prior history under a project's
