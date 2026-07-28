@@ -559,12 +559,19 @@ function resolveRun(cfg, task, members, args) {
     if (i < positionals.length) values[k] = positionals[i];
   });
 
-  // Strict: every placeholder in every runnable command must be satisfied (reserved ones
-  // are crew-filled, so exempt: {task} is in values; {envfile} is substituted later).
+  // Per-project value set: {env} may be remapped by the project's `envMap` (e.g. a
+  // dependency consumed at a fixed env — RGE at pre/qa talks to SDK@qa). Everything else
+  // is shared. Strict-check and substitution then run against the per-project values.
   const unresolved = new Set();
-  for (const r of runnable)
+  for (const r of runnable) {
+    const env = mappedEnv(r.project, values.env);
+    r._values = env === undefined ? { ...values } : { ...values, env };
     for (const p of placeholdersIn(r.template))
-      if (!RESERVED.has(p) && !(p in values)) unresolved.add(p);
+      if (!RESERVED.has(p) && !(p in r._values)) unresolved.add(p);
+    if (r.project.env)
+      for (const p of placeholdersIn(r.project.env))
+        if (!RESERVED.has(p) && !(p in r._values)) unresolved.add(p);
+  }
   if (unresolved.size)
     fail(
       `unresolved placeholder(s): ${[...unresolved].join(', ')}. ` +
@@ -572,14 +579,27 @@ function resolveRun(cfg, task, members, args) {
     );
 
   for (const r of runnable) {
-    r.resolved = substitute(r.template, values); // {envfile} left intact for cmdRun
+    r.resolved = substitute(r.template, r._values); // {envfile} left intact for cmdRun
     // Resolve the base env-file path (if declared) with the same values — raw (no shell
     // quoting): it's a filesystem path crew reads, not a shell token.
     r.envFile = r.project.env
-      ? r.project.env.replace(PLACEHOLDER_RE, (m, k) => (k in values ? values[k] : m))
+      ? r.project.env.replace(PLACEHOLDER_RE, (m, k) => (k in r._values ? r._values[k] : m))
       : null;
   }
   return { runnable, skipped };
+}
+
+// Remap the selection env `g` for a project via its optional `envMap` (a lookup from the
+// selection env to the env this project should actually run at; `default` is the fallback).
+// No envMap, or no matching entry/default -> `g` unchanged. Keeps crew agnostic: it's a
+// plain per-project table, no knowledge of which services map where.
+function mappedEnv(project, g) {
+  const m = project && project.envMap;
+  if (m && typeof m === 'object') {
+    if (g != null && g in m) return m[g];
+    if ('default' in m) return m.default;
+  }
+  return g;
 }
 
 // ---------------------------------------------------------------------------

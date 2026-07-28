@@ -154,6 +154,20 @@ crew start env=qa   # opens the picker, then fills {env} in each project's start
 crew hardcodes no task names or values beyond the `longRunning` list — no baked-in
 `local`/`pre`/`qa`/`pro` vocabulary.
 
+**Per-project env (`envMap`).** A project can remap the selection's env to the env it
+actually runs at — useful when a dependency is consumed at a fixed env. `{env}` resolves
+per project as `envMap[sel] ?? envMap.default ?? sel`, then feeds the start command, the
+`env` file path, and the wiring:
+
+```json
+"sdk-api": { …, "envMap": { "pro": "pro", "default": "qa" } }
+```
+
+So `crew start env=pre` runs your app at `pre` but `sdk-api` at `qa` (and `env=pro` → both
+`pro`). It's a plain per-project table — crew has no knowledge of which service maps where.
+This matters because a caller's env file carries the dependency's **credentials** too; crew
+rewrites the URL to localhost, so the local dependency must run the env those creds are for.
+
 ## Dependency graph
 
 `crew graph` derives a **read-only dependency graph** from each project's `.envs/*` files —

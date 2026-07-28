@@ -58,6 +58,12 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   projects are never named on the CLI (bare CLI tokens are ignored with a warning; only
   `key=value` args are consumed). The picked set is saved to `lastSelection` (global,
   machine-local) and reused across the four. A legacy `groups` key is dropped on load.
+- `envMap` (optional, per project): remaps the selection env to the env THIS project runs
+  at — `{ "<selEnv>": "<projEnv>", "default": "<fallback>" }` (see `mappedEnv`). `{env}`
+  resolves per project (`envMap[sel] ?? envMap.default ?? sel`) before the start command,
+  the `env` file path, and wiring. Used when a dependency is consumed at a fixed env (e.g.
+  SDK projects `{"pro":"pro","default":"qa"}`: RGE at pre/qa talks to SDK@qa, pro→pro).
+  Agnostic — a plain per-project table; crew has no service-mapping knowledge.
 - `match` (per project): the project's complete deployed hostname(s) as **exact strings**
   (list every env variant); matched by exact host equality (`tokenMatchLen`) — no globs, no
   collisions (`api.getbee.io` never matches `rge-api.getbee.io`). `crew graph` derives edges
