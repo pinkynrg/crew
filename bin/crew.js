@@ -843,7 +843,7 @@ async function runGuards(cfg, members) {
 // origin, and materialize a FRESH temp file per run (stateless — regenerated every start,
 // deleted on teardown). {envfile} in the command is replaced with the temp path. Peers not
 // in the running set (or without a `local`) stay remote. dry => annotate only, no writes.
-function wireRun(userPath, runnable, members, { dry }) {
+function wireRun(userPath, runnable, members, { dry, overrides = {} }) {
   const peers = members
     .filter((m) => m.project.local)
     .map((m) => ({ name: m.name, tokens: projectIdentity(m.project).tokens, origin: originOf(m.project.local) || m.project.local }));
@@ -855,6 +855,7 @@ function wireRun(userPath, runnable, members, { dry }) {
     const basePath = resolve(projectDir(r.project), r.envFile);
     if (!pathExists(basePath)) fail(`project '${r.name}': env file not found: ${basePath}`);
     const myPeers = peers.filter((p) => p.name !== r.name);
+    const overrideVars = overrideVarsFor(overrides, r.name);
     let baseText = '';
     try {
       baseText = readFileSync(basePath, 'utf8');
@@ -877,12 +878,13 @@ function wireRun(userPath, runnable, members, { dry }) {
         return u;
       });
       r._wired = [...hit];
+      r._overrides = Object.keys(overrideVars);
       r.resolved = r.resolved.replace(/\{envfile\}/g, shellQuote(`<wired ${r.envFile}>`));
       continue;
     }
     mkdirSync(tmpDir, { recursive: true });
     const out = join(tmpDir, `${sanitize(r.name)}.env`);
-    writeFileSync(out, wireText(baseText, myPeers));
+    writeFileSync(out, applyEnvOverrides(wireText(baseText, myPeers), overrideVars).text);
     tempPaths.push(out);
     r.resolved = r.resolved.replace(/\{envfile\}/g, shellQuote(out));
   }
@@ -914,7 +916,9 @@ async function cmdRun(flags, task, rest) {
   for (const s of skipped) console.log(`skipping ${s} (no task '${task}')`);
 
   // Materialize wired env files (fills {envfile}); fresh per run, cleaned up after.
-  const { cleanup } = wireRun(userPath, runnable, members, { dry: flags.dryRun });
+  // Env overrides come from local.json (machine-local, untracked) so secrets never hit the config.
+  const overrides = loadMachine(flags).overrides || {};
+  const { cleanup } = wireRun(userPath, runnable, members, { dry: flags.dryRun, overrides });
 
   const label = members.map((m) => m.name).join(', ');
   const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
@@ -926,6 +930,8 @@ async function cmdRun(flags, task, rest) {
     for (const r of runnable) {
       if (r._wired && r._wired.length)
         console.log(`  ${c.dim('# ' + r.name + ' wired to localhost: ' + r._wired.join(', '))}`);
+      if (r._overrides && r._overrides.length)
+        console.log(`  ${c.dim('# ' + r.name + ' env overrides: ' + r._overrides.join(', '))}`);
       console.log(`  ${r.name}: cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
     }
     return;
@@ -1189,6 +1195,46 @@ function wireText(text, peers) {
     const o = originOf(url);
     return o ? best.origin + url.slice(o.length) : url;
   });
+}
+
+// Local-wiring env overrides (machine-local, from local.json `overrides`). When crew starts a
+// project locally it materializes a wired env for it; `overrides["<project>"] = {VAR: val}`
+// upserts extra `KEY=value` lines into that env — e.g. a Temporal queue name so your local
+// worker consumes `foo-local` not shared `foo`, or the dev API key the local dependency accepts.
+// Flat, one entry per project: it only ever applies when that project runs (crew builds its
+// wired env only then). Secrets/personal values live in local.json (untracked), never in the
+// shared config. Overrides beat the base file and the URL swap.
+function overrideVarsFor(overrides, name) {
+  const o = overrides && overrides[name];
+  return o && typeof o === 'object' ? o : {};
+}
+// dotenv/sh-safe: quote only values with characters outside a safe set, so plain keys/tokens
+// stay unquoted (max compat with both `. envfile` sourcing and dotenv-style loaders).
+function envOverrideValue(v) {
+  const s = String(v);
+  return /^[A-Za-z0-9_.:@/=+-]*$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'";
+}
+// Upsert each KEY=value into env-file text: replace an existing assignment (optionally
+// `export`-prefixed) in place, else append. Returns the new text and the keys applied.
+function applyEnvOverrides(text, vars) {
+  const applied = [];
+  let out = text;
+  for (const [k, v] of Object.entries(vars || {})) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) {
+      warn(`override: skipping invalid env var name '${k}'`);
+      continue;
+    }
+    if (v === null || typeof v === 'object') {
+      warn(`override: '${k}' must be a string value — got ${Array.isArray(v) ? 'array' : typeof v}`);
+      continue;
+    }
+    const line = `${k}=${envOverrideValue(v)}`;
+    const re = new RegExp(`^([ \\t]*(?:export[ \\t]+)?)${k}=.*$`, 'm');
+    if (re.test(out)) out = out.replace(re, (_m, pre) => pre + line);
+    else out += (out === '' || out.endsWith('\n') ? '' : '\n') + line + '\n';
+    applied.push(k);
+  }
+  return { text: out, applied };
 }
 
 // crew graph [target] — read-only dependency graph derived from env files (no wiring).
@@ -1708,6 +1754,76 @@ function menu({ title, items, label, multi = false, start = 0, preselected = [],
 // prefilled at the cursor — edit it, or clear it to unset), and enumerable choices use
 // the arrow menu. Over a pipe (scripts/tests): fall back to typed lines where a blank
 // keeps the prefilled default. `close()` only matters for the piped path.
+// ---------------------------------------------------------------------------
+// Env overrides — machine-local per-project env vars, stored in local.json (never committed).
+// Applied to a project's wired env when crew starts it (see overrideVarsFor/applyEnvOverrides).
+// ---------------------------------------------------------------------------
+const OVERRIDE_ACTIONS = ['set', 'add', 'remove', 'rm', 'unset'];
+async function cmdOverrides(flags, sub, rest) {
+  if (sub && OVERRIDE_ACTIONS.includes(sub)) {
+    const { cfg } = loadMerged(flags);
+    const p = makePrompter();
+    try {
+      if (sub === 'set' || sub === 'add') return await overrideSet(flags, cfg, p);
+      return await overrideRemove(flags, p);
+    } finally {
+      p.close();
+    }
+  }
+  overrideList(flags, loadMerged(flags).cfg);
+}
+
+function overrideList(flags, cfg) {
+  const ovr = loadMachine(flags).overrides || {};
+  console.log(c.bold(c.underline('Env overrides')) + c.dim('  (machine-local — local.json)'));
+  const projects = Object.keys(ovr);
+  if (!projects.length) return void console.log(c.dim('  (none) — add one: crew overrides set'));
+  for (const proj of projects) {
+    const known = cfg.projects && cfg.projects[proj];
+    console.log(`  ${c.cyan(proj)}${known ? '' : c.yellow('  (unknown project)')}`);
+    const vars = ovr[proj] && typeof ovr[proj] === 'object' ? ovr[proj] : {};
+    const keys = Object.keys(vars);
+    if (!keys.length) console.log(`      ${c.dim('(empty)')}`);
+    for (const k of keys) console.log(`      ${k}=${vars[k]}`);
+  }
+  console.log(faint('  applied to each project’s wired env only when crew starts it'));
+}
+
+async function overrideSet(flags, cfg, p) {
+  const projNames = Object.keys(cfg.projects || {});
+  if (!projNames.length) fail('no projects defined — add one: crew add');
+  const proj = await p.select('Override which project?', projNames, projNames[0]);
+  const key = (await p.ask('Env var name', '')).trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) fail(`invalid env var name '${key}'`);
+  const machine = loadMachine(flags);
+  const existing = (machine.overrides && machine.overrides[proj] && machine.overrides[proj][key]) || '';
+  const value = await p.ask(`Value for ${key}`, String(existing));
+  machine.overrides = machine.overrides || {};
+  machine.overrides[proj] = machine.overrides[proj] && typeof machine.overrides[proj] === 'object' ? machine.overrides[proj] : {};
+  machine.overrides[proj][key] = value;
+  writeMachine(flags, machine);
+  console.log(`\nSet ${c.cyan(proj)}  ${key}=${value}`);
+}
+
+async function overrideRemove(flags, p) {
+  const machine = loadMachine(flags);
+  const ovr = machine.overrides || {};
+  const projects = Object.keys(ovr);
+  if (!projects.length) fail('no overrides defined yet. Add one: crew overrides set');
+  const proj = await p.select('Remove from which project?', projects, projects[0]);
+  const keys = Object.keys(ovr[proj] && typeof ovr[proj] === 'object' ? ovr[proj] : {});
+  const ALL = '(all — remove the whole project entry)';
+  const choice = keys.length ? await p.select(`Remove which var from ${proj}?`, [...keys, ALL], keys[0]) : ALL;
+  if (choice === ALL) delete ovr[proj];
+  else {
+    delete ovr[proj][choice];
+    if (!Object.keys(ovr[proj]).length) delete ovr[proj];
+  }
+  machine.overrides = ovr;
+  writeMachine(flags, machine);
+  console.log(`\nRemoved ${choice === ALL ? `all overrides for ${proj}` : `${choice} from ${proj}`}`);
+}
+
 function makePrompter() {
   if (canInteractive()) {
     const ask = (labelText, prefill = '') =>
@@ -1817,6 +1933,7 @@ function help() {
     ['edit', '[name]', 'Wizard: modify an existing project'],
     ['remove', '<name>', 'Delete a project (-y, alias rm)'],
     ['guards', '[project]', 'List/manage guards (add/remove/link/unlink)'],
+    ['overrides', '[set|remove]', 'List/set/remove per-project env overrides (local.json)'],
     ['dir', '[path]', 'Show/set the projects directory'],
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
     ['pull', '<url>', 'Load config.json from a URL (backs up current)'],
@@ -1937,6 +2054,10 @@ async function main() {
       return;
     case 'guards':
       await cmdGuards(flags, rest[0], rest.slice(1));
+      return;
+    case 'overrides':
+    case 'override':
+      await cmdOverrides(flags, rest[0], rest.slice(1));
       return;
     case 'dir':
       cmdDir(flags, rest[0]);

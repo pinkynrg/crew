@@ -168,6 +168,41 @@ So `crew start env=pre` runs your app at `pre` but `sdk-api` at `qa` (and `env=p
 This matters because a caller's env file carries the dependency's **credentials** too; crew
 rewrites the URL to localhost, so the local dependency must run the env those creds are for.
 
+**Env overrides (`local.json`).** URL swapping isn't always enough — sometimes a *value*
+must change when you run locally: a dev API key the local peer accepts, or a Temporal queue
+name so your local worker consumes `orchestra-local-ai` instead of the shared `orchestra-ai`.
+`overrides` upsert extra `KEY=value` lines into a project's **wired** env file (the one crew
+builds for `{envfile}`). They live in **`local.json`** (machine-local, untracked) so secrets
+and personal values never touch the shared `config.json`:
+
+```json
+{
+  "overrides": {
+    "bee-orchestra":   { "TEMPORAL_ORCHESTRA_AI_QUEUE": "orchestra-local-ai" },
+    "beepro-frontend": { "SDK_API_KEY": "my-local-dev-key" }
+  }
+}
+```
+
+`overrides["<project>"] = { VAR: value }` — one flat table per project, applied to that
+project's wired env whenever crew starts it locally. Manage them without hand-editing:
+
+```
+crew overrides            list every override (grouped by project)
+crew overrides set        pick a project, enter VAR + value (upsert)
+crew overrides remove     pick a project, then a var to drop (or the whole entry)
+```
+
+- Overrides win over the base env file (and over the localhost URL swap).
+- Upsert = replace an existing `VAR=` / `export VAR=` line in place, else append it.
+- They apply **whenever you start that project** (crew builds a wired env only then), so add
+  only values that hold for your local sessions — e.g. don't override a consumer's `SDK_API_KEY`
+  to the local one unless you actually run that dependency locally alongside it.
+
+crew stays agnostic: it's a plain per-project table, no service knowledge. (This is also the
+escape hatch for cross-env wiring — run everything at `pre` and inject the `pre` key your env
+file lacks — instead of pinning a dependency's env with `envMap`.)
+
 ## Dependency graph
 
 `crew graph` derives a **read-only dependency graph** from each project's `.envs/*` files —
@@ -244,6 +279,7 @@ crew add                               wizard: create a new project
 crew edit [name]                       wizard: modify an existing project
 crew remove <name>                     delete a project (confirm; -y) (alias: rm)
 crew guards [project]                  list/manage guards (add/remove/link/unlink)
+crew overrides [set|remove]            list/set/remove per-project env overrides (local.json)
 crew dir [path]                        show/set the projects dir (relative paths resolve here)
 crew config [path|edit]                print merged config / its path / open in $EDITOR
 crew pull <url>                        fetch config.json from a URL, install it (backs up current)
@@ -412,7 +448,8 @@ Because `config.json` never contains machine-specific data, it's directly commit
 
 1. Keep `projects`/`guards` on relative paths (`crew dir` + `crew add`/`edit` do this).
 2. Commit `config.json` (in a repo, or `git init` inside `~/.config/crew`). **Gitignore
-   `local.json`** (and `workspaces/`, `sessions/`, `tmp/`) — those are machine-local/generated.
+   `local.json`** (and `workspaces/`, `sessions/`, `tmp/`) — those are machine-local/generated,
+   and `local.json` may hold `overrides` secrets (dev API keys), so it must never be committed.
 3. A teammate installs it — clone/symlink to `~/.config/crew/config.json`, or fetch it
    straight from the repo with `crew pull <raw-url>` (backs up any current config; a private
    repo needs a token/PAT in the URL). Then `crew dir <their-path>` once and everything

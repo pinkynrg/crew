@@ -52,7 +52,21 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   (projects/guards, relative paths) is directly committable; a legacy `projectsDir`
   in `config.json` auto-migrates to `local.json` on load. `local.json` reads from beside
   the resolved config (works with `--config`); gitignore it when committing. `local.json`
-  also holds `lastSelection` (the remembered picker selection).
+  also holds `lastSelection` (the remembered picker selection) and `overrides` (below).
+- `overrides` (machine-local — in `local.json`, so secrets/personal values never touch the
+  shared `config.json`): extra env vars upserted into a project's **wired** env file (the one
+  crew materializes for `{envfile}`; a project without `{envfile}` can't be overridden).
+  `overrides["<project>"] = {VAR:val}` — a flat, one-level table applied to `<project>`'s wired
+  env whenever crew starts it (crew builds a wired env only for started projects, so there's no
+  cross-project trigger — an override only ever matters when its project runs). Use it for a var
+  that must change locally: a Temporal queue name so the local worker consumes `foo-local` not
+  shared `foo`, or the dev API key the local dependency accepts. Applied by
+  `overrideVarsFor`/`applyEnvOverrides` in `wireRun`, after `wireText`; overrides beat the base
+  file and the URL swap. Upsert = replace an existing `VAR=`/`export VAR=` line in place, else
+  append; values quoted only when unsafe (non-string values skipped with a warning). Also the
+  escape hatch for cross-env wiring (run everything at `pre`, inject the `pre` key the env
+  lacks) instead of pinning via `envMap`. crew stays agnostic — a plain per-project table.
+  Managed via the `crew overrides` command (list/set/remove, select-driven; writes `local.json`).
 - No groups, no `run` command. `start`/`install`/`workspace`/`claude` act on a **selection**
   chosen via an interactive multiselect (`selectMembers`, preselected with `lastSelection`);
   projects are never named on the CLI (bare CLI tokens are ignored with a warning; only
