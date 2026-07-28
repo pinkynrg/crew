@@ -313,6 +313,17 @@ an existing window for that workspace instead of duplicating it.
 `code --add`s the rest as an in-memory Untitled Workspace (attaches to the last active
 instance; less deterministic).
 
+**Workspace settings.** A top-level `workspaceSettings` object in the config is written
+verbatim into the generated `.code-workspace`'s `settings`. Use it to tame extensions that
+misbehave across a multi-root window — e.g. stop the Jest extension from auto-running (and
+spamming terminals) in every folder:
+
+```json
+{ "workspaceSettings": { "jest.enable": false } }
+```
+
+crew injects nothing by default.
+
 ## Claude sessions (stable history)
 
 Claude Code stores its per-directory history under `~/.claude/projects/<cwd-slug>/`, keyed

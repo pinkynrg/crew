@@ -69,6 +69,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   aborts. `--skip-guards` bypasses. Only `start`/`install` gate on them. Managed via
   the `crew guards` command (list/add/remove/link/unlink, all select-driven). The v1
   `checks` key auto-migrates to `guards` on load.
+- `workspaceSettings` (optional top-level object): written verbatim into the generated
+  `.code-workspace` `settings` (e.g. `{"jest.enable": false}` to stop the Jest extension
+  auto-running per folder). crew injects nothing by default.
 - Two execution modes by `config.longRunning`: long-running (streamed, first exit or
   Ctrl-C tears the whole group down) vs run-to-completion (wait all, no kill-others,
   pass/fail summary, non-zero if any failed).

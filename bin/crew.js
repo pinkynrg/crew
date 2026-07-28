@@ -965,7 +965,11 @@ async function cmdWorkspace(flags, rest) {
 
   const wsDir = join(crewHomeFor(userPath), 'workspaces');
   const wsFile = join(wsDir, `${selectionLabel(members)}.code-workspace`);
-  const wsJson = { folders: dirs.map((p) => ({ path: p })), settings: {} };
+  // Workspace-level VSCode settings from config (e.g. quiet the Jest extension's per-folder
+  // auto-run: { "jest.enable": false } or { "jest.runMode": "on-demand" }). crew injects
+  // nothing by default — fully agnostic.
+  const settings = cfg.workspaceSettings && typeof cfg.workspaceSettings === 'object' ? cfg.workspaceSettings : {};
+  const wsJson = { folders: dirs.map((p) => ({ path: p })), settings };
 
   if (flags.dryRun) {
     console.log(`# workspace file: ${wsFile}`);
