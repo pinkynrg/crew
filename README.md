@@ -257,16 +257,20 @@ without running.
 
 A project can require named **guards** — preconditions verified before `crew start`/`install`
 does anything. crew stays agnostic: a guard is just a shell command, and it **passes iff
-it exits 0**. Guards live in a top-level registry and attach to projects many-to-many:
+it exits 0**. Each guard carries a required `comment` explaining what it verifies (printed
+in faint gray beside its result), a `command`, and a failure `message`. Guards live in a
+top-level registry and attach to projects many-to-many:
 
 ```json
 {
   "guards": {
     "aws": {
+      "comment": "AWS SSO token still valid for the app's credential resolution.",
       "command": "aws sts get-caller-identity --profile pre_bee >/dev/null 2>&1",
       "message": "AWS SSO expired — run: aws sso login --profile pre_bee"
     },
     "vpn": {
+      "comment": "VPN connected: an interface holds a corp-subnet address.",
       "command": "ifconfig | grep -qE 'inet (10\\.11\\.12\\.|172\\.27\\.)'",
       "message": "VPN not connected."
     }
@@ -284,11 +288,14 @@ any fails, crew prints each failure's `message` in red and **aborts before anyth
 starts**:
 
 ```
-guards: aws, vpn
-  ✓ aws
-  ✗ vpn: VPN not connected.
+guards:
+  ✓ aws  AWS SSO token still valid for the app's credential resolution.
+  ✗ vpn  VPN connected: an interface holds a corp-subnet address.
+      VPN not connected.
 crew: guard failed — nothing started.
 ```
+
+(The faint gray line is each guard's `comment`; the red line under a `✗` is its `message`.)
 
 Bypass with `--skip-guards`. Guards only gate `start`/`install` — `workspace` and
 `claude` don't run them.
@@ -299,7 +306,7 @@ All wizard/select-driven — no hand-editing:
 
 ```
 crew guards [project]    list guards (all, or just a project's), with which projects use each
-crew guards add          wizard: name + command + failure message, then attach to projects
+crew guards add          wizard: name + comment + command + failure message, then attach to projects
 crew guards remove       pick a guard to delete (also detaches it from every project)
 crew guards link         pick a guard, then toggle which projects use it (multi-select)
 crew guards unlink       pick a guard, then pick linked projects to detach

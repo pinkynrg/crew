@@ -54,6 +54,8 @@ function fgRGB(r, g, b) {
   const code = TRUECOLOR ? `38;2;${r};${g};${b}` : `38;5;${rgbTo256(r, g, b)}`;
   return (s) => `\x1b[${code}m${s}\x1b[0m`;
 }
+// A subdued gray for low-priority annotations (guard descriptions, etc.) — darker than c.dim.
+const faint = fgRGB(110, 110, 110);
 function hslToRgb(h, s, l) {
   const a = s * Math.min(l, 1 - l);
   const f = (n) => {
@@ -808,7 +810,7 @@ async function runGuards(cfg, members) {
   if (undef.length)
     fail(`undefined guard(s): ${undef.join(', ')}. Define them with: crew guards add`);
 
-  console.log(c.dim(`guards: ${names.join(', ')}`));
+  console.log(c.dim('guards:'));
   const results = await Promise.all(
     names.map(
       (n) =>
@@ -821,11 +823,13 @@ async function runGuards(cfg, members) {
   );
   let failed = false;
   for (const r of results) {
+    const note = registry[r.n].comment ? '  ' + faint(registry[r.n].comment) : '';
     if (r.ok) {
-      console.log(`  ${c.green('✓')} ${r.n}`);
+      console.log(`  ${c.green('✓')} ${r.n}${note}`);
     } else {
       failed = true;
-      console.log(`  ${c.red('✗')} ${r.n}: ${c.red(registry[r.n].message || 'guard failed')}`);
+      console.log(`  ${c.red('✗')} ${r.n}${note}`);
+      console.log(`      ${c.red(registry[r.n].message || 'guard failed')}`);
     }
   }
   if (failed) fail(`${results.filter((r) => !r.ok).length > 1 ? 'guards' : 'guard'} failed — nothing started.`);
@@ -1510,6 +1514,7 @@ async function cmdGuards(flags, sub, rest) {
 function printGuard(reg, n) {
   const g = reg[n] || {};
   console.log(`  ${c.cyan(n)}`);
+  if (g.comment) console.log(`      ${c.dim('comment')}  ${faint(g.comment)}`);
   console.log(`      ${c.dim('command')}  ${g.command || c.dim('(none)')}`);
   if (g.message) console.log(`      ${c.dim('message')}  ${g.message}`);
 }
@@ -1539,11 +1544,13 @@ async function guardAdd(flags, cfg, path, p) {
   const name = (await p.ask('Guard name', '')).trim();
   if (!name) fail('guards: a name is required');
   if (cfg.guards && cfg.guards[name]) fail(`guard '${name}' already exists`);
+  const comment = (await p.ask('What does this check verify? (shown dim at run start)', '')).trim();
+  if (!comment) fail('guards: a comment is required — it explains what the check verifies');
   const command = (await p.ask('Check command (exit 0 = pass)', '')).trim();
   if (!command) fail('guards: a command is required');
   const message = (await p.ask('Failure message', '')).trim();
   cfg.guards = cfg.guards || {};
-  cfg.guards[name] = message ? { command, message } : { command };
+  cfg.guards[name] = message ? { comment, command, message } : { comment, command };
   // Optionally attach to projects right away.
   const projNames = Object.keys(cfg.projects || {});
   if (projNames.length) {

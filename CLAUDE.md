@@ -69,10 +69,11 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   collisions (`api.getbee.io` never matches `rge-api.getbee.io`). `crew graph` derives edges
   from `.envs/*` URLs; `crew start` warns when a co-running selection isn't connected.
 - Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip.
-- `guards`: top-level `guards: {name: {command, message}}` registry; a project lists names
-  in `project.guards` (many-to-many). Before a run, the target's guards are deduped by
-  name, run once each in parallel (pass = exit 0); any failure prints its message and
-  aborts. `--skip-guards` bypasses. Only `start`/`install` gate on them. Managed via
+- `guards`: top-level `guards: {name: {comment, command, message}}` registry; a project lists
+  names in `project.guards` (many-to-many). `comment` is required and states what the check
+  verifies — it's printed in faint gray beside each result when guards run. Before a run, the
+  target's guards are deduped by name, run once each in parallel (pass = exit 0); any failure
+  prints its message and aborts. `--skip-guards` bypasses. Only `start`/`install` gate on them. Managed via
   the `crew guards` command (list/add/remove/link/unlink, all select-driven). The v1
   `checks` key auto-migrates to `guards` on load.
 - `workspaceSettings` (optional top-level object): written verbatim into the generated
