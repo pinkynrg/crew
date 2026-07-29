@@ -809,23 +809,30 @@ export function menu({ title, items, label, multi = false, start = 0, preselecte
     out.write(`${title}${c.dim(hint)}\n`);
     out.write('\x1b[?25l'); // hide cursor
 
-    let prevLines = 0; // lines drawn last render (items + footer), for cursor rewind
+    // Count SCREEN rows, not logical lines: a long line (e.g. the connectivity footer) wraps to
+    // several rows, and the cursor-rewind must match or the redraw drifts and duplicates lines.
+    const cols = () => process.stdout.columns || 80;
+    const rowsOf = (s) => Math.max(1, Math.ceil(s.replace(/\x1b\[[0-9;]*m/g, '').length / cols()));
+    let prevLines = 0; // screen rows drawn last render (items + footer), for cursor rewind
     const render = (first) => {
       if (!first) {
         out.write(`\x1b[${prevLines}A`); // back to the top of the block
         out.write('\x1b[0J'); // erase it (items + any stale footer)
       }
       let lines = 0;
+      const put = (s) => {
+        out.write(s + '\n');
+        lines += rowsOf(s);
+      };
       items.forEach((it, i) => {
         const cursor = i === idx;
         const ptr = cursor ? c.cyan('❯ ') : '  ';
         const box = multi ? (checked.has(it) ? c.green('◉ ') : '◯ ') : '';
-        out.write(`${ptr}${box}${label(it, cursor)}\n`);
-        lines++;
+        put(`${ptr}${box}${label(it, cursor)}`);
       });
       if (footer) {
         const f = footer(multi ? order : items[idx]);
-        if (f) for (const fl of f.split('\n')) (out.write(fl + '\n'), lines++);
+        if (f) for (const fl of f.split('\n')) put(fl);
       }
       prevLines = lines;
     };
