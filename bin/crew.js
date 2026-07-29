@@ -983,6 +983,10 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
     const timers = [];
     let aborting = false;
     let firstSigintAt = 0;
+    let stopRequested = false; // the user asked to quit (vs processes exiting on their own)
+    let allStopped = false; // every process has exited but the viewer is held open to review
+    let settled = false; // settle() runs once
+    let viewerRepaint = () => {}; // set by the interactive viewer so finish() can refresh its footer
 
     let menuOpen = false; // reentrancy guard for the key handler
     let detachKeys = () => {};
@@ -1074,6 +1078,8 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
     // second within the window force-kills). Shared by the OS SIGINT and the interactive key,
     // since raw mode (the filter UI) swallows the signal so Ctrl-C must be handled by hand.
     const requestStop = () => {
+      stopRequested = true;
+      if (live.size === 0) return settle(); // nothing running (or all already exited) -> leave now
       const now = Date.now();
       if (!firstSigintAt) {
         firstSigintAt = now;
@@ -1097,6 +1103,8 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
     process.stdout.on('error', onStdoutErr);
 
     const settle = () => {
+      if (settled) return;
+      settled = true;
       detachKeys(); // leave the alternate screen + restore raw mode before we resolve
       for (const [sig, h] of handlers) process.removeListener(sig, h);
       process.stdout.removeListener('error', onStdoutErr);
@@ -1116,9 +1124,17 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       if (!live.has(proc)) return; // 'error' and 'close' can both fire — settle once
       live.delete(proc);
       results.push({ name: proc._name, index: proc._index, exitCode });
-      if (announceExits) note(proc, c.dim(`exited (${exitCode})`));
+      if (announceExits) note(proc, (exitCode ? c.red : c.dim)(`exited (${exitCode})`));
       if (killOthers && !aborting && live.size) tearDown('SIGTERM');
-      if (live.size === 0) settle();
+      if (live.size === 0) {
+        // If processes exited on their OWN (crash / boot failure) and the user hasn't asked to
+        // quit, hold the interactive viewer open so the error stays on screen — they read it, then
+        // press q/Esc to leave. Otherwise (piped, or a user-requested stop) settle immediately.
+        if (interactive && !stopRequested) {
+          allStopped = true;
+          viewerRepaint();
+        } else settle();
+      }
     };
 
     for (let i = 0; i < commands.length; i++) {
@@ -1247,6 +1263,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       };
       const footerText = () => {
         if (searching) return c.dim('search: ') + query + c.cyan('▌') + c.dim('   (Enter apply · Esc clear)');
+        if (allStopped) return c.red('■ all processes exited') + c.dim(' — scroll to review · [/] search · [q/esc] exit');
         const pos = scroll > 0 ? c.yellow(`  ↑${scroll}`) : '';
         // Count goes RED when anything is hidden, so a suppressed project/guard is always obvious.
         const nShown = `${shown.size}/${names.length}`;
@@ -1271,6 +1288,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
         rawWrite(buf);
         dirty = false;
       };
+      viewerRepaint = paint; // let finish() refresh the footer when all processes exit
       const scrollBy = (d) => {
         const H = Math.max(1, rows() - 1);
         const maxScroll = Math.max(0, screenRows().length - H);
