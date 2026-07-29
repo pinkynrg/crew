@@ -404,6 +404,33 @@ export function saveLastSelection(flags, names) {
   }
 }
 
+// Log-viewer filter memory: we persist the HIDDEN names (global, machine-local), not the shown
+// ones — so a project/guard absent from a later run is simply ignored and anything NEW defaults
+// to visible (saving "shown" would silently hide new entries).
+export function loadHiddenLog(flags) {
+  const h = loadMachine(flags).hiddenLog;
+  return Array.isArray(h) ? h : [];
+}
+export function saveHiddenLog(flags, names) {
+  try {
+    writeMachine(flags, { ...loadMachine(flags), hiddenLog: names });
+  } catch {
+    /* read-only fs — preference just won't persist */
+  }
+}
+// Log-viewer wrap/cut preference (global, machine-local). Default: wrap.
+export function loadLogWrap(flags) {
+  const w = loadMachine(flags).logWrap;
+  return typeof w === 'boolean' ? w : true;
+}
+export function saveLogWrap(flags, wrap) {
+  try {
+    writeMachine(flags, { ...loadMachine(flags), logWrap: wrap });
+  } catch {
+    /* read-only fs — preference just won't persist */
+  }
+}
+
 export const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 
 // ---------------------------------------------------------------------------
@@ -765,7 +792,7 @@ export function canInteractive() {
 // Up/Down (or k/j) move; Space toggles (multi); Enter confirms.
 // `footer(selection)` (optional) returns a live status block redrawn on every keypress —
 // `selection` is the checked items (multi) or the highlighted item. May be multi-line.
-export function menu({ title, items, label, multi = false, start = 0, preselected = [], footer = null }) {
+export function menu({ title, items, label, multi = false, start = 0, preselected = [], footer = null, erase = false }) {
   return new Promise((resolve) => {
     const stdin = process.stdin;
     const out = process.stdout;
@@ -805,6 +832,8 @@ export function menu({ title, items, label, multi = false, start = 0, preselecte
     render(true);
 
     const cleanup = () => {
+      // `erase`: wipe the whole block (title + items + footer) so it leaves no scrollback trace.
+      if (erase) out.write(`\x1b[${prevLines + 1}A\x1b[0J`);
       out.write('\x1b[?25h'); // show cursor
       stdin.removeListener('keypress', onKey);
       if (stdin.setRawMode) stdin.setRawMode(wasRaw);
@@ -946,7 +975,7 @@ const KILL_GRACE_MS = Number(process.env.CREW_KILL_GRACE_MS) || 5000;
 // gunicorn-style children). Within the window, extra Ctrl-C is ignored with a nudge.
 const SIGINT_FORCE_AFTER_MS = Number(process.env.CREW_FORCE_AFTER_MS) || 10000;
 
-export function runFanout(commands, { killOthers, announceExits, interactive = false }) {
+export function runFanout(commands, { killOthers, announceExits, interactive = false, guardSeed = [], hidden = [], saveHidden = () => {}, logWrap = true, saveWrap = () => {} }) {
   return new Promise((resolve) => {
     const results = [];
     const live = new Set();
@@ -1115,63 +1144,171 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       child.on('close', (code, signal) => finish(child, code ?? signal));
     }
 
-    // Interactive log viewer (streamed mode on a TTY): an alternate-screen view showing only the
-    // selected projects' recent lines. `f` opens the picker to choose them (hide all -> blank
-    // screen); Ctrl-C/q stop. Raw mode swallows SIGINT, so keys route through requestStop().
-    // A footer is pinned to the bottom row via a DECSTBM scroll region so live logs scroll above
-    // it. No-op when piped/CI (viewer stays null, output streams with prefixes).
+    // Interactive log viewer (streamed mode on a TTY): a full-screen pager on the alternate
+    // screen showing the SELECTED projects' history, scrollable (keyboard + mouse wheel) with a
+    // wrap/cut toggle and a pinned footer. Mouse is captured (SGR) so the wheel scrolls OUR
+    // viewport, not the shell — so during the run you only ever see logs. On exit we leave the
+    // alternate screen and dump the full history to the terminal, so the logs persist in
+    // scrollback. Keys route through requestStop() since raw mode swallows SIGINT. No-op when
+    // piped/CI (viewer stays null; output streams with prefixes).
     if (interactive && live.size) {
       const stdin = process.stdin;
-      emitKeypressEvents(stdin);
       const wasRaw = stdin.isRaw;
       if (stdin.setRawMode) stdin.setRawMode(true);
       stdin.resume();
-      const names = commands.map((cmd) => cmd.name);
-      const history = []; // { proc, text } complete lines (capped)
+      // Guards appear as pseudo-projects (`[vpn]`/`[aws]`) — filterable rows seeded at the top of
+      // the history. Their names join the project names in the filter list + hidden memory.
+      const guardProcs = new Map(guardSeed.map((g) => [g.name, { _name: g.name, _color: (s) => c.gray(s) }]));
+      const names = [...commands.map((cmd) => cmd.name), ...guardSeed.map((g) => g.name)];
+      const history = []; // { proc, text } complete lines (capped at LOG_HISTORY)
       const pending = new Map(); // proc -> partial line not yet terminated
-      const shown = new Set(names); // projects currently visible
-      let active = true; // false while the picker owns the screen
+      const shown = new Set(names.filter((n) => !hidden.includes(n))); // persisted hidden applied
+      for (const g of guardSeed) history.push({ proc: guardProcs.get(g.name), text: `${c.green('✓')} ${g.comment || 'passed'}` });
+      let wrap = logWrap; // wrap long lines vs cut them to one row (persisted preference)
+      let scroll = 0; // screen-rows scrolled up from the live bottom (0 = follow tail)
+      let active = true; // false while the filter picker owns the screen
+      let dirty = false;
+      let searching = false; // true while typing a search query
+      let query = ''; // active substring filter over rows ('' = off)
+
+      // Uniform prefix width: pad every `[name]` to the longest name so the log text columns line
+      // up. Uses the proc's own color (guards are gray). Viewer-only; the piped path keeps `_prefix`.
+      const maxName = Math.max(0, ...names.map((n) => n.length));
+      const fillW = maxName + 2; // width inside [ ]; the longest name still gets a 1-dot leader
+      // `[name ····]` — name in its color, a dim dot leader to the aligned `]`, log right after.
+      const prefixFor = (proc) => {
+        const color = proc._color || ((s) => s);
+        const dots = '·'.repeat(Math.max(1, fillW - proc._name.length - 1));
+        return color(`[${proc._name} `) + c.dim(dots) + color(']') + ' ';
+      };
+      // A history row is visible when its project is shown AND (no search, or it matches).
+      const matches = (proc, text) =>
+        shown.has(proc._name) && (!query || `${proc._name} ${text}`.replace(ESC, '').toLowerCase().includes(query.toLowerCase()));
 
       const rows = () => process.stdout.rows || 24;
-      const footerText = () => c.dim(`crew: [f] filter logs   [Ctrl-C] stop   (${shown.size}/${names.length} shown)`);
-      const drawFooter = () => {
-        const r = rows();
-        rawWrite(`\x1b7\x1b[${r};1H\x1b[2K${footerText()}\x1b8`); // save cursor, draw, restore
+      const cols = () => process.stdout.columns || 80;
+      const ESC = /\x1b\[[0-9;]*m/g;
+      // ANSI-aware line wrap: split into rows of <= w VISIBLE columns, carrying SGR codes verbatim
+      // (so colors survive) and never counting them toward width.
+      const splitRows = (s, w) => {
+        const out = [];
+        let cur = '';
+        let vis = 0;
+        let i = 0;
+        while (i < s.length) {
+          if (s[i] === '\x1b') {
+            const m = /^\x1b\[[0-9;]*m/.exec(s.slice(i));
+            if (m) {
+              cur += m[0];
+              i += m[0].length;
+              continue;
+            }
+          }
+          cur += s[i++];
+          if (++vis === w) {
+            out.push(cur);
+            cur = '';
+            vis = 0;
+          }
+        }
+        if (cur !== '' || out.length === 0) out.push(cur);
+        return out;
       };
-      const repaint = () => {
+      const cutRow = (s, w) => {
+        let out = '';
+        let vis = 0;
+        let i = 0;
+        while (i < s.length && vis < w) {
+          if (s[i] === '\x1b') {
+            const m = /^\x1b\[[0-9;]*m/.exec(s.slice(i));
+            if (m) {
+              out += m[0];
+              i += m[0].length;
+              continue;
+            }
+          }
+          out += s[i++];
+          vis++;
+        }
+        return out;
+      };
+      // Flatten the filtered history into screen rows (each <= terminal width).
+      const screenRows = () => {
+        const w = cols();
+        const out = [];
+        for (const h of history) {
+          if (!matches(h.proc, h.text)) continue;
+          const line = prefixFor(h.proc) + h.text;
+          if (wrap) for (const rr of splitRows(line, w)) out.push(rr);
+          else out.push(cutRow(line, w));
+        }
+        return out;
+      };
+      const footerText = () => {
+        if (searching) return c.dim('search: ') + query + c.cyan('▌') + c.dim('   (Enter apply · Esc clear)');
+        const pos = scroll > 0 ? c.yellow(`  ↑${scroll}`) : '';
+        // Count goes RED when anything is hidden, so a suppressed project/guard is always obvious.
+        const nShown = `${shown.size}/${names.length}`;
+        const count = shown.size < names.length ? c.red(nShown) : c.dim(nShown);
+        const q = query ? c.cyan(`  /${query}`) : '';
+        return c.dim('crew: [f] filter (') + count + c.dim(`)  [/] search  [w] ${wrap ? 'cut' : 'wrap'}  [q/esc] stop`) + q + pos;
+      };
+      // Full repaint: body rows painted by absolute position (so scroll is exact), footer on the
+      // last row. One batched write to minimize flicker; cursor hidden.
+      const paint = () => {
         const r = rows();
-        rawWrite('\x1b[r\x1b[2J\x1b[H'); // release region, clear, home
-        if (r >= 3) rawWrite(`\x1b[1;${r - 1}r\x1b[H`); // body = rows 1..R-1, cursor home
-        lastWrite.proc = null;
-        lastWrite.char = '\n';
-        const body = history.filter((h) => shown.has(h.proc._name)).slice(-(r - 1));
-        for (const h of body) render(h.proc, h.text + '\n');
-        drawFooter();
+        const H = Math.max(1, r - 1);
+        const all = screenRows();
+        const maxScroll = Math.max(0, all.length - H);
+        if (scroll > maxScroll) scroll = maxScroll;
+        const endExcl = all.length - scroll;
+        const start = Math.max(0, endExcl - H);
+        const win = all.slice(start, endExcl);
+        let buf = '\x1b[?25l';
+        for (let i = 0; i < H; i++) buf += `\x1b[${i + 1};1H\x1b[2K` + (i < win.length ? win[i] : '');
+        buf += `\x1b[${r};1H\x1b[2K` + footerText();
+        rawWrite(buf);
+        dirty = false;
+      };
+      const scrollBy = (d) => {
+        const H = Math.max(1, rows() - 1);
+        const maxScroll = Math.max(0, screenRows().length - H);
+        scroll = Math.min(maxScroll, Math.max(0, scroll + d));
+        paint();
       };
 
       viewer = {
         feed(proc, text) {
           const parts = ((pending.get(proc) || '') + text).split('\n');
           pending.set(proc, parts.pop()); // trailing element is the incomplete remainder
+          let added = 0;
           for (const line of parts) {
             history.push({ proc, text: line });
             if (history.length > LOG_HISTORY) history.shift();
-            if (active && shown.has(proc._name)) render(proc, line + '\n'); // scrolls above footer
+            if (matches(proc, line)) added += wrap ? splitRows(prefixFor(proc) + line, cols()).length : 1;
           }
+          if (!active || !added) return;
+          if (scroll > 0) scroll += added; // hold position when scrolled up into history
+          dirty = true; // throttled repaint follows the tail
         },
       };
+      const tick = setInterval(() => {
+        if (dirty && active && !menuOpen) paint();
+      }, 60);
+      if (tick.unref) tick.unref();
 
-      let onKey;
+      let onData;
       const openFilter = async () => {
         if (menuOpen || !live.size) return;
         menuOpen = true;
         active = false; // capture to history only; let the picker own the screen
-        stdin.removeListener('keypress', onKey);
-        rawWrite('\x1b[r\x1b[2J\x1b[H'); // release region + clear for the menu
+        stdin.removeListener('data', onData);
+        rawWrite('\x1b[?1000l\x1b[?1006l'); // disable mouse for the menu
+        rawWrite('\x1b[2J\x1b[H\x1b[?25h'); // clear + show cursor for the menu
         let sel = null;
         try {
           sel = await menu({
-            title: 'Show logs for (Space toggles, Enter applies; select none = blank screen)',
+            title: 'Show logs for (Space toggles, Enter applies)',
             items: names,
             label: (o, cur) => (cur ? c.bold(o) : o),
             multi: true,
@@ -1183,37 +1320,100 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
         if (Array.isArray(sel)) {
           shown.clear();
           for (const n of sel) shown.add(n);
+          saveHidden(names.filter((n) => !shown.has(n))); // remember the hidden set globally
         }
-        // menu() pauses stdin + may drop raw mode on close — re-assert both or keys go dead.
+        // menu() pauses stdin + may drop raw mode on close — re-assert or the keys go dead.
         if (stdin.setRawMode) stdin.setRawMode(true);
         stdin.resume();
+        rawWrite('\x1b[?1000h\x1b[?1006h'); // re-enable mouse
+        scroll = 0;
         active = true;
         menuOpen = false;
-        repaint(); // draw the filtered view (blank if nothing selected)
-        if (live.size) stdin.on('keypress', onKey);
+        stdin.on('data', onData);
+        paint();
       };
-      onKey = (str, key) => {
+      onData = (b) => {
         if (menuOpen) return;
-        if (key && key.ctrl && key.name === 'c') return requestStop();
-        if (key && key.name === 'q') return requestStop();
-        if (key && key.name === 'f') return void openFilter();
+        const s = b.toString('utf8');
+        // Search-input mode: type a substring; Enter applies, Esc clears. Ctrl-C still stops.
+        if (searching) {
+          if (s === '\x03') return requestStop();
+          if (s === '\r' || s === '\n') {
+            searching = false;
+            scroll = 0;
+            return paint();
+          }
+          if (s === '\x1b') {
+            searching = false;
+            query = '';
+            scroll = 0;
+            return paint();
+          }
+          if (s === '\x7f' || s === '\b') {
+            query = query.slice(0, -1);
+            return paint();
+          }
+          if (s.length === 1 && s >= ' ') {
+            query += s;
+            scroll = 0;
+            return paint();
+          }
+          return; // ignore escape sequences (arrows, etc.) while typing
+        }
+        // Mouse wheel (SGR: ESC [ < btn ; x ; y M|m): 64 = wheel up, 65 = wheel down.
+        let mouse = false;
+        for (const m of s.matchAll(/\x1b\[<(\d+);\d+;\d+[Mm]/g)) {
+          const btn = Number(m[1]);
+          if (btn === 64) (scrollBy(3), (mouse = true));
+          else if (btn === 65) (scrollBy(-3), (mouse = true));
+        }
+        if (mouse) return;
+        // Quit on q, Ctrl-C, or a bare ESC. (Arrow/PgUp keys are longer sequences like `\x1b[A`,
+        // so `s === '\x1b'` matches only a lone Escape.) In search mode ESC clears instead (above).
+        if (s === '\x03' || s === 'q' || s === '\x1b') return requestStop();
+        if (s === '/') {
+          searching = true;
+          return paint();
+        }
+        if (s === 'f') return void openFilter();
+        if (s === 'w') {
+          wrap = !wrap;
+          scroll = 0;
+          saveWrap(wrap); // remember wrap/cut across runs
+          return paint();
+        }
+        if (s === '\x1b[A' || s === 'k') return scrollBy(1); // up = older
+        if (s === '\x1b[B' || s === 'j') return scrollBy(-1); // down = newer
+        if (s === '\x1b[5~') return scrollBy(rows() - 1); // PgUp
+        if (s === '\x1b[6~') return scrollBy(-(rows() - 1)); // PgDn
+        if (s === 'g') {
+          scroll = Number.MAX_SAFE_INTEGER;
+          return scrollBy(0); // jump to oldest (clamped)
+        }
+        if (s === 'G') {
+          scroll = 0;
+          return paint(); // jump to live tail
+        }
       };
       const onResize = () => {
-        if (!menuOpen) repaint();
+        if (!menuOpen) paint();
       };
-      stdin.on('keypress', onKey);
+      stdin.on('data', onData);
       process.stdout.on('resize', onResize);
       detachKeys = () => {
-        viewer = null; // stop capturing; final output (if any) streams normally
-        stdin.removeListener('keypress', onKey);
+        clearInterval(tick);
+        viewer = null; // stop capturing
+        stdin.removeListener('data', onData);
         process.stdout.removeListener('resize', onResize);
-        rawWrite('\x1b[r'); // reset scroll region
-        rawWrite('\x1b[?1049l'); // leave the alternate screen -> restore the original
+        rawWrite('\x1b[?1000l\x1b[?1006l\x1b[?25h'); // disable mouse, show cursor
+        rawWrite('\x1b[?1049l'); // leave the alternate screen -> restore the terminal as it was
         if (stdin.setRawMode) stdin.setRawMode(wasRaw);
         stdin.pause();
+        // No history dump: leaving the alternate screen restores the terminal to before the run
+        // (the `crew start …` command + prompt), rather than flooding it with the log tail.
       };
-      rawWrite('\x1b[?1049h'); // enter the alternate screen
-      repaint();
+      rawWrite('\x1b[?1049h\x1b[?1000h\x1b[?1006h'); // enter the alternate screen + enable mouse
+      paint();
     }
 
     if (live.size === 0) settle();
@@ -1226,7 +1426,10 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
 // a guard shared by several projects runs once. Any failure prints its message and aborts
 // before anything starts. Bypass with --skip-guards.
 // ---------------------------------------------------------------------------
-export async function runGuards(cfg, members) {
+// Runs the target's guards (deduped). Any failure prints + aborts. On success returns
+// [{ name, comment }] so the caller can seed them into the log viewer. `quiet` suppresses the
+// success print (the viewer will show the guards instead); failures always print.
+export async function runGuards(cfg, members, { quiet = false } = {}) {
   const registry = cfg.guards || {};
   const names = [];
   const seen = new Set();
@@ -1236,13 +1439,12 @@ export async function runGuards(cfg, members) {
         seen.add(gn);
         names.push(gn);
       }
-  if (!names.length) return;
+  if (!names.length) return [];
 
   const undef = names.filter((n) => !registry[n] || !registry[n].command);
   if (undef.length)
     fail(`undefined guard(s): ${undef.join(', ')}. Define them with: crew guards add`);
 
-  console.log(c.dim('guards:'));
   const results = await Promise.all(
     names.map(
       (n) =>
@@ -1253,18 +1455,24 @@ export async function runGuards(cfg, members) {
         })
     )
   );
-  let failed = false;
-  for (const r of results) {
-    const note = registry[r.n].comment ? '  ' + faint(registry[r.n].comment) : '';
-    if (r.ok) {
-      console.log(`  ${c.green('✓')} ${r.n}${note}`);
-    } else {
-      failed = true;
-      console.log(`  ${c.red('✗')} ${r.n}${note}`);
-      console.log(`      ${c.red(registry[r.n].message || 'guard failed')}`);
+  const failed = results.filter((r) => !r.ok);
+  if (failed.length) {
+    console.log(c.dim('guards:'));
+    for (const r of results) {
+      const note = registry[r.n].comment ? '  ' + faint(registry[r.n].comment) : '';
+      if (r.ok) console.log(`  ${c.green('✓')} ${r.n}${note}`);
+      else {
+        console.log(`  ${c.red('✗')} ${r.n}${note}`);
+        console.log(`      ${c.red(registry[r.n].message || 'guard failed')}`);
+      }
     }
+    fail(`${failed.length > 1 ? 'guards' : 'guard'} failed — nothing started.`);
   }
-  if (failed) fail(`${results.filter((r) => !r.ok).length > 1 ? 'guards' : 'guard'} failed — nothing started.`);
+  if (!quiet) {
+    console.log(c.dim('guards:'));
+    for (const r of results) console.log(`  ${c.green('✓')} ${r.n}${registry[r.n].comment ? '  ' + faint(registry[r.n].comment) : ''}`);
+  }
+  return results.map((r) => ({ name: r.n, comment: registry[r.n].comment || '' }));
 }
 
 // Local service wiring: for each runnable whose command uses {envfile}, load its base env
@@ -1345,6 +1553,7 @@ export async function selectMembers(flags, cfg, opts = {}) {
     preselected: loadLastSelection(flags).filter((n) => cfg.projects[n]),
     label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)),
     footer: edges ? (sel) => connectivityStatus(cfg, edges, sel, true) : null,
+    erase: true, // don't leave the picker + its connectivity footer in scrollback
   });
   if (!picked || !picked.length) {
     console.log(c.dim('nothing selected'));
@@ -1371,14 +1580,6 @@ export async function cmdRun(flags, task, rest) {
   if (!members) return;
   validateMemberPaths(members);
 
-  // Restate the connectivity result once (the picker footer is erased on close; and the
-  // explicit-names path has no picker), so a disconnected run is visible in scrollback.
-  if (isLong) {
-    const edges = dependencyEdges(cfg, Object.entries(cfg.projects));
-    const w = connectivityStatus(cfg, edges, members.map((m) => m.name));
-    if (w) console.log(w);
-  }
-
   const { runnable, skipped } = resolveRun(cfg, task, members, args);
   for (const s of skipped) console.log(`skipping ${s} (no task '${task}')`);
 
@@ -1404,7 +1605,10 @@ export async function cmdRun(flags, task, rest) {
     return;
   }
 
-  if (!flags.skipGuards) await runGuards(cfg, runnable);
+  const interactive = isLong && process.stdin.isTTY && process.stdout.isTTY;
+  // Guards gate the run. On the interactive path stay quiet (the viewer shows them as rows,
+  // and its alternate screen would wipe a printed block anyway); elsewhere print the ✓ block.
+  const guardSeed = flags.skipGuards ? [] : await runGuards(cfg, runnable, { quiet: interactive });
 
   const paint = projectColors(cfg); // same per-project colors as `crew list`
   const commands = runnable.map((r, i) => ({
@@ -1415,9 +1619,18 @@ export async function cmdRun(flags, task, rest) {
 
   if (isLong) {
     // LONG-RUNNING: stream; the first exit (any) tears the whole group down; Ctrl-C too.
-    // On a TTY, enable the interactive filter/stop key layer (no-op when piped/CI).
-    const interactive = process.stdin.isTTY && process.stdout.isTTY;
-    const results = await runFanout(commands, { killOthers: true, announceExits: true, interactive });
+    // On a TTY, enable the interactive scrollable log viewer (no-op when piped/CI). Guards are
+    // seeded as [name] rows; the hidden-log filter is remembered globally in local.json.
+    const results = await runFanout(commands, {
+      killOthers: true,
+      announceExits: true,
+      interactive,
+      guardSeed,
+      hidden: loadHiddenLog(flags),
+      saveHidden: (h) => saveHiddenLog(flags, h),
+      logWrap: loadLogWrap(flags),
+      saveWrap: (w) => saveLogWrap(flags, w),
+    });
     cleanup(); // remove the wired temp env files
     process.exit(exitCodeFromEvents(results));
   } else {
