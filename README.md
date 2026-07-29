@@ -106,6 +106,7 @@ runs nothing.
     "api": {
       "path": "~/code/api",
       "type": "backend",
+      "defaultBranch": "main",
       "runner": "make {task}"
     },
     "web": {
@@ -131,6 +132,11 @@ runs nothing.
 Here `api` runs any task through `make {task}`, `web` through `npm run {task}`, `worker`
 has an explicit `tasks.start` override with an `{env}` placeholder, and `docs` is
 run-less (skipped for that task, kept for `workspace`/`claude`).
+
+`defaultBranch` (optional) records the branch new work is cut from — repos differ
+(`main`/`master`/`develop`/`trunk`). It's pure metadata: `crew list` shows it as a `branch`
+line and `crew add`/`edit` prefills it from the repo (`origin/HEAD`, else current branch);
+crew runs no git with it.
 
 ### Placeholders & args (strict)
 
@@ -282,12 +288,34 @@ crew guards [project]                  list/manage guards (add/remove/link/unlin
 crew overrides [set|remove]            list/set/remove per-project env overrides (local.json)
 crew dir [path]                        show/set the projects dir (relative paths resolve here)
 crew config [path|edit]                print merged config / its path / open in $EDITOR
+crew check                             validate config + local.json; list errors/warnings (alias: validate)
 crew pull <url>                        fetch config.json from a URL, install it (backs up current)
 ```
 
 Global flags: `--dry-run`, `--skip-guards`, `--config <path>`, `-y/--yes`, `-h/--help`,
 `-v/--version`. Every acting command supports `--dry-run` to print what it would do
 without running.
+
+### Validating the config
+
+`crew check` is a built-in, **zero-dependency** validator (no JSON-Schema library — crew has
+no runtime deps). It reads the merged config plus `local.json` and reports:
+
+- **errors** (exit 1) — wrong types, a missing `path`, a `local` that isn't an http(s) URL, a
+  project referencing an undefined guard, `{envfile}` used with no `env` field;
+- **warnings** (exit 0) — unknown keys, a `match` entry that looks like a glob or carries a
+  scheme/path (matching is exact-host only), `match` with no `local` (a wiring target nothing
+  can reach locally), a guard missing its `comment`, `overrides`/`lastSelection` pointing at an
+  unknown project, a path that doesn't exist on disk.
+
+```
+$ crew check
+Checking ~/.config/crew/config.json
+  ✓ no problems found
+```
+
+It's a good pre-commit / CI gate for a shared config: `crew check` exits non-zero only on
+errors, so warnings won't fail a pipeline.
 
 ## Guards
 

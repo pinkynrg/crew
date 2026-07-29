@@ -1083,6 +1083,7 @@ function cmdList(flags) {
     if (!p.runner && taskEntries.length === 0) console.log(`      ${c.dim('(run-less)')}`);
     if (p.guards && p.guards.length)
       console.log(`      ${c.dim('guards'.padEnd(labelW + 2))}${p.guards.join(', ')}`);
+    if (p.defaultBranch) console.log(`      ${c.dim('branch'.padEnd(labelW + 2))}${p.defaultBranch}`);
   }
 
   // --- Footer ---------------------------------------------------------------
@@ -1427,6 +1428,24 @@ const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 // Prompt for every project field, defaulting to `existing` (empty object when adding).
 // Text fields are inline-editable (prefilled with the current value — Enter keeps it, clear
 // to unset); type is a picked list. Any field the wizard doesn't manage is preserved.
+// Best-effort default branch (where new work is cut from): origin/HEAD if the repo knows it,
+// else the current branch. '' when git/repo unavailable. Used only to prefill the wizard.
+function detectDefaultBranch(dir) {
+  try {
+    const opts = { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
+    let r = spawnSync('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], opts);
+    let b = r.status === 0 ? r.stdout.trim() : '';
+    if (b.startsWith('origin/')) b = b.slice('origin/'.length);
+    if (!b) {
+      r = spawnSync('git', ['branch', '--show-current'], opts);
+      b = r.status === 0 ? r.stdout.trim() : '';
+    }
+    return b;
+  } catch {
+    return '';
+  }
+}
+
 // `guardNames` are the guard names defined in the config (offered as a multi-select).
 async function collectProject(p, existing, guardNames = []) {
   const path0 = await p.ask('Path', existing.path || '');
@@ -1457,6 +1476,9 @@ async function collectProject(p, existing, guardNames = []) {
   const matchStr = (await p.ask('Match host globs (space-separated), e.g. *api.example.com (empty = none)', (existing.match || []).join(' '))).trim();
   const match = matchStr ? matchStr.split(/\s+/) : [];
 
+  const detectedBranch = existing.defaultBranch || detectDefaultBranch(abs);
+  const defaultBranch = (await p.ask('Default branch — where new work starts (empty = none)', detectedBranch)).trim();
+
   let guards = existing.guards || [];
   if (guardNames.length) guards = await p.multiselect('Guards', guardNames, guards);
 
@@ -1467,6 +1489,7 @@ async function collectProject(p, existing, guardNames = []) {
   setOrDel('env', env, !!env);
   setOrDel('local', local, !!local);
   setOrDel('match', match, match.length > 0);
+  setOrDel('defaultBranch', defaultBranch, !!defaultBranch);
   setOrDel('tasks', tasks, Object.keys(tasks).length > 0);
   setOrDel('guards', guards, guards && guards.length > 0);
   return project;
@@ -1824,6 +1847,133 @@ async function overrideRemove(flags, p) {
   console.log(`\nRemoved ${choice === ALL ? `all overrides for ${proj}` : `${choice} from ${proj}`}`);
 }
 
+// ---------------------------------------------------------------------------
+// crew check — hand-rolled config validator (zero-dep, strict). Errors block (exit 1);
+// warnings are advisory. Validates the merged config + machine-local local.json.
+// ---------------------------------------------------------------------------
+const TOP_KEYS = new Set(['version', 'workspaceName', 'longRunning', 'workspaceSettings', 'internalDomains', 'projects', 'guards']);
+const PROJECT_KEYS = new Set(['path', 'type', 'runner', 'env', 'local', 'match', 'envMap', 'tasks', 'guards', 'defaultBranch']);
+const GUARD_KEYS = new Set(['comment', 'command', 'message']);
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isStrArr = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
+
+function cmdCheck(flags) {
+  const { cfg, userPath, localPath } = loadMerged(flags);
+  const errors = [];
+  const warns = [];
+  const E = (m) => errors.push(m);
+  const W = (m) => warns.push(m);
+
+  // Top level.
+  for (const k of Object.keys(cfg)) if (!TOP_KEYS.has(k)) W(`top-level: unknown key '${k}'`);
+  if (cfg.version != null && typeof cfg.version !== 'number') E(`version must be a number`);
+  if (cfg.workspaceName != null && typeof cfg.workspaceName !== 'string') E(`workspaceName must be a string`);
+  if (cfg.longRunning != null && !isStrArr(cfg.longRunning)) E(`longRunning must be an array of strings`);
+  if (cfg.workspaceSettings != null && !isObj(cfg.workspaceSettings)) E(`workspaceSettings must be an object`);
+  if (cfg.internalDomains != null && !isStrArr(cfg.internalDomains)) E(`internalDomains must be an array of strings`);
+  if (cfg.guards != null && !isObj(cfg.guards)) E(`guards must be an object`);
+  const guards = isObj(cfg.guards) ? cfg.guards : {};
+
+  // Projects.
+  if (!isObj(cfg.projects) || !Object.keys(cfg.projects).length) {
+    E(`projects: at least one project is required`);
+  } else {
+    for (const [name, p] of Object.entries(cfg.projects)) {
+      const at = `project '${name}'`;
+      if (!isObj(p)) {
+        E(`${at}: must be an object`);
+        continue;
+      }
+      for (const k of Object.keys(p)) if (!PROJECT_KEYS.has(k)) W(`${at}: unknown key '${k}'`);
+      if (typeof p.path !== 'string' || !p.path.trim()) E(`${at}: 'path' (string) is required`);
+      else
+        try {
+          if (!pathExists(resolveProjectPath(p.path))) W(`${at}: path does not exist on disk: ${p.path}`);
+        } catch (e) {
+          W(`${at}: path cannot be resolved (${e.message})`);
+        }
+      if (p.type != null && typeof p.type !== 'string') E(`${at}: 'type' must be a string`);
+      else if (typeof p.type === 'string' && !PROJECT_TYPES.includes(p.type)) W(`${at}: unusual type '${p.type}' (known: ${PROJECT_TYPES.join(', ')})`);
+      if (p.runner != null && typeof p.runner !== 'string') E(`${at}: 'runner' must be a string`);
+      if (p.tasks != null) {
+        if (!isObj(p.tasks)) E(`${at}: 'tasks' must be an object`);
+        else for (const [t, cmd] of Object.entries(p.tasks)) if (typeof cmd !== 'string') E(`${at}: task '${t}' command must be a string`);
+      }
+      if (p.env != null && typeof p.env !== 'string') E(`${at}: 'env' must be a string`);
+      if (p.defaultBranch != null && typeof p.defaultBranch !== 'string') E(`${at}: 'defaultBranch' must be a string`);
+      if (p.local != null) {
+        if (typeof p.local !== 'string') E(`${at}: 'local' must be a string`);
+        else if (!originOf(p.local)) E(`${at}: 'local' must be an http(s) URL (got '${p.local}')`);
+      }
+      if (p.match != null) {
+        if (!isStrArr(p.match)) E(`${at}: 'match' must be an array of strings`);
+        else
+          for (const h of p.match) {
+            if (/[*?]/.test(h)) W(`${at}: match '${h}' looks like a glob — matching is exact-host only`);
+            else if (h.includes('/')) W(`${at}: match '${h}' should be a bare hostname (no scheme/path)`);
+          }
+      }
+      if (p.envMap != null) {
+        if (!isObj(p.envMap)) E(`${at}: 'envMap' must be an object`);
+        else for (const [k, v] of Object.entries(p.envMap)) if (typeof v !== 'string') E(`${at}: envMap['${k}'] must be a string`);
+      }
+      if (p.guards != null) {
+        if (!isStrArr(p.guards)) E(`${at}: 'guards' must be an array of strings`);
+        else for (const g of p.guards) if (!guards[g]) E(`${at}: references undefined guard '${g}'`);
+      }
+      const usesEnvfile = [p.runner, ...Object.values(isObj(p.tasks) ? p.tasks : {})].some((s) => typeof s === 'string' && s.includes('{envfile}'));
+      if (usesEnvfile && !p.env) E(`${at}: uses {envfile} but has no 'env' field`);
+      if (isStrArr(p.match) && p.match.length && !p.local) W(`${at}: has 'match' (a wiring target) but no 'local' — peers can't wire to it locally`);
+    }
+  }
+
+  // Guard registry.
+  for (const [name, g] of Object.entries(guards)) {
+    const at = `guard '${name}'`;
+    if (!isObj(g)) {
+      E(`${at}: must be an object`);
+      continue;
+    }
+    for (const k of Object.keys(g)) if (!GUARD_KEYS.has(k)) W(`${at}: unknown key '${k}'`);
+    if (typeof g.command !== 'string' || !g.command.trim()) E(`${at}: 'command' (string) is required`);
+    if (typeof g.comment !== 'string' || !g.comment.trim()) W(`${at}: 'comment' is required — it explains what the check verifies`);
+    if (g.message != null && typeof g.message !== 'string') E(`${at}: 'message' must be a string`);
+  }
+  const usedGuards = new Set(Object.values(cfg.projects || {}).flatMap((p) => (isObj(p) && Array.isArray(p.guards) ? p.guards : [])));
+  for (const name of Object.keys(guards)) if (!usedGuards.has(name)) W(`guard '${name}' is defined but used by no project`);
+
+  // Machine-local local.json (overrides + remembered selection).
+  const machine = loadMachine(flags);
+  const projNames = new Set(Object.keys(cfg.projects || {}));
+  if (machine.overrides != null) {
+    if (!isObj(machine.overrides)) E(`local.json: overrides must be an object`);
+    else
+      for (const [proj, vars] of Object.entries(machine.overrides)) {
+        if (!projNames.has(proj)) W(`local.json overrides: unknown project '${proj}'`);
+        if (!isObj(vars)) {
+          E(`local.json overrides['${proj}'] must be an object of VAR:value`);
+          continue;
+        }
+        for (const [k, v] of Object.entries(vars)) {
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) W(`local.json overrides['${proj}']: invalid env var name '${k}'`);
+          if (v === null || typeof v === 'object') W(`local.json overrides['${proj}'].${k} must be a string`);
+        }
+      }
+  }
+  if (Array.isArray(machine.lastSelection)) for (const n of machine.lastSelection) if (!projNames.has(n)) W(`local.json lastSelection: unknown project '${n}'`);
+
+  // Report.
+  console.log(c.bold(`Checking ${tildify(userPath)}`) + (localPath ? c.dim(`  (+ ${tildify(localPath)})`) : ''));
+  for (const m of errors) console.log(`  ${c.red('✗')} ${m}`);
+  for (const m of warns) console.log(`  ${c.yellow('!')} ${m}`);
+  if (!errors.length && !warns.length) return void console.log(`  ${c.green('✓')} no problems found`);
+  const parts = [];
+  if (errors.length) parts.push(c.red(`${errors.length} error${errors.length > 1 ? 's' : ''}`));
+  if (warns.length) parts.push(c.yellow(`${warns.length} warning${warns.length > 1 ? 's' : ''}`));
+  console.log(`\n  ${parts.join(', ')}`);
+  if (errors.length) process.exitCode = 1;
+}
+
 function makePrompter() {
   if (canInteractive()) {
     const ask = (labelText, prefill = '') =>
@@ -1936,6 +2086,7 @@ function help() {
     ['overrides', '[set|remove]', 'List/set/remove per-project env overrides (local.json)'],
     ['dir', '[path]', 'Show/set the projects directory'],
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
+    ['check', '', 'Validate the config; report errors + warnings (alias: validate)'],
     ['pull', '<url>', 'Load config.json from a URL (backs up current)'],
   ];
   const FLAGS = [
@@ -2067,6 +2218,11 @@ async function main() {
       return;
     case 'config':
       cmdConfig(flags, rest[0]);
+      return;
+    case 'check':
+    case 'validate':
+    case 'doctor':
+      cmdCheck(flags);
       return;
     case 'pull':
       await cmdPull(flags, rest[0]);

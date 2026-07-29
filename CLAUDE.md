@@ -82,6 +82,12 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   (list every env variant); matched by exact host equality (`tokenMatchLen`) — no globs, no
   collisions (`api.getbee.io` never matches `rge-api.getbee.io`). `crew graph` derives edges
   from `.envs/*` URLs; `crew start` warns when a co-running selection isn't connected.
+- `defaultBranch` (optional, per project): the branch new work is cut from (repos differ —
+  `main`/`master`/`develop`/`trunk`). Pure metadata crew records/displays (`crew list` shows a
+  `branch` line); crew runs no git with it. The `crew add`/`edit` wizard prefills it via
+  `detectDefaultBranch` (repo `origin/HEAD`, else current branch) — best-effort only, so
+  verify against the remote (`gh api repos/<owner>/<repo> --jq .default_branch`) since a local
+  `origin/HEAD` can be stale.
 - Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip.
 - `guards`: top-level `guards: {name: {comment, command, message}}` registry; a project lists
   names in `project.guards` (many-to-many). `comment` is required and states what the check
@@ -111,11 +117,20 @@ No test framework. Verify manually against a throwaway config:
 node --check bin/crew.js
 node bin/crew.js --config /tmp/x.json list
 node bin/crew.js --config /tmp/x.json graph            # read-only, no TTY needed
+node bin/crew.js --config /tmp/x.json check            # validate; exit 1 on errors
 ```
 
 `start`/`install`/`workspace`/`claude` open the picker, so they need an interactive TTY
 (non-TTY = clear error). Use `--dry-run` in a real terminal to inspect resolved commands
-(incl. `{envfile}` wiring); `list`/`graph` work non-interactively.
+(incl. `{envfile}` wiring); `list`/`graph`/`check` work non-interactively.
+
+`crew check` (`cmdCheck`) is the hand-rolled, zero-dep config validator — NO JSON-Schema
+library (would break the zero-deps constraint) and NO separate schema file (would break the
+single-file constraint). It validates the merged config + `local.json`: known-key sets
+(`TOP_KEYS`/`PROJECT_KEYS`/`GUARD_KEYS`), types, and cross-references a schema can't express
+(guard names must exist; `{envfile}` needs `env`; `match` must be a bare host, not a glob;
+`match` without `local` is a dangling wiring target). Errors exit 1; warnings don't. Keep its
+key sets in sync when adding a config field.
 
 ## Non-goals
 
