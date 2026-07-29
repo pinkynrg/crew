@@ -39,10 +39,11 @@ jobs:
       id-token: write # npm provenance
     steps:
       - uses: actions/checkout@v4
+      # No registry-url: it writes an .npmrc with an empty _authToken that suppresses npm's
+      # OIDC trusted-publishing exchange. Default registry is registry.npmjs.org anyway.
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          registry-url: 'https://registry.npmjs.org'
       - name: Upgrade npm (OIDC trusted publishing needs >= 11.5.1; npm 11 supports node 20)
         run: npm install -g npm@11
       - run: npm ci
