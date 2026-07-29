@@ -299,15 +299,16 @@ Actions:
 ```
 crew help                       usage (also: no args)
 crew list                       list projects                      (alias: ls)
-crew install                    pick projects, run their install task
+crew install [project]          install one project (named, or single-select pick)
 crew start [args]               pick projects, run their start task (local wiring)
 crew workspace                  pick projects, open one VSCode window (alias: code)
 crew claude                     pick projects, launch Claude Code once (--add-dir)
 crew graph                      dependency graph derived from .envs files
 ```
 
-`start`/`install`/`workspace`/`claude` always open the interactive multiselect
-(preselected with your last pick); the selection is remembered globally.
+`start`/`workspace`/`claude` always open the interactive multiselect (preselected with your
+last pick); the selection is remembered globally. `install` is single-project: name it
+(`crew install sdk-api`) or pick one from a single-select list.
 
 Config:
 

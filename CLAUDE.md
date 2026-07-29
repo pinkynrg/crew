@@ -75,11 +75,12 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   per-project table. Managed via `crew overrides` (list/set/remove, select-driven; `set` prompts
   an optional "only when <peer> is local"; writes `local.json`). `crew check` validates both
   forms.
-- No groups, no `run` command. `start`/`install`/`workspace`/`claude` act on a **selection**
-  chosen via an interactive multiselect (`selectMembers`, preselected with `lastSelection`);
-  projects are never named on the CLI (bare CLI tokens are ignored with a warning; only
-  `key=value` args are consumed). The picked set is saved to `lastSelection` (global,
-  machine-local) and reused across the four. A legacy `groups` key is dropped on load.
+- No groups, no `run` command. `start`/`workspace`/`claude` act on a **multiselect selection**
+  (`selectMembers`, preselected with `lastSelection`); projects are never named on the CLI there
+  (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
+  `lastSelection` (global, machine-local) and reused across the three. `install` is the exception:
+  it acts on a **single** project — a name given on the CLI (`crew install <project>`, doesn't
+  touch `lastSelection`), else a single-select picker. A legacy `groups` key is dropped on load.
 - `envMap` (optional, per project): remaps the selection env to the env THIS project runs
   at — `{ "<selEnv>": "<projEnv>", "default": "<fallback>" }` (see `mappedEnv`). `{env}`
   resolves per project (`envMap[sel] ?? envMap.default ?? sel`) before the start command,

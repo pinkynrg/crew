@@ -1567,13 +1567,34 @@ export async function selectMembers(flags, cfg, opts = {}) {
 // ---------------------------------------------------------------------------
 export async function cmdRun(flags, task, rest) {
   const { cfg, userPath } = loadMerged(flags);
-  // Only key=value placeholder args are consumed; projects are chosen in the picker.
   const args = rest.filter((a) => a.includes('='));
   const bare = rest.filter((a) => !a.includes('='));
-  if (bare.length) warn(`ignoring '${bare.join(' ')}' — projects are chosen in the picker`);
   const isLong = (cfg.longRunning || []).includes(task);
-  // For a co-running local set the picker shows a live wiring-connectivity footer.
-  const members = await selectMembers(flags, cfg, { connectivity: isLong });
+  // `install` acts on a single project: a name given on the CLI (bypasses the picker, doesn't
+  // touch the remembered co-running selection), else a SINGLE-select picker. start/etc use the
+  // multi-select remembered set.
+  let members;
+  if (task === 'install') {
+    if (bare.length) {
+      members = membersFor(cfg, bare);
+    } else {
+      if (!canInteractive()) fail('crew needs an interactive terminal to pick a project');
+      const known = Object.keys(cfg.projects || {});
+      if (!known.length) fail('no projects configured yet — run: crew add');
+      const paint = projectColors(cfg);
+      const picked = await menu({
+        title: 'Install which project?',
+        items: known,
+        label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)),
+        erase: true,
+      });
+      if (picked == null) return void console.log(c.dim('nothing selected'));
+      members = membersFor(cfg, [picked]);
+    }
+  } else {
+    if (bare.length) warn(`ignoring '${bare.join(' ')}' — projects are chosen in the picker`);
+    members = await selectMembers(flags, cfg, { connectivity: isLong });
+  }
   if (!members) return;
   validateMemberPaths(members);
 
@@ -2420,7 +2441,7 @@ export function help() {
   const ACTIONS = [
     ['help', '', 'Show this help (also: no args)'],
     ['list', '', 'List projects (alias: ls)'],
-    ['install', '', 'Pick projects, run their install task'],
+    ['install', '[project]', 'Install a project — named, or pick one (single-select) if none given'],
     ['start', '[args]', 'Pick projects, run their start task (local wiring)'],
     ['workspace', '', 'Pick projects, open as one VSCode window (alias: code)'],
     ['claude', '[session]', 'Pick projects, launch Claude Code (names the chat history, else auto)'],
