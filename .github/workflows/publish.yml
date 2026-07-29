@@ -5,7 +5,9 @@ name: Publish to npm
 #   - if package.json's version is NOT yet on npm -> publish it as-is (tag it);
 #   - if it IS already on npm -> auto-bump the patch version, commit + tag, publish.
 # The bump commit is pushed with GITHUB_TOKEN and marked [skip ci], so it does not
-# retrigger this workflow. Requires an NPM_TOKEN secret (npm Automation token).
+# retrigger this workflow. Auth is npm Trusted Publishing (OIDC) — no NPM_TOKEN secret;
+# the package's Trusted Publisher on npmjs.com must point at this repo + publish.yml, and
+# the publish job needs `id-token: write` plus npm >= 11.5.1 (installed below).
 on:
   push:
     branches: [main]
@@ -41,6 +43,8 @@ jobs:
         with:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
+      - name: Upgrade npm (OIDC trusted publishing needs >= 11.5.1)
+        run: npm install -g npm@latest
       - run: npm ci
       - name: Resolve version (publish as-is, or auto-bump patch)
         run: |
@@ -59,5 +63,3 @@ jobs:
           fi
       - name: Publish
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
