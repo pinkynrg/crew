@@ -348,7 +348,7 @@ errors, so warnings won't fail a pipeline.
 
 ## Guards
 
-A project can require named **guards** — preconditions verified before `crew start`/`install`
+A project can require named **guards** — preconditions verified before `crew start`
 does anything. crew stays agnostic: a guard is just a shell command, and it **passes iff
 it exits 0**. Each guard carries a required `comment` explaining what it verifies (printed
 in faint gray beside its result), a `command`, and a failure `message`. Guards live in a
@@ -390,7 +390,7 @@ crew: guard failed — nothing started.
 
 (The faint gray line is each guard's `comment`; the red line under a `✗` is its `message`.)
 
-Guards only gate `start`/`install` — `workspace` and `claude` don't run them.
+Guards run before `crew start`.
 
 ### Managing guards
 

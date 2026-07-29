@@ -101,7 +101,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   names in `project.guards` (many-to-many). `comment` is required and states what the check
   verifies — it's printed in faint gray beside each result when guards run. Before a run, the
   target's guards are deduped by name, run once each in parallel (pass = exit 0); any failure
-  prints its message and aborts. Only `start`/`install` gate on them. Managed via
+  prints its message and aborts. Run before `crew start`. Managed via
   the `crew guards` command (list/add/remove/link/unlink, all select-driven). The v1
   `checks` key auto-migrates to `guards` on load.
 - `workspaceSettings` (optional top-level object): written verbatim into the generated

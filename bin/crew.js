@@ -1588,9 +1588,9 @@ export async function cmdRun(flags, task, rest) {
   const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
 
   const interactive = isLong && process.stdin.isTTY && process.stdout.isTTY;
-  // Guards gate the run. On the interactive path stay quiet (the viewer shows them as rows,
-  // and its alternate screen would wipe a printed block anyway); elsewhere print the ✓ block.
-  const guardSeed = await runGuards(cfg, runnable, { quiet: interactive });
+  // Guards gate `start`. On the interactive path stay quiet (the viewer shows them as rows, and
+  // its alternate screen would wipe a printed block anyway); otherwise print the ✓ block.
+  const guardSeed = task === 'start' ? await runGuards(cfg, runnable, { quiet: interactive }) : [];
 
   const paint = projectColors(cfg); // same per-project colors as `crew list`
   const commands = runnable.map((r, i) => ({
