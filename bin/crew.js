@@ -1181,9 +1181,10 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
         const dots = '·'.repeat(Math.max(1, fillW - proc._name.length - 1));
         return color(`[${proc._name} `) + c.dim(dots) + color(']') + ' ';
       };
-      // A history row is visible when its project is shown AND (no search, or it matches).
+      // A history row is visible when its project is shown AND (no search, or the LOG TEXT
+      // matches — search is content-only; project names are filtered via `f`, not `/`).
       const matches = (proc, text) =>
-        shown.has(proc._name) && (!query || `${proc._name} ${text}`.replace(ESC, '').toLowerCase().includes(query.toLowerCase()));
+        shown.has(proc._name) && (!query || text.replace(ESC, '').toLowerCase().includes(query.toLowerCase()));
 
       const rows = () => process.stdout.rows || 24;
       const cols = () => process.stdout.columns || 80;
