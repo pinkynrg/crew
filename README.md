@@ -275,6 +275,23 @@ This is the key reason crew rolls its own runner instead of a ppid-walking tree-
 that daemonizes — get orphaned to init and escape a ppid walk, leaving a port bound. A
 process-group signal reaches them regardless of reparenting. POSIX only (macOS + Linux).
 
+### Interactive controls (streamed runs)
+
+When `crew start` streams to a TTY it opens a **full-screen log viewer** (an alternate screen,
+like `less`/`htop`) showing only the selected projects' recent output, with a footer pinned to
+the bottom row: `crew: [f] filter logs   [Ctrl-C] stop   (N/M shown)`.
+
+- **`f`** — open the multiselect picker to choose which projects are **shown**. The view
+  repaints to only those (from a kept line history, so re-showing a project brings its recent
+  lines back). **Select none → blank screen.** Hidden projects keep running; their output is
+  captured to history, just not displayed.
+- **`Ctrl-C`** (or **`q`**) — graceful teardown; a second Ctrl-C within 10s force-kills.
+
+History is bounded by `CREW_LOG_HISTORY` lines (default 5000). On exit crew leaves the
+alternate screen and restores your terminal — so the run's logs aren't left in scrollback (it
+was a live view). Piped/CI runs are unaffected: no viewer, output streams with `[name]`
+prefixes as before. Inside the `f` picker, `Esc` cancels the filter (doesn't stop the run).
+
 ## Commands
 
 Actions:
