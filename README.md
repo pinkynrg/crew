@@ -184,26 +184,40 @@ and personal values never touch the shared `config.json`:
 ```json
 {
   "overrides": {
-    "bee-orchestra":   { "TEMPORAL_ORCHESTRA_AI_QUEUE": "orchestra-local-ai" },
-    "beepro-frontend": { "SDK_API_KEY": "my-local-dev-key" }
+    "bee-orchestra": {
+      "TEMPORAL_ORCHESTRA_AI_QUEUE": "orchestra-local-ai"
+    },
+    "beepro-frontend": {
+      "whenLocal": {
+        "bee-loader": { "REACT_APP_BEEPLUGINURL": "http://localhost:8088/v2/api/loader" }
+      }
+    }
   }
 }
 ```
 
-`overrides["<project>"] = { VAR: value }` — one flat table per project, applied to that
-project's wired env whenever crew starts it locally. Manage them without hand-editing:
+Each `overrides["<project>"]` table has two kinds of entry:
+
+- **bare `VAR: value`** — applied **whenever that project starts** (crew builds a wired env only
+  then). Use for a value that's always different locally: the `orchestra` queue name above so
+  your local worker consumes `orchestra-local-ai` rather than the shared `orchestra-ai`.
+- **`whenLocal: { "<peer>": { VAR: value } }`** — applied **only when `<peer>` is also being
+  started**. Use when the override only makes sense while a local dependency is up — e.g. point
+  `REACT_APP_BEEPLUGINURL` at your local `bee-loader` (exact host **and** path, which the
+  host-only URL swap can't do), but leave it remote when the loader isn't running.
+
+Manage them without hand-editing:
 
 ```
-crew overrides            list every override (grouped by project)
-crew overrides set        pick a project, enter VAR + value (upsert)
-crew overrides remove     pick a project, then a var to drop (or the whole entry)
+crew overrides            list every override (grouped by project; whenLocal shown separately)
+crew overrides set        pick a project, VAR, an optional "only when <peer> is local", value
+crew overrides remove     pick a project, then an entry to drop (or the whole project)
 ```
 
-- Overrides win over the base env file (and over the localhost URL swap).
+- Overrides win over the base env file **and** the localhost URL swap; `whenLocal` wins over bare.
 - Upsert = replace an existing `VAR=` / `export VAR=` line in place, else append it.
-- They apply **whenever you start that project** (crew builds a wired env only then), so add
-  only values that hold for your local sessions — e.g. don't override a consumer's `SDK_API_KEY`
-  to the local one unless you actually run that dependency locally alongside it.
+- Bare entries apply on every start of that project, so keep them to values that always hold
+  locally; reach for `whenLocal` when the value should track another service being up.
 
 crew stays agnostic: it's a plain per-project table, no service knowledge. (This is also the
 escape hatch for cross-env wiring — run everything at `pre` and inject the `pre` key your env

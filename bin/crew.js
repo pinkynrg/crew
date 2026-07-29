@@ -849,13 +849,15 @@ function wireRun(userPath, runnable, members, { dry, overrides = {} }) {
     .map((m) => ({ name: m.name, tokens: projectIdentity(m.project).tokens, origin: originOf(m.project.local) || m.project.local }));
   const tmpDir = join(crewHomeFor(userPath), 'tmp');
   const tempPaths = [];
+  // Trigger set for `whenLocal` overrides: every project being started (self included).
+  const running = runnable.map((r) => r.name);
   for (const r of runnable) {
     if (!r.resolved.includes('{envfile}')) continue;
     if (!r.envFile) fail(`project '${r.name}' uses {envfile} but has no "env" field in config`);
     const basePath = resolve(projectDir(r.project), r.envFile);
     if (!pathExists(basePath)) fail(`project '${r.name}': env file not found: ${basePath}`);
     const myPeers = peers.filter((p) => p.name !== r.name);
-    const overrideVars = overrideVarsFor(overrides, r.name);
+    const overrideVars = overrideVarsFor(overrides, r.name, running);
     let baseText = '';
     try {
       baseText = readFileSync(basePath, 'utf8');
@@ -1199,15 +1201,24 @@ function wireText(text, peers) {
 }
 
 // Local-wiring env overrides (machine-local, from local.json `overrides`). When crew starts a
-// project locally it materializes a wired env for it; `overrides["<project>"] = {VAR: val}`
-// upserts extra `KEY=value` lines into that env — e.g. a Temporal queue name so your local
-// worker consumes `foo-local` not shared `foo`, or the dev API key the local dependency accepts.
-// Flat, one entry per project: it only ever applies when that project runs (crew builds its
-// wired env only then). Secrets/personal values live in local.json (untracked), never in the
-// shared config. Overrides beat the base file and the URL swap.
-function overrideVarsFor(overrides, name) {
+// project locally it materializes a wired env for it; `overrides["<project>"]` upserts extra
+// `KEY=value` lines into that env. Two forms:
+//   - bare `VAR: val`  — applied whenever the project runs (e.g. a Temporal queue so your local
+//     worker consumes `foo-local` not shared `foo`);
+//   - `whenLocal: { "<peer>": { VAR: val } }` — applied ONLY when that peer is also being started
+//     (e.g. point a URL at a local dependency's exact host+path, but only while it's up).
+// `whenLocal` beats bare (applied last). `running` = names of all projects being started.
+// Secrets/personal values live in local.json (untracked), never in the shared config. Overrides
+// beat the base env file and the URL swap.
+const OVERRIDE_WHEN_LOCAL = 'whenLocal';
+function overrideVarsFor(overrides, name, running) {
   const o = overrides && overrides[name];
-  return o && typeof o === 'object' ? o : {};
+  if (!o || typeof o !== 'object') return {};
+  const vars = {};
+  for (const [k, v] of Object.entries(o)) if (k !== OVERRIDE_WHEN_LOCAL) vars[k] = v;
+  const wl = o[OVERRIDE_WHEN_LOCAL];
+  if (wl && typeof wl === 'object') for (const peer of running || []) if (wl[peer] && typeof wl[peer] === 'object') Object.assign(vars, wl[peer]);
+  return vars;
 }
 // dotenv/sh-safe: quote only values with characters outside a safe set, so plain keys/tokens
 // stay unquoted (max compat with both `. envfile` sourcing and dotenv-style loaders).
@@ -1804,12 +1815,19 @@ function overrideList(flags, cfg) {
   for (const proj of projects) {
     const known = cfg.projects && cfg.projects[proj];
     console.log(`  ${c.cyan(proj)}${known ? '' : c.yellow('  (unknown project)')}`);
-    const vars = ovr[proj] && typeof ovr[proj] === 'object' ? ovr[proj] : {};
-    const keys = Object.keys(vars);
-    if (!keys.length) console.log(`      ${c.dim('(empty)')}`);
-    for (const k of keys) console.log(`      ${k}=${vars[k]}`);
+    const o = ovr[proj] && typeof ovr[proj] === 'object' ? ovr[proj] : {};
+    const bare = Object.keys(o).filter((k) => k !== OVERRIDE_WHEN_LOCAL);
+    const wl = o[OVERRIDE_WHEN_LOCAL] && typeof o[OVERRIDE_WHEN_LOCAL] === 'object' ? o[OVERRIDE_WHEN_LOCAL] : null;
+    if (!bare.length && !wl) console.log(`      ${c.dim('(empty)')}`);
+    for (const k of bare) console.log(`      ${k}=${o[k]}`);
+    if (wl)
+      for (const peer of Object.keys(wl)) {
+        console.log(`      ${faint(`when ${peer} is local:`)}`);
+        const pv = wl[peer] && typeof wl[peer] === 'object' ? wl[peer] : {};
+        for (const k of Object.keys(pv)) console.log(`        ${k}=${pv[k]}`);
+      }
   }
-  console.log(faint('  applied to each project’s wired env only when crew starts it'));
+  console.log(faint('  bare vars apply whenever the project starts; whenLocal vars only when that peer co-runs'));
 }
 
 async function overrideSet(flags, cfg, p) {
@@ -1818,14 +1836,23 @@ async function overrideSet(flags, cfg, p) {
   const proj = await p.select('Override which project?', projNames, projNames[0]);
   const key = (await p.ask('Env var name', '')).trim();
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) fail(`invalid env var name '${key}'`);
+  const peer = (await p.ask('Only when which project runs locally? (empty = always)', '')).trim();
+  if (peer && !cfg.projects[peer]) fail(`unknown project '${peer}'`);
   const machine = loadMachine(flags);
-  const existing = (machine.overrides && machine.overrides[proj] && machine.overrides[proj][key]) || '';
-  const value = await p.ask(`Value for ${key}`, String(existing));
   machine.overrides = machine.overrides || {};
-  machine.overrides[proj] = machine.overrides[proj] && typeof machine.overrides[proj] === 'object' ? machine.overrides[proj] : {};
-  machine.overrides[proj][key] = value;
+  const o = machine.overrides[proj] && typeof machine.overrides[proj] === 'object' ? machine.overrides[proj] : {};
+  let existing;
+  if (peer) {
+    o[OVERRIDE_WHEN_LOCAL] = o[OVERRIDE_WHEN_LOCAL] && typeof o[OVERRIDE_WHEN_LOCAL] === 'object' ? o[OVERRIDE_WHEN_LOCAL] : {};
+    o[OVERRIDE_WHEN_LOCAL][peer] = o[OVERRIDE_WHEN_LOCAL][peer] && typeof o[OVERRIDE_WHEN_LOCAL][peer] === 'object' ? o[OVERRIDE_WHEN_LOCAL][peer] : {};
+    existing = o[OVERRIDE_WHEN_LOCAL][peer][key] || '';
+  } else existing = o[key] || '';
+  const value = await p.ask(`Value for ${key}`, String(existing));
+  if (peer) o[OVERRIDE_WHEN_LOCAL][peer][key] = value;
+  else o[key] = value;
+  machine.overrides[proj] = o;
   writeMachine(flags, machine);
-  console.log(`\nSet ${c.cyan(proj)}  ${key}=${value}`);
+  console.log(`\nSet ${c.cyan(proj)}  ${peer ? faint(`(when ${peer} local) `) : ''}${key}=${value}`);
 }
 
 async function overrideRemove(flags, p) {
@@ -1834,13 +1861,24 @@ async function overrideRemove(flags, p) {
   const projects = Object.keys(ovr);
   if (!projects.length) fail('no overrides defined yet. Add one: crew overrides set');
   const proj = await p.select('Remove from which project?', projects, projects[0]);
-  const keys = Object.keys(ovr[proj] && typeof ovr[proj] === 'object' ? ovr[proj] : {});
+  const o = ovr[proj] && typeof ovr[proj] === 'object' ? ovr[proj] : {};
+  const entries = [];
+  for (const k of Object.keys(o)) if (k !== OVERRIDE_WHEN_LOCAL) entries.push({ label: k, kind: 'bare', k });
+  const wl = o[OVERRIDE_WHEN_LOCAL] && typeof o[OVERRIDE_WHEN_LOCAL] === 'object' ? o[OVERRIDE_WHEN_LOCAL] : null;
+  if (wl) for (const peer of Object.keys(wl)) for (const k of Object.keys(wl[peer] || {})) entries.push({ label: `whenLocal.${peer}.${k}`, kind: 'wl', peer, k });
   const ALL = '(all — remove the whole project entry)';
-  const choice = keys.length ? await p.select(`Remove which var from ${proj}?`, [...keys, ALL], keys[0]) : ALL;
+  const labels = entries.map((e) => e.label);
+  const choice = labels.length ? await p.select(`Remove which override from ${proj}?`, [...labels, ALL], labels[0]) : ALL;
   if (choice === ALL) delete ovr[proj];
   else {
-    delete ovr[proj][choice];
-    if (!Object.keys(ovr[proj]).length) delete ovr[proj];
+    const e = entries.find((x) => x.label === choice);
+    if (e.kind === 'bare') delete o[e.k];
+    else {
+      delete wl[e.peer][e.k];
+      if (!Object.keys(wl[e.peer]).length) delete wl[e.peer];
+      if (!Object.keys(wl).length) delete o[OVERRIDE_WHEN_LOCAL];
+    }
+    if (!Object.keys(o).length) delete ovr[proj];
   }
   machine.overrides = ovr;
   writeMachine(flags, machine);
@@ -1954,9 +1992,27 @@ function cmdCheck(flags) {
           E(`local.json overrides['${proj}'] must be an object of VAR:value`);
           continue;
         }
+        const checkVar = (where, k, v) => {
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) W(`local.json ${where}: invalid env var name '${k}'`);
+          if (v === null || typeof v === 'object') W(`local.json ${where}.${k} must be a string`);
+        };
         for (const [k, v] of Object.entries(vars)) {
-          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) W(`local.json overrides['${proj}']: invalid env var name '${k}'`);
-          if (v === null || typeof v === 'object') W(`local.json overrides['${proj}'].${k} must be a string`);
+          if (k === OVERRIDE_WHEN_LOCAL) {
+            if (!isObj(v)) {
+              E(`local.json overrides['${proj}'].whenLocal must be an object keyed by project`);
+              continue;
+            }
+            for (const [peer, pv] of Object.entries(v)) {
+              if (!projNames.has(peer)) W(`local.json overrides['${proj}'].whenLocal: unknown project '${peer}'`);
+              if (!isObj(pv)) {
+                E(`local.json overrides['${proj}'].whenLocal['${peer}'] must be an object of VAR:value`);
+                continue;
+              }
+              for (const [vk, vv] of Object.entries(pv)) checkVar(`overrides['${proj}'].whenLocal['${peer}']`, vk, vv);
+            }
+            continue;
+          }
+          checkVar(`overrides['${proj}']`, k, v);
         }
       }
   }
