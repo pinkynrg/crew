@@ -297,11 +297,11 @@ prefixes as before. Inside the `f` picker, `Esc` cancels the filter (doesn't sto
 Actions:
 
 ```
-crew help                       usage (also: no args, -h, --help)
+crew help                       usage (also: no args)
 crew list                       list projects                      (alias: ls)
 crew install                    pick projects, run their install task
 crew start [args]               pick projects, run their start task (local wiring)
-crew workspace [--fileless]     pick projects, open one VSCode window (alias: code)
+crew workspace                  pick projects, open one VSCode window (alias: code)
 crew claude                     pick projects, launch Claude Code once (--add-dir)
 crew graph                      dependency graph derived from .envs files
 ```
@@ -314,7 +314,7 @@ Config:
 ```
 crew add                               wizard: create a new project
 crew edit [name]                       wizard: modify an existing project
-crew remove <name>                     delete a project (confirm; -y) (alias: rm)
+crew remove <name>                     delete a project (confirm) (alias: rm)
 crew guards [project]                  list/manage guards (add/remove/link/unlink)
 crew overrides [set|remove]            list/set/remove per-project env overrides (local.json)
 crew dir [path]                        show/set the projects dir (relative paths resolve here)
@@ -323,9 +323,7 @@ crew check                             validate config + local.json; list errors
 crew pull <url>                        fetch config.json from a URL, install it (backs up current)
 ```
 
-Global flags: `--dry-run`, `--skip-guards`, `--config <path>`, `-y/--yes`, `-h/--help`,
-`-v/--version`. Every acting command supports `--dry-run` to print what it would do
-without running.
+Global flags: `--config <path>`, `-v/--version`.
 
 ### Validating the config
 
@@ -392,8 +390,7 @@ crew: guard failed — nothing started.
 
 (The faint gray line is each guard's `comment`; the red line under a `✗` is its `message`.)
 
-Bypass with `--skip-guards`. Guards only gate `start`/`install` — `workspace` and
-`claude` don't run them.
+Guards only gate `start`/`install` — `workspace` and `claude` don't run them.
 
 ### Managing guards
 
@@ -424,10 +421,6 @@ regardless of pick order. crew opens it with `code <that file>`. This keeps the 
 project explorer and out of git, while staying deterministic and reopenable: the file is
 regenerated on every invocation to reflect the current config, and `code <file>` focuses
 an existing window for that workspace instead of duplicating it.
-
-`--fileless` is an alternative: it opens a new window on the first folder, then
-`code --add`s the rest as an in-memory Untitled Workspace (attaches to the last active
-instance; less deterministic).
 
 **Workspace settings.** A top-level `workspaceSettings` object in the config is written
 verbatim into the generated `.code-workspace`'s `settings`. Use it to tame extensions that

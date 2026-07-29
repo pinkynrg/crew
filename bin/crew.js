@@ -945,8 +945,7 @@ export function makePrompter() {
   return { ask, select, multiselect, close: () => rl.close() };
 }
 
-export async function confirm(flags, question) {
-  if (flags.yes) return true;
+export async function confirm(question) {
   const { ask, close } = makePrompter();
   try {
     const a = await ask(`${question} (y/N)`, '');
@@ -1443,7 +1442,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
 // Guards — named shell probes a project can require (VPN up, AWS logged in, …). crew is
 // agnostic: a guard passes iff its command exits 0. Deduped by name across the target, so
 // a guard shared by several projects runs once. Any failure prints its message and aborts
-// before anything starts. Bypass with --skip-guards.
+// before anything starts.
 // ---------------------------------------------------------------------------
 // Runs the target's guards (deduped). Any failure prints + aborts. On success returns
 // [{ name, comment }] so the caller can seed them into the log viewer. `quiet` suppresses the
@@ -1498,8 +1497,8 @@ export async function runGuards(cfg, members, { quiet = false } = {}) {
 // (project.env), rewrite any URL pointing at a CO-RUNNING peer to that peer's `local`
 // origin, and materialize a FRESH temp file per run (stateless — regenerated every start,
 // deleted on teardown). {envfile} in the command is replaced with the temp path. Peers not
-// in the running set (or without a `local`) stay remote. dry => annotate only, no writes.
-export function wireRun(userPath, runnable, members, { dry, overrides = {} }) {
+// in the running set (or without a `local`) stay remote.
+export function wireRun(userPath, runnable, members, { overrides = {} }) {
   const peers = members
     .filter((m) => m.project.local)
     .map((m) => ({ name: m.name, tokens: projectIdentity(m.project).tokens, origin: originOf(m.project.local) || m.project.local }));
@@ -1519,26 +1518,6 @@ export function wireRun(userPath, runnable, members, { dry, overrides = {} }) {
       baseText = readFileSync(basePath, 'utf8');
     } catch (e) {
       fail(`project '${r.name}': cannot read env file ${basePath}: ${e.message}`);
-    }
-    if (dry) {
-      const hit = new Set();
-      baseText.replace(URL_RE, (u) => {
-        const p = urlHostPath(u);
-        if (!p) return u;
-        let b = null;
-        let bl = 0;
-        for (const pe of myPeers)
-          for (const t of pe.tokens) {
-            const l = tokenMatchLen(p.host, p.path, t);
-            if (l > bl) (bl = l), (b = pe);
-          }
-        if (b) hit.add(b.name);
-        return u;
-      });
-      r._wired = [...hit];
-      r._overrides = Object.keys(overrideVars);
-      r.resolved = r.resolved.replace(/\{envfile\}/g, shellQuote(`<wired ${r.envFile}>`));
-      continue;
     }
     mkdirSync(tmpDir, { recursive: true });
     const out = join(tmpDir, `${sanitize(r.name)}.env`);
@@ -1593,7 +1572,6 @@ export async function cmdRun(flags, task, rest) {
   const bare = rest.filter((a) => !a.includes('='));
   if (bare.length) warn(`ignoring '${bare.join(' ')}' — projects are chosen in the picker`);
   const isLong = (cfg.longRunning || []).includes(task);
-  const mode = isLong ? 'long-running' : 'run-to-completion';
   // For a co-running local set the picker shows a live wiring-connectivity footer.
   const members = await selectMembers(flags, cfg, { connectivity: isLong });
   if (!members) return;
@@ -1605,29 +1583,14 @@ export async function cmdRun(flags, task, rest) {
   // Materialize wired env files (fills {envfile}); fresh per run, cleaned up after.
   // Env overrides come from local.json (machine-local, untracked) so secrets never hit the config.
   const overrides = loadMachine(flags).overrides || {};
-  const { cleanup } = wireRun(userPath, runnable, members, { dry: flags.dryRun, overrides });
+  const { cleanup } = wireRun(userPath, runnable, members, { overrides });
 
-  const label = members.map((m) => m.name).join(', ');
   const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
-
-  if (flags.dryRun) {
-    console.log(`# task '${task}' on: ${label} — mode: ${mode}`);
-    const guardNames = [...new Set(runnable.flatMap((r) => r.project.guards || []))];
-    if (guardNames.length) console.log(`# guards: ${guardNames.join(', ')}`);
-    for (const r of runnable) {
-      if (r._wired && r._wired.length)
-        console.log(`  ${c.dim('# ' + r.name + ' wired to localhost: ' + r._wired.join(', '))}`);
-      if (r._overrides && r._overrides.length)
-        console.log(`  ${c.dim('# ' + r.name + ' env overrides: ' + r._overrides.join(', '))}`);
-      console.log(`  ${r.name}: cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
-    }
-    return;
-  }
 
   const interactive = isLong && process.stdin.isTTY && process.stdout.isTTY;
   // Guards gate the run. On the interactive path stay quiet (the viewer shows them as rows,
   // and its alternate screen would wipe a printed block anyway); elsewhere print the ✓ block.
-  const guardSeed = flags.skipGuards ? [] : await runGuards(cfg, runnable, { quiet: interactive });
+  const guardSeed = await runGuards(cfg, runnable, { quiet: interactive });
 
   const paint = projectColors(cfg); // same per-project colors as `crew list`
   const commands = runnable.map((r, i) => ({
@@ -1683,17 +1646,6 @@ export async function cmdWorkspace(flags, rest) {
   validateMemberPaths(members);
   const dirs = dirList(members);
 
-  if (flags.fileless) {
-    if (flags.dryRun) {
-      console.log(`code -n ${shellQuote(dirs[0])}`);
-      if (dirs.length > 1) console.log(`code --add ${dirs.slice(1).map(shellQuote).join(' ')}`);
-      return;
-    }
-    launch('code', ['-n', dirs[0]]);
-    if (dirs.length > 1) launch('code', ['--add', ...dirs.slice(1)]);
-    return;
-  }
-
   const wsDir = join(crewHomeFor(userPath), 'workspaces');
   const wsFile = join(wsDir, `${selectionLabel(members)}.code-workspace`);
   // Workspace-level VSCode settings from config (e.g. quiet the Jest extension's per-folder
@@ -1701,12 +1653,6 @@ export async function cmdWorkspace(flags, rest) {
   // nothing by default — fully agnostic.
   const settings = cfg.workspaceSettings && typeof cfg.workspaceSettings === 'object' ? cfg.workspaceSettings : {};
   const wsJson = { folders: dirs.map((p) => ({ path: p })), settings };
-
-  if (flags.dryRun) {
-    console.log(`# workspace file: ${wsFile}`);
-    console.log(JSON.stringify(wsJson, null, 2));
-    return;
-  }
 
   mkdirSync(wsDir, { recursive: true });
   writeFileSync(wsFile, JSON.stringify(wsJson, null, 2) + '\n');
@@ -1731,12 +1677,6 @@ export async function cmdClaude(flags, rest) {
 
   const cliArgs = [];
   for (const d of dirs) cliArgs.push('--add-dir', d);
-
-  if (flags.dryRun) {
-    console.log(`# cwd (stable, crew-managed): ${cwd}`);
-    console.log(`claude ${cliArgs.map(shellQuote).join(' ')}`);
-    return;
-  }
   launch('claude', cliArgs, { cwd });
 }
 
@@ -2113,7 +2053,7 @@ export async function cmdRemove(flags, name) {
   if (!cfg.projects[name])
     fail(`no such project '${name}'.\n  projects: ${Object.keys(cfg.projects).join(', ') || '(none)'}`);
 
-  if (!(await confirm(flags, `Delete project '${name}'?`))) return;
+  if (!(await confirm(`Delete project '${name}'?`))) return;
   delete cfg.projects[name];
   writeUserConfig(path, cfg);
   console.log(`Removed project '${name}'`);
@@ -2192,10 +2132,8 @@ async function guardAdd(flags, cfg, path, p) {
 async function guardRemove(flags, cfg, path, p) {
   const names = Object.keys(cfg.guards);
   const name = await p.select('Remove which guard?', names, names[0]);
-  if (!flags.yes) {
-    const yes = await p.ask(`Delete guard '${name}'? (y/N)`, '');
-    if (!/^y/i.test(yes)) return void console.log('cancelled');
-  }
+  const yes = await p.ask(`Delete guard '${name}'? (y/N)`, '');
+  if (!/^y/i.test(yes)) return void console.log('cancelled');
   delete cfg.guards[name];
   for (const pr of Object.values(cfg.projects || {})) setProjectGuard(pr, name, false);
   writeUserConfig(path, cfg);
@@ -2480,7 +2418,7 @@ export function help() {
     return `  ${left}${' '.repeat(Math.max(2, COL - sig.length))}${desc}`;
   };
   const ACTIONS = [
-    ['help', '', 'Show this help (no args / -h / --help)'],
+    ['help', '', 'Show this help (also: no args)'],
     ['list', '', 'List projects (alias: ls)'],
     ['install', '', 'Pick projects, run their install task'],
     ['start', '[args]', 'Pick projects, run their start task (local wiring)'],
@@ -2491,7 +2429,7 @@ export function help() {
   const CONFIG = [
     ['add', '', 'Wizard: create a new project'],
     ['edit', '[name]', 'Wizard: modify an existing project'],
-    ['remove', '<name>', 'Delete a project (-y, alias rm)'],
+    ['remove', '<name>', 'Delete a project (alias rm)'],
     ['guards', '[project]', 'List/manage guards (add/remove/link/unlink)'],
     ['overrides', '[set|remove]', 'List/set/remove per-project env overrides (local.json)'],
     ['dir', '[path]', 'Show/set the projects directory'],
@@ -2500,12 +2438,7 @@ export function help() {
     ['pull', '<url>', 'Load config.json from a URL (backs up current)'],
   ];
   const FLAGS = [
-    ['--dry-run', 'Show what would run without executing'],
-    ['--skip-guards', "Skip a target's guards"],
-    ['--fileless', 'workspace: open windows instead of a workspace file'],
     ['--config <path>', 'Use a specific config file'],
-    ['-y, --yes', 'Skip confirmation prompts'],
-    ['-h, --help', 'This help'],
     ['-v, --version', 'Print version'],
   ];
   const L = [];
@@ -2538,23 +2471,13 @@ export function help() {
 // ---------------------------------------------------------------------------
 function parseArgs(argv) {
   const flags = {
-    dryRun: false,
-    fileless: false,
-    yes: false,
-    skipGuards: false,
-    help: false,
     version: false,
     config: null,
   };
   const pos = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--dry-run') flags.dryRun = true;
-    else if (a === '--skip-guards') flags.skipGuards = true;
-    else if (a === '--fileless') flags.fileless = true;
-    else if (a === '-y' || a === '--yes') flags.yes = true;
-    else if (a === '-h' || a === '--help') flags.help = true;
-    else if (a === '-v' || a === '--version') flags.version = true;
+    if (a === '-v' || a === '--version') flags.version = true;
     else if (a === '--config') {
       flags.config = argv[++i];
       if (flags.config == null) fail('--config requires a path');
@@ -2573,7 +2496,7 @@ async function main() {
     return;
   }
   const cmd = pos[0];
-  if (!cmd || flags.help) {
+  if (!cmd) {
     help();
     return;
   }

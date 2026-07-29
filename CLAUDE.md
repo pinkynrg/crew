@@ -101,7 +101,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   names in `project.guards` (many-to-many). `comment` is required and states what the check
   verifies — it's printed in faint gray beside each result when guards run. Before a run, the
   target's guards are deduped by name, run once each in parallel (pass = exit 0); any failure
-  prints its message and aborts. `--skip-guards` bypasses. Only `start`/`install` gate on them. Managed via
+  prints its message and aborts. Only `start`/`install` gate on them. Managed via
   the `crew guards` command (list/add/remove/link/unlink, all select-driven). The v1
   `checks` key auto-migrates to `guards` on load.
 - `workspaceSettings` (optional top-level object): written verbatim into the generated
@@ -141,8 +141,7 @@ node bin/crew.js --config /tmp/x.json check            # validate; exit 1 on err
 ```
 
 `start`/`install`/`workspace`/`claude` open the picker, so they need an interactive TTY
-(non-TTY = clear error). Use `--dry-run` in a real terminal to inspect resolved commands
-(incl. `{envfile}` wiring); `list`/`graph`/`check` work non-interactively.
+(non-TTY = clear error); `list`/`graph`/`check` work non-interactively.
 
 `crew check` (`cmdCheck`) is the hand-rolled, zero-dep config validator — NO JSON-Schema
 library (would break the zero-deps constraint) and NO separate schema file (would break the
