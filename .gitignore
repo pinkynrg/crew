@@ -3,7 +3,3 @@ node_modules/
 .DS_Store
 .env
 .crew.json
-
-# Built by esbuild from src/ (npm run build / prepare). Not committed; published from the
-# build. Run `npm run build` (or `npm ci`, which triggers prepare) to regenerate it.
-bin/crew.js

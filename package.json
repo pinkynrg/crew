@@ -14,12 +14,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "esbuild src/main.js --bundle --platform=node --format=esm --outfile=bin/crew.js --banner:js='#!/usr/bin/env node'",
-    "prepare": "npm run build",
     "start": "node bin/crew.js"
-  },
-  "devDependencies": {
-    "esbuild": "^0.28.1"
   },
   "keywords": [
     "cli",

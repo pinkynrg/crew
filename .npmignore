@@ -1,9 +1,0 @@
-# The published package ships only the built bundle (bin/crew.js) + README (see the
-# package.json "files" allowlist). This file exists so npm does NOT fall back to .gitignore
-# — which ignores the built bin/crew.js — and therefore keeps the bundle in the tarball.
-src/
-.github/
-node_modules/
-package-lock.json
-*.log
-.DS_Store
