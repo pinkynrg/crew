@@ -1837,13 +1837,10 @@ export function cmdDir(flags, arg) {
 // edge P→T when a URL in P's envs has a host equal to one of T's match hosts (tokenMatchLen).
 // Optional config `internalDomains: [..]` only affects the cosmetic "other hosts" list.
 // localhost URLs match no id, so they drop out.
-export function cmdGraph(flags, names) {
+export function cmdGraph(flags) {
   const { cfg } = loadMerged(flags);
   const paint = projectColors(cfg);
-  const projects =
-    names && names.length
-      ? membersFor(cfg, names).map((m) => [m.name, m.project])
-      : Object.entries(cfg.projects || {});
+  const projects = Object.entries(cfg.projects || {});
   const domains = Array.isArray(cfg.internalDomains) ? cfg.internalDomains : [];
 
   const meta = {};
@@ -2489,7 +2486,7 @@ export function help() {
     ['start', '[args]', 'Pick projects, run their start task (local wiring)'],
     ['workspace', '', 'Pick projects, open as one VSCode window (alias: code)'],
     ['claude', '[session]', 'Pick projects, launch Claude Code (names the chat history, else auto)'],
-    ['graph', '[project...]', 'Show the dependency graph derived from .envs'],
+    ['graph', '', 'Show the dependency graph derived from .envs'],
   ];
   const CONFIG = [
     ['add', '', 'Wizard: create a new project'],
@@ -2522,17 +2519,6 @@ export function help() {
   L.push('');
   L.push(c.bold('CONFIG'));
   for (const [n, r, d] of CONFIG) L.push(cmd(n, r, d));
-  L.push('');
-  L.push(c.bold('SELECTION'));
-  L.push('  start/install/workspace/claude always open an interactive multiselect');
-  L.push('  (preselected with your last pick). The chosen set is remembered globally and');
-  L.push('  reused across them. For a co-running set, start warns live if the selection');
-  L.push('  isn\'t connected in the dependency graph.');
-  L.push('');
-  L.push(c.bold('TASKS'));
-  L.push('  Per project: tasks[<task>] -> runner with {task}. start/dev/watch stream and');
-  L.push('  tear down together on Ctrl-C; others run to completion, then report pass/fail.');
-  L.push('  Pass placeholder values ({name}) as key=value args, e.g. crew start env=qa.');
   L.push('');
   L.push(c.bold('FLAGS'));
   for (const [f, d] of FLAGS) L.push(`  ${c.cyan(f)}${' '.repeat(Math.max(2, 18 - f.length))}${d}`);
@@ -2635,7 +2621,7 @@ async function main() {
       cmdDir(flags, rest[0]);
       return;
     case 'graph':
-      cmdGraph(flags, rest);
+      cmdGraph(flags);
       return;
     case 'config':
       cmdConfig(flags, rest[0]);

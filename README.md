@@ -303,7 +303,7 @@ crew install                    pick projects, run their install task
 crew start [args]               pick projects, run their start task (local wiring)
 crew workspace [--fileless]     pick projects, open one VSCode window (alias: code)
 crew claude                     pick projects, launch Claude Code once (--add-dir)
-crew graph [project...]         dependency graph derived from .envs files
+crew graph                      dependency graph derived from .envs files
 ```
 
 `start`/`install`/`workspace`/`claude` always open the interactive multiselect
