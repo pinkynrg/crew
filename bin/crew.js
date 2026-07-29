@@ -981,7 +981,7 @@ const KILL_GRACE_MS = Number(process.env.CREW_KILL_GRACE_MS) || 5000;
 // gunicorn-style children). Within the window, extra Ctrl-C is ignored with a nudge.
 const SIGINT_FORCE_AFTER_MS = Number(process.env.CREW_FORCE_AFTER_MS) || 10000;
 
-export function runFanout(commands, { killOthers, announceExits, interactive = false, guardSeed = [], hidden = [], saveHidden = () => {}, logWrap = true, saveWrap = () => {} }) {
+export function runFanout(commands, { killOthers, announceExits, interactive = false, guards = [], hidden = [], saveHidden = () => {}, logWrap = true, saveWrap = () => {} }) {
   return new Promise((resolve) => {
     const results = [];
     const live = new Set();
@@ -993,6 +993,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
     let allStopped = false; // every process has exited but the viewer is held open to review
     let settled = false; // settle() runs once
     let viewerRepaint = () => {}; // set by the interactive viewer so finish() can refresh its footer
+    let viewerRunGuards = null; // set by the viewer: runs guards live as rows, resolves pass/fail
 
     let menuOpen = false; // reentrancy guard for the key handler
     let detachKeys = () => {};
@@ -1143,28 +1144,35 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       }
     };
 
-    for (let i = 0; i < commands.length; i++) {
-      const cmd = commands[i];
-      const child = spawn('/bin/sh', ['-c', cmd.command], {
-        detached: true, // own process group -> group-kill catches reparented children
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...(COLOR ? { FORCE_COLOR: '1' } : {}), ...process.env },
-      });
-      child._name = cmd.name;
-      child._index = i;
-      child._color = cmd.color;
-      child._prefix = cmd.color(`[${cmd.name}] `);
-      child._killedByUs = false;
-      live.add(child);
-      spawned.push(child);
-      child.stdout.on('data', (b) => emit(child, b.toString('utf8')));
-      child.stderr.on('data', (b) => emit(child, b.toString('utf8')));
-      child.on('error', (err) => {
-        note(child, c.red(`failed to start: ${err.message}`));
-        finish(child, 1);
-      });
-      child.on('close', (code, signal) => finish(child, code ?? signal));
-    }
+    // Spawn all commands. Deferred behind the guard phase (below) so nothing starts until guards
+    // pass — and so the viewer is already on screen showing each command as it launches.
+    const startSpawn = () => {
+      if (settled || stopRequested) return;
+      for (let i = 0; i < commands.length; i++) {
+        const cmd = commands[i];
+        const child = spawn('/bin/sh', ['-c', cmd.command], {
+          detached: true, // own process group -> group-kill catches reparented children
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...(COLOR ? { FORCE_COLOR: '1' } : {}), ...process.env },
+        });
+        child._name = cmd.name;
+        child._index = i;
+        child._color = cmd.color;
+        child._prefix = cmd.color(`[${cmd.name}] `);
+        child._killedByUs = false;
+        live.add(child);
+        spawned.push(child);
+        note(child, c.dim(`▶ ${cmd.command}`)); // show the executed command up front
+        child.stdout.on('data', (b) => emit(child, b.toString('utf8')));
+        child.stderr.on('data', (b) => emit(child, b.toString('utf8')));
+        child.on('error', (err) => {
+          note(child, c.red(`failed to start: ${err.message}`));
+          finish(child, 1);
+        });
+        child.on('close', (code, signal) => finish(child, code ?? signal));
+      }
+      if (live.size === 0) settle();
+    };
 
     // Interactive log viewer (streamed mode on a TTY): a full-screen pager on the alternate
     // screen showing the SELECTED projects' history, scrollable (keyboard + mouse wheel) with a
@@ -1173,19 +1181,18 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
     // alternate screen and dump the full history to the terminal, so the logs persist in
     // scrollback. Keys route through requestStop() since raw mode swallows SIGINT. No-op when
     // piped/CI (viewer stays null; output streams with prefixes).
-    if (interactive && live.size) {
+    if (interactive && commands.length) {
       const stdin = process.stdin;
       const wasRaw = stdin.isRaw;
       if (stdin.setRawMode) stdin.setRawMode(true);
       stdin.resume();
-      // Guards appear as pseudo-projects (`[vpn]`/`[aws]`) — filterable rows seeded at the top of
-      // the history. Their names join the project names in the filter list + hidden memory.
-      const guardProcs = new Map(guardSeed.map((g) => [g.name, { _name: g.name, _color: (s) => c.gray(s) }]));
-      const names = [...commands.map((cmd) => cmd.name), ...guardSeed.map((g) => g.name)];
+      // Guards appear as pseudo-projects (`[vpn]`/`[aws]`) — filterable rows. Their names join the
+      // project names in the filter list + hidden memory. Rows are added live by viewerRunGuards.
+      const guardProcs = new Map(guards.map((g) => [g.name, { _name: g.name, _color: (s) => c.gray(s) }]));
+      const names = [...commands.map((cmd) => cmd.name), ...guards.map((g) => g.name)];
       const history = []; // { proc, text } complete lines (capped at LOG_HISTORY)
       const pending = new Map(); // proc -> partial line not yet terminated
       const shown = new Set(names.filter((n) => !hidden.includes(n))); // persisted hidden applied
-      for (const g of guardSeed) history.push({ proc: guardProcs.get(g.name), text: `${c.green('✓')} ${g.comment || 'passed'}` });
       let wrap = logWrap; // wrap long lines vs cut them to one row (persisted preference)
       let scroll = 0; // screen-rows scrolled up from the live bottom (0 = follow tail)
       let active = true; // false while the filter picker owns the screen
@@ -1269,7 +1276,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       };
       const footerText = () => {
         if (searching) return c.dim('search: ') + query + c.cyan('▌') + c.dim('   (Enter apply · Esc clear)');
-        if (allStopped) return c.red('■ all processes exited') + c.dim(' — scroll to review · [/] search · [q/esc] exit');
+        if (allStopped) return c.red('■ stopped') + c.dim(' — scroll to review · [/] search · [q/esc] exit');
         const pos = scroll > 0 ? c.yellow(`  ↑${scroll}`) : '';
         // Count goes RED when anything is hidden, so a suppressed project/guard is always obvious.
         const nShown = `${shown.size}/${names.length}`;
@@ -1295,6 +1302,36 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
         dirty = false;
       };
       viewerRepaint = paint; // let finish() refresh the footer when all processes exit
+
+      // Run guards live as rows (⏳ → ✓/✗) inside the already-open viewer; resolve pass/fail.
+      viewerRunGuards = async () => {
+        const rows = guards.map((g) => {
+          const row = { proc: guardProcs.get(g.name), text: c.dim(`⏳ ${g.comment || 'checking…'}`) };
+          history.push(row);
+          return { g, row };
+        });
+        paint();
+        const results = await Promise.all(
+          guards.map(
+            (g) =>
+              new Promise((res) => {
+                const ch = spawn('/bin/sh', ['-c', g.command], { stdio: 'ignore' });
+                ch.on('error', () => res(false));
+                ch.on('close', (code) => res(code === 0));
+              })
+          )
+        );
+        let allOk = true;
+        rows.forEach(({ g, row }, i) => {
+          if (results[i]) row.text = `${c.green('✓')} ${g.comment || 'passed'}`;
+          else {
+            allOk = false;
+            row.text = c.red(`✗ ${g.message || 'guard failed'}`);
+          }
+        });
+        paint();
+        return allOk;
+      };
       const scrollBy = (d) => {
         const H = Math.max(1, rows() - 1);
         const maxScroll = Math.max(0, screenRows().length - H);
@@ -1324,7 +1361,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
 
       let onData;
       const openFilter = async () => {
-        if (menuOpen || !live.size) return;
+        if (menuOpen) return;
         menuOpen = true;
         active = false; // capture to history only; let the picker own the screen
         stdin.removeListener('data', onData);
@@ -1441,7 +1478,21 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       paint();
     }
 
-    if (live.size === 0) settle();
+    // Guard phase then spawn. Interactive: the viewer is already up; run guards as live rows and
+    // only spawn once they pass (holding the viewer open on failure). Non-interactive / no guards:
+    // spawn straight away (non-interactive guards already ran + gated in cmdRun).
+    if (viewerRunGuards && guards.length) {
+      viewerRunGuards().then((ok) => {
+        if (settled || stopRequested) return; // user quit during the guard phase
+        if (ok) startSpawn();
+        else {
+          allStopped = true; // guards failed: hold the viewer so the ✗ + message stay on screen
+          viewerRepaint();
+        }
+      });
+    } else {
+      startSpawn();
+    }
   });
 }
 
@@ -1451,10 +1502,9 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
 // a guard shared by several projects runs once. Any failure prints its message and aborts
 // before anything starts.
 // ---------------------------------------------------------------------------
-// Runs the target's guards (deduped). Any failure prints + aborts. On success returns
-// [{ name, comment }] so the caller can seed them into the log viewer. `quiet` suppresses the
-// success print (the viewer will show the guards instead); failures always print.
-export async function runGuards(cfg, members, { quiet = false } = {}) {
+// The target's guard specs, deduped by name (a guard shared by several projects runs once).
+// Errors if any referenced guard is undefined. [{ name, command, comment, message }].
+export function collectGuards(cfg, members) {
   const registry = cfg.guards || {};
   const names = [];
   const seen = new Set();
@@ -1464,40 +1514,43 @@ export async function runGuards(cfg, members, { quiet = false } = {}) {
         seen.add(gn);
         names.push(gn);
       }
-  if (!names.length) return [];
-
   const undef = names.filter((n) => !registry[n] || !registry[n].command);
-  if (undef.length)
-    fail(`undefined guard(s): ${undef.join(', ')}. Define them with: crew guards add`);
+  if (undef.length) fail(`undefined guard(s): ${undef.join(', ')}. Define them with: crew guards add`);
+  return names.map((n) => ({
+    name: n,
+    command: registry[n].command,
+    comment: registry[n].comment || '',
+    message: registry[n].message || 'guard failed',
+  }));
+}
 
+// Non-interactive path: run the guards now, print the ✓/✗ block, abort on any failure. (The
+// interactive path instead runs them as live rows inside the log viewer — see runFanout.)
+export async function runGuards(cfg, members) {
+  const specs = collectGuards(cfg, members);
+  if (!specs.length) return;
   const results = await Promise.all(
-    names.map(
-      (n) =>
+    specs.map(
+      (g) =>
         new Promise((res) => {
-          const child = spawn('/bin/sh', ['-c', registry[n].command], { stdio: 'ignore' });
-          child.on('error', () => res({ n, ok: false }));
-          child.on('close', (code) => res({ n, ok: code === 0 }));
+          const ch = spawn('/bin/sh', ['-c', g.command], { stdio: 'ignore' });
+          ch.on('error', () => res(false));
+          ch.on('close', (code) => res(code === 0));
         })
     )
   );
-  const failed = results.filter((r) => !r.ok);
-  if (failed.length) {
-    console.log(c.dim('guards:'));
-    for (const r of results) {
-      const note = registry[r.n].comment ? '  ' + faint(registry[r.n].comment) : '';
-      if (r.ok) console.log(`  ${c.green('✓')} ${r.n}${note}`);
-      else {
-        console.log(`  ${c.red('✗')} ${r.n}${note}`);
-        console.log(`      ${c.red(registry[r.n].message || 'guard failed')}`);
-      }
+  console.log(c.dim('guards:'));
+  let failed = 0;
+  specs.forEach((g, i) => {
+    const note = g.comment ? '  ' + faint(g.comment) : '';
+    if (results[i]) console.log(`  ${c.green('✓')} ${g.name}${note}`);
+    else {
+      failed++;
+      console.log(`  ${c.red('✗')} ${g.name}${note}`);
+      console.log(`      ${c.red(g.message)}`);
     }
-    fail(`${failed.length > 1 ? 'guards' : 'guard'} failed — nothing started.`);
-  }
-  if (!quiet) {
-    console.log(c.dim('guards:'));
-    for (const r of results) console.log(`  ${c.green('✓')} ${r.n}${registry[r.n].comment ? '  ' + faint(registry[r.n].comment) : ''}`);
-  }
-  return results.map((r) => ({ name: r.n, comment: registry[r.n].comment || '' }));
+  });
+  if (failed) fail(`${failed > 1 ? 'guards' : 'guard'} failed — nothing started.`);
 }
 
 // Local service wiring: for each runnable whose command uses {envfile}, load its base env
@@ -1616,9 +1669,14 @@ export async function cmdRun(flags, task, rest) {
   const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
 
   const interactive = isLong && process.stdin.isTTY && process.stdout.isTTY;
-  // Guards gate `start`. On the interactive path stay quiet (the viewer shows them as rows, and
-  // its alternate screen would wipe a printed block anyway); otherwise print the ✓ block.
-  const guardSeed = task === 'start' ? await runGuards(cfg, runnable, { quiet: interactive }) : [];
+  // Guards gate `start`. Interactive: pass the specs to runFanout, which runs them as live rows
+  // inside the viewer (so the screen appears immediately) and gates the spawn. Non-interactive:
+  // run them here (prints the ✓/✗ block, aborts on failure) before anything starts.
+  let guardSpecs = [];
+  if (task === 'start') {
+    if (interactive) guardSpecs = collectGuards(cfg, runnable);
+    else await runGuards(cfg, runnable);
+  }
 
   const paint = projectColors(cfg); // same per-project colors as `crew list`
   const commands = runnable.map((r, i) => ({
@@ -1635,7 +1693,7 @@ export async function cmdRun(flags, task, rest) {
       killOthers: true,
       announceExits: true,
       interactive,
-      guardSeed,
+      guards: guardSpecs,
       hidden: loadHiddenLog(flags),
       saveHidden: (h) => saveHiddenLog(flags, h),
       logWrap: loadLogWrap(flags),
