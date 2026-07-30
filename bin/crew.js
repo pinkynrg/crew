@@ -1823,6 +1823,8 @@ export function cmdList(flags) {
       c.dim(tildify(userConfigPath(flags))) +
       (localPath ? c.dim(`  (+ ${tildify(localPath)})`) : '')
   );
+  const machinePath = machineConfigPath(flags);
+  console.log(c.dim('local         ') + c.dim(tildify(machinePath)) + (pathExists(machinePath) ? '' : c.dim('  (none yet)')));
 }
 
 // crew dir [path] — show or set the machine-local projects directory. Stored in
