@@ -144,7 +144,10 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   mode on a TTY): a `viewer` object on an **alternate screen** (`\x1b[?1049h`) that keeps a
   tagged line `history` (cap `CREW_LOG_HISTORY`, default 5000) and `repaint`s a filtered view —
   `emit` routes to `viewer.feed` (splits on `\n`, buffers partials in `pending`, live-`render`s
-  a line only when its project is in `shown`). `f` opens the `menu` multiselect (preselected =
+  a line only when its project is in `shown`). `feed` caps each line's length at `MAX_LINE`
+  (`CREW_MAX_LINE`, default 4000) and flushes an unterminated remainder longer than that — so a
+  newline-less spew (minified bundle, base64/binary) can't grow `pending` unbounded or make
+  `splitRows`/`repaint` explode into hundreds of thousands of rows (which previously wedged the viewer). `f` opens the `menu` multiselect (preselected =
   `shown`); applying repaints from history, so **select none = blank screen** and re-showing a
   project brings its recent lines back. Footer pinned to row R via a DECSTBM scroll region
   (`\x1b[1;R-1r`). `Ctrl-C`/`q` -> `requestStop` (shared graceful-stop; raw mode swallows

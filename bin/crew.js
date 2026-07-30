@@ -1177,6 +1177,11 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
     // an alternate screen while running. null = plain prefixed streaming (piped / CI).
     let viewer = null;
     const LOG_HISTORY = Number(process.env.CREW_LOG_HISTORY) || 5000;
+    // Cap the VISIBLE length of any single log line. Without it, a stream with few newlines (a
+    // minified bundle, a base64/binary spew, a giant JSON) makes `pending` grow unbounded and
+    // `splitRows` produce hundreds of thousands of wrapped rows per repaint — which wedges the
+    // viewer. Overlong lines are clipped with a marker; the process still runs.
+    const MAX_LINE = Number(process.env.CREW_MAX_LINE) || 4000;
 
     // Shared line-aware logger: prefix only at line starts; when a different command
     // interrupts an unterminated line, close it first (standard prefixed-logger behavior).
@@ -1520,9 +1525,18 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       viewer = {
         feed(proc, text) {
           const parts = ((pending.get(proc) || '') + text).split('\n');
-          pending.set(proc, parts.pop()); // trailing element is the incomplete remainder
+          let rem = parts.pop(); // trailing element is the incomplete remainder
+          // Bound `pending`: an unterminated line longer than the cap is flushed now (as a
+          // complete line) so a newline-less stream can't accumulate megabytes in memory.
+          if (rem.length > MAX_LINE) {
+            parts.push(rem);
+            rem = '';
+          }
+          pending.set(proc, rem);
           let added = 0;
-          for (const line of parts) {
+          for (const raw of parts) {
+            // Clip overlong lines so splitRows/screenRows stay cheap (see MAX_LINE).
+            const line = raw.length > MAX_LINE ? raw.slice(0, MAX_LINE) + c.dim(` …[+${raw.length - MAX_LINE} chars]`) : raw;
             history.push({ proc, text: line });
             if (history.length > LOG_HISTORY) history.shift();
             if (matches(proc, line)) added += wrap ? splitRows(prefixFor(proc) + line, cols()).length : 1;
