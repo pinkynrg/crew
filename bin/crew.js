@@ -665,7 +665,9 @@ export function envFilesFor(dir) {
   const envsDir = join(dir, '.envs');
   let names = [];
   try {
-    names = readdirSync(envsDir).filter((n) => !n.startsWith('.'));
+    // Skip hidden/editor junk, but KEEP dotfile env files (`.env`, `.env.qa`, …) — some projects
+    // (e.g. the loader) name their envs that way, and the graph must read them for edges.
+    names = readdirSync(envsDir).filter((n) => !n.startsWith('.') || n === '.env' || n.startsWith('.env.'));
   } catch {
     return [];
   }
@@ -686,15 +688,22 @@ export function urlHostPath(url) {
   const path = (m[2] || '').replace(/\/+$/, '').toLowerCase();
   return { host, path };
 }
-// A match token is a COMPLETE hostname (perfect string match) — no globs, no paths. It
-// matches a URL when the URL's host equals it (case-insensitive). Exact strings mean no
-// cross-service collisions: `api.getbee.io` matches only that host, never `rge-api.getbee.io`.
-// List every host a service is reached by, including env variants (qa-…, pre-…). Returns the
-// token length on match (0 otherwise) — the length keeps the "most specific wins" caller API,
-// though exact matching makes overlaps impossible in practice.
+// A match token identifies a service by EXACT host, optionally narrowed by a path prefix:
+//   - `api.getbee.io`                       → matches any URL on that host (host-swap wiring).
+//   - `host/plugin/v2/BeePlugin.js`         → matches only URLs on that host whose path is (or is
+//     under) that path — used when two services share a host but differ by path, or when the
+//     local rewrite must change the path too (full-URL wiring; see wireText). Exact host, no
+//     globs → no cross-service collisions. Returns the matched length (host or host+path) so the
+//     most-specific token wins.
 export function tokenMatchLen(host, path, tok) {
   tok = String(tok).toLowerCase();
-  return tok && tok === host ? tok.length : 0;
+  if (!tok) return 0;
+  const slash = tok.indexOf('/');
+  if (slash === -1) return tok === host ? tok.length : 0; // host-only token
+  const tokHost = tok.slice(0, slash);
+  const tokPath = tok.slice(slash).replace(/\/+$/, ''); // e.g. '/plugin/v2/beeplugin.js'
+  if (host !== tokHost) return 0;
+  return path === tokPath || path.startsWith(tokPath + '/') ? tok.length : 0;
 }
 
 // The scheme://host[:port] prefix of a URL (drops path/query/fragment). '' if not a URL.
@@ -702,27 +711,31 @@ export function originOf(url) {
   const m = String(url).match(/^https?:\/\/[^/?#\s]+/i);
   return m ? m[0] : '';
 }
-// Rewrite env-file text for local wiring: every URL whose host/path matches a co-running
-// peer's tokens has its origin swapped to that peer's local origin (path/query preserved).
-// Most-specific token wins (gateway paths). Peers absent from `peers` stay remote. `peers`
-// = [{ tokens, origin }]. Format-preserving — only URL origins change.
+// Rewrite env-file text for local wiring: every URL matching a co-running peer's token is
+// pointed at that peer locally. A host-only token swaps just the origin (path/query preserved);
+// a host+path token replaces the WHOLE URL with the peer's full `local` (so the local path can
+// differ from the deployed one — e.g. `…/plugin/v2/BeePlugin.js` → `localhost:8088/v2/api/loader`).
+// Most-specific token wins. Peers absent from `peers` stay remote. `peers` = [{ tokens, origin, local }].
 export function wireText(text, peers) {
   return text.replace(URL_RE, (url) => {
     const p = urlHostPath(url);
     if (!p) return url;
     let best = null;
     let bestLen = 0;
+    let bestTok = null;
     for (const peer of peers)
       for (const tok of peer.tokens) {
         const len = tokenMatchLen(p.host, p.path, tok);
         if (len > bestLen) {
           bestLen = len;
           best = peer;
+          bestTok = tok;
         }
       }
     if (!best) return url;
+    if (String(bestTok).includes('/')) return best.local; // path token: replace the whole URL
     const o = originOf(url);
-    return o ? best.origin + url.slice(o.length) : url;
+    return o ? best.origin + url.slice(o.length) : url; // host token: swap origin, keep path
   });
 }
 
@@ -1561,7 +1574,7 @@ export async function runGuards(cfg, members) {
 export function wireRun(userPath, runnable, members, { overrides = {} }) {
   const peers = members
     .filter((m) => m.project.local)
-    .map((m) => ({ name: m.name, tokens: projectIdentity(m.project).tokens, origin: originOf(m.project.local) || m.project.local }));
+    .map((m) => ({ name: m.name, tokens: projectIdentity(m.project).tokens, origin: originOf(m.project.local) || m.project.local, local: m.project.local }));
   const tmpDir = join(crewHomeFor(userPath), 'tmp');
   const tempPaths = [];
   // Trigger set for `whenLocal` overrides: every project being started (self included).
@@ -2409,8 +2422,8 @@ export function cmdCheck(flags) {
         if (!isStrArr(p.match)) E(`${at}: 'match' must be an array of strings`);
         else
           for (const h of p.match) {
-            if (/[*?]/.test(h)) W(`${at}: match '${h}' looks like a glob — matching is exact-host only`);
-            else if (h.includes('/')) W(`${at}: match '${h}' should be a bare hostname (no scheme/path)`);
+            if (/[*?]/.test(h)) W(`${at}: match '${h}' looks like a glob — matching is exact host (optionally + path)`);
+            else if (h.includes('://')) W(`${at}: match '${h}' must not include a scheme — use host or host/path`);
           }
       }
       if (p.envMap != null) {

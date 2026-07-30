@@ -235,9 +235,9 @@ file lacks — instead of pinning a dependency's env with `envMap`.)
 who calls whom — with no manual edge list. It powers the connectivity check `crew start`
 does on a co-running set.
 
-Give each project a `match`: the **complete hostname(s)** it's served under — **exact
-strings**, listing every env variant. An edge `P → T` is drawn when a URL in P's env files
-has a host equal to one of T's `match` strings.
+Give each project a `match`: the **host(s)** it's served under — **exact strings**, listing
+every env variant, each **optionally narrowed by a path**. An edge `P → T` is drawn when a URL
+in P's env files matches one of T's `match` entries.
 
 ```json
 "projects": {
@@ -250,6 +250,11 @@ has a host equal to one of T's `match` strings.
 
 - **Exact match**, so `api.example.com` matches only that host — never
   `rge-api.example.com` or `vpc-…-api-….amazonaws.com`. No globs, no collisions.
+- **Host+path** tokens (`cdn.example.com/plugin/v2/BeePlugin.js`) match only URLs on that host
+  under that path — for two services sharing a host but differing by path. In **wiring**, a
+  host-only token swaps just the origin (path kept); a host+path token replaces the whole URL
+  with the peer's full `local` (so set `local` to the full local URL, path included — useful
+  when the local path differs from the deployed one).
 - List each env variant (`qa-`, `pre-`, …); add new ones when envs appear.
 - A project with no `match` has no id, so nothing can point at it — `crew graph` flags it.
   crew derives nothing from folder/file/env names; the exact hosts are the whole rule.

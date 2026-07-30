@@ -87,10 +87,15 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   the `env` file path, and wiring. Used when a dependency is consumed at a fixed env (e.g.
   SDK projects `{"pro":"pro","default":"qa"}`: RGE at pre/qa talks to SDK@qa, pro→pro).
   Agnostic — a plain per-project table; crew has no service-mapping knowledge.
-- `match` (per project): the project's complete deployed hostname(s) as **exact strings**
-  (list every env variant); matched by exact host equality (`tokenMatchLen`) — no globs, no
-  collisions (`api.getbee.io` never matches `rge-api.getbee.io`). `crew graph` derives edges
-  from `.envs/*` URLs; `crew start` warns when a co-running selection isn't connected.
+- `match` (per project): the project's deployed host(s) as **exact strings** (list every env
+  variant), each optionally narrowed by a **path** — `host` or `host/path/prefix` (`tokenMatchLen`,
+  no globs, no collisions: `api.getbee.io` never matches `rge-api.getbee.io`). A host-only token
+  swaps just the origin in wiring (path preserved); a **host+path** token matches only URLs on
+  that host under that path AND replaces the WHOLE URL with the peer's full `local` — so two
+  services sharing a host but differing by path stay distinct, and a local path can differ from
+  the deployed one (e.g. `…-app-rsrc…/plugin/v2/BeePlugin.js` → `localhost:8088/v2/api/loader`;
+  for a path token, set `local` to the full local URL incl. path). `crew graph` derives edges
+  from `.envs/*` URLs (incl. dotfile `.env*`); `crew start` warns when a co-running set isn't connected.
 - `defaultBranch` (optional, per project): the branch new work is cut from (repos differ —
   `main`/`master`/`develop`/`trunk`). Pure metadata crew records/displays (`crew list` shows a
   `branch` line); crew runs no git with it. The `crew add`/`edit` wizard prefills it via
