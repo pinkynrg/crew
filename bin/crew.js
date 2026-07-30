@@ -1780,8 +1780,6 @@ export function cmdList(flags) {
   // --- Projects -------------------------------------------------------------
   console.log(c.bold(c.underline('Projects')));
   if (projects.length === 0) console.log(c.dim('  (none)'));
-  const nameW = Math.max(0, ...projects.map(([n]) => n.length));
-  const typeW = Math.max(0, ...projects.map(([, p]) => (p.type || 'other').length));
   for (const [name, p] of projects) {
     // Tolerant of an unset projects dir: show the raw relative path instead of crashing.
     let abs = null;
@@ -1793,24 +1791,25 @@ export function cmdList(flags) {
     const ok = abs ? pathExists(abs) : false;
     const dot = ok ? c.green('●') : c.red('●');
     const type = p.type || 'other';
-    const nameCell = c.bold(paint.get(name)(name.padEnd(nameW)));
-    const typeCell = c.dim(type.padEnd(typeW));
     const shown = abs ? tildify(abs) : `${p.path}  ${c.dim('(set projects dir: crew dir)')}`;
-    const pathCell = ok ? c.dim(shown) : c.red(shown + (abs ? '  ✗ missing' : ''));
-    console.log(`  ${dot} ${nameCell}  ${typeCell}  ${pathCell}`);
+    const pathCell = ok ? shown : c.red(shown + (abs ? '  ✗ missing' : ''));
+    console.log(`  ${dot} ${c.bold(paint.get(name)(name))}`); // header: status + name only
 
+    // Every field is a labeled row, columns aligned per project (type/path like runner/branch/…).
     const taskEntries = Object.entries(p.tasks || {});
-    const labels = [p.runner ? 'runner' : null, ...taskEntries.map(([t]) => t)].filter(Boolean);
+    const labels = ['type', 'path', ...(p.runner ? ['runner'] : []), ...taskEntries.map(([t]) => t), ...(p.guards && p.guards.length ? ['guards'] : []), ...(p.defaultBranch ? ['branch'] : [])];
     const labelW = Math.max(6, ...labels.map((s) => s.length));
-    if (p.runner) console.log(`      ${c.dim('runner'.padEnd(labelW + 2))}${p.runner}`);
+    const lab = (s) => c.dim(s.padEnd(labelW + 2));
+    console.log(`      ${lab('type')}${type}`);
+    console.log(`      ${lab('path')}${pathCell}`);
+    if (p.runner) console.log(`      ${lab('runner')}${p.runner}`);
     for (const [t, cmd] of taskEntries) {
       const kind = longRunning.has(t) ? c.yellow('service') : c.green('task');
-      console.log(`      ${c.dim(t.padEnd(labelW + 2))}${cmd}  ${c.dim('[')}${kind}${c.dim(']')}`);
+      console.log(`      ${lab(t)}${cmd}  ${c.dim('[')}${kind}${c.dim(']')}`);
     }
     if (!p.runner && taskEntries.length === 0) console.log(`      ${c.dim('(run-less)')}`);
-    if (p.guards && p.guards.length)
-      console.log(`      ${c.dim('guards'.padEnd(labelW + 2))}${p.guards.join(', ')}`);
-    if (p.defaultBranch) console.log(`      ${c.dim('branch'.padEnd(labelW + 2))}${p.defaultBranch}`);
+    if (p.guards && p.guards.length) console.log(`      ${lab('guards')}${p.guards.join(', ')}`);
+    if (p.defaultBranch) console.log(`      ${lab('branch')}${p.defaultBranch}`);
   }
 
   // --- Footer ---------------------------------------------------------------
