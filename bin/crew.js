@@ -2509,6 +2509,19 @@ export function cmdCheck(flags) {
 // ("changed 1 package…" whether or not anything changed), so we hide it and compare versions
 // ourselves: skip if already latest, else install silently and report old -> new (or surface
 // npm's error on failure).
+// The version npm actually has installed globally — the source of truth, read
+// straight from the global tree. Never trust npm install's exit code for this:
+// it exits 0 even when it reinstalls the same version (see cmdUpgrade).
+function installedGlobalVersion(pkg) {
+  const r = spawnSync('npm', ['ls', '-g', pkg, '--depth=0', '--json'], { encoding: 'utf8' });
+  if (!r.stdout) return null;
+  try {
+    return JSON.parse(r.stdout)?.dependencies?.[pkg]?.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function cmdUpgrade() {
   const pkg = PKG.name;
   const current = PKG.version;
@@ -2518,8 +2531,14 @@ export function cmdUpgrade() {
     console.log(`${c.green('✓')} already up to date ${c.dim(`(v${current})`)}`);
     return;
   }
+  // Install the exact resolved version, NOT the `@latest` tag. `npm view` does a
+  // fresh registry query (so `latest` is current), but `npm install <pkg>@latest`
+  // resolves the tag against npm's cached packument — which can still point at the
+  // old version — and then silently reinstalls it while exiting 0. Pinning
+  // @<latest> forces npm to fetch the version we actually resolved.
+  const spec = latest ? `${pkg}@${latest}` : `${pkg}@latest`;
   process.stdout.write(c.dim(`upgrading ${pkg} ${latest ? `v${current} → v${latest}` : `(v${current})`}… `));
-  const r = spawnSync('npm', ['install', '-g', `${pkg}@latest`], { encoding: 'utf8' });
+  const r = spawnSync('npm', ['install', '-g', spec], { encoding: 'utf8' });
   if (r.error) {
     process.stdout.write('\n');
     fail(r.error.code === 'ENOENT' ? `'npm' not found on PATH` : `upgrade failed: ${r.error.message}`);
@@ -2530,7 +2549,19 @@ export function cmdUpgrade() {
     fail('upgrade failed — see npm output above');
   }
   process.stdout.write(c.green('done\n'));
-  console.log(latest ? `${c.green('✓')} upgraded ${c.dim(`v${current} → v${latest}`)}` : `${c.green('✓')} upgraded to latest ${c.dim(`(was v${current})`)}`);
+  // Verify against the actual global install — npm exiting 0 does not mean the
+  // version changed. If it didn't, say so plainly instead of claiming success.
+  const installed = installedGlobalVersion(pkg);
+  if (installed && installed === current) {
+    fail(`npm reported success but ${pkg} is still v${current}. Try: npm cache clean --force && npm install -g ${spec}`);
+  }
+  if (installed) {
+    console.log(`${c.green('✓')} upgraded ${c.dim(`v${current} → v${installed}`)}`);
+  } else if (latest) {
+    console.log(`${c.green('✓')} upgraded ${c.dim(`v${current} → v${latest}`)}`);
+  } else {
+    console.log(`${c.green('✓')} upgraded ${c.dim(`(was v${current})`)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
