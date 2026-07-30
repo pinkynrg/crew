@@ -70,8 +70,8 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `OVERRIDE_WHEN_LOCAL`) and applied by `applyEnvOverrides` in `wireRun`, after `wireText`;
   overrides beat the base file and the URL swap. Upsert = replace an existing `VAR=`/`export
   VAR=` line in place, else append; values quoted only when unsafe (non-string values skipped
-  with a warning). Also the escape hatch for cross-env wiring (run everything at `pre`, inject
-  the `pre` key the env lacks) instead of pinning via `envMap`. crew stays agnostic — a plain
+  with a warning). Also the escape hatch for cross-env wiring (inject a key an env lacks) when
+  env derivation + the URL swap don't cover a case. crew stays agnostic — a plain
   per-project table. Managed via `crew overrides` (list/set/remove, select-driven; `set` prompts
   an optional "only when <peer> is local"; writes `local.json`). `crew check` validates both
   forms.
@@ -81,21 +81,38 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `lastSelection` (global, machine-local) and reused across the three. `install` is the exception:
   it acts on a **single** project — a name given on the CLI (`crew install <project>`, doesn't
   touch `lastSelection`), else a single-select picker. A legacy `groups` key is dropped on load.
-- `envMap` (optional, per project): remaps the selection env to the env THIS project runs
-  at — `{ "<selEnv>": "<projEnv>", "default": "<fallback>" }` (see `mappedEnv`). `{env}`
-  resolves per project (`envMap[sel] ?? envMap.default ?? sel`) before the start command,
-  the `env` file path, and wiring. Used when a dependency is consumed at a fixed env (e.g.
-  SDK projects `{"pro":"pro","default":"qa"}`: RGE at pre/qa talks to SDK@qa, pro→pro).
-  Agnostic — a plain per-project table; crew has no service-mapping knowledge.
-- `match` (per project): the project's deployed host(s) as **exact strings** (list every env
-  variant), each optionally narrowed by a **path** — `host` or `host/path/prefix` (`tokenMatchLen`,
-  no globs, no collisions: `api.getbee.io` never matches `rge-api.getbee.io`). A host-only token
+- Env derivation (replaces the old `envMap`): `{env}` is NOT a static per-project map — it's
+  **derived from the chain** by `resolveEnvs(cfg, selection, selEnv)`. The **entry clusters**
+  (source SCCs of the dependency graph — projects nothing else in the selection depends on) run
+  at the selection env; every other project inherits the env-variant its consumer's env file
+  actually points at (host → env via the labeled `match`, below). BFS from the seeds, so the
+  claim CLOSEST to an entry wins; within one file the MAJORITY label wins. Cycles (e.g. a
+  frontend↔backend URL reference loop) collapse into one entry cluster via `stronglyConnected`
+  (Tarjan) — so no reference-marker is needed to keep root-finding correct. Same shared config
+  serves multiple teams: beepro-frontend@pre derives sdk-frontend=qa (consumed via the qa
+  loader), while sdk-frontend@pre (SDK team's entry) derives sdk-api=pre. Disagreements, missing
+  envs and unreached nodes are collected as warnings (surfaced by `crew start`, printed by
+  `crew resolve`), never silently mis-resolved. `crew resolve <env> [proj…]` is the read-only
+  dry-run. Feeds the start command, the `env` file path, and wiring. crew stays agnostic — env
+  names are free-form; no hardcoded env list.
+- `match` (per project): an **env-labeled map** `{ "<env>": host | [hosts] }` of the project's
+  deployed host(s) — exact strings, each optionally narrowed by a **path** (`host` or
+  `host/path/prefix`; `tokenMatchLen`, no globs, no collisions: `api.getbee.io` never matches
+  `rge-api.getbee.io`). Partial/free-form keys OK (label only the envs a project has — the loader
+  has just `qa`/`pro`). `projectIdentity` flattens the values into identity `tokens` (edges +
+  wiring) and builds `envOf` (host → env label — the basis for env derivation). A host-only token
   swaps just the origin in wiring (path preserved); a **host+path** token matches only URLs on
   that host under that path AND replaces the WHOLE URL with the peer's full `local` — so two
   services sharing a host but differing by path stay distinct, and a local path can differ from
   the deployed one (e.g. `…-app-rsrc…/plugin/v2/BeePlugin.js` → `localhost:8088/v2/api/loader`;
   for a path token, set `local` to the full local URL incl. path). `crew graph` derives edges
-  from `.envs/*` URLs (incl. dotfile `.env*`); `crew start` warns when a co-running set isn't connected.
+  from `.envs/*` URLs (incl. dotfile `.env.<env>`); `crew start` warns when a co-running set isn't connected.
+- Reference edges (`isReferenceEdge`): a URL from a **non-frontend into a `type: frontend`** project
+  is a **reference** (link-back / allowed-origin / redirect base — a backend embedding the app's
+  public URL), NOT a dependency. It's still shown by `crew graph` (marked `⇢ … (ref)`) but excluded
+  from connectivity AND env derivation — so a backend that merely links to the frontend can't make an
+  unrelated selection look "connected" nor seed the frontend's env. Only `frontend→frontend` edges
+  (one app embedding another) stay real. Uses the declared `type` only; no per-edge config/marker.
 - `defaultBranch` (optional, per project): the branch new work is cut from (repos differ —
   `main`/`master`/`develop`/`trunk`). Pure metadata crew records/displays (`crew list` shows a
   `branch` line); crew runs no git with it. The `crew add`/`edit` wizard prefills it via
@@ -147,13 +164,13 @@ node bin/crew.js --config /tmp/x.json check            # validate; exit 1 on err
 ```
 
 `start`/`install`/`workspace`/`claude` open the picker, so they need an interactive TTY
-(non-TTY = clear error); `list`/`graph`/`check` work non-interactively.
+(non-TTY = clear error); `list`/`graph`/`check`/`resolve` work non-interactively.
 
 `crew check` (`cmdCheck`) is the hand-rolled, zero-dep config validator — NO JSON-Schema
 library (would break the zero-deps constraint) and NO separate schema file (would break the
 single-file constraint). It validates the merged config + `local.json`: known-key sets
 (`TOP_KEYS`/`PROJECT_KEYS`/`GUARD_KEYS`), types, and cross-references a schema can't express
-(guard names must exist; `{envfile}` needs `env`; `match` must be a bare host, not a glob;
+(guard names must exist; `{envfile}` needs `env`; `match` must be an env-labeled object of bare hosts, not globs;
 `match` without `local` is a dangling wiring target). Errors exit 1; warnings don't. Keep its
 key sets in sync when adding a config field.
 

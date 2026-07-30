@@ -437,7 +437,7 @@ export const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 // Config-validation key sets (used by `crew check`).
 // ---------------------------------------------------------------------------
 export const TOP_KEYS = new Set(['version', 'workspaceName', 'longRunning', 'workspaceSettings', 'internalDomains', 'projects', 'guards']);
-export const PROJECT_KEYS = new Set(['path', 'type', 'runner', 'env', 'local', 'match', 'envMap', 'tasks', 'guards', 'defaultBranch']);
+export const PROJECT_KEYS = new Set(['path', 'type', 'runner', 'env', 'local', 'match', 'tasks', 'guards', 'defaultBranch']);
 export const GUARD_KEYS = new Set(['comment', 'command', 'message']);
 export const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const isStrArr = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
@@ -482,7 +482,7 @@ export function dependencyEdges(cfg, entries) {
             best = t;
           }
         }
-      if (best && best !== name) edges.get(name).add(best);
+      if (best && best !== name && !isReferenceEdge(cfg, name, best)) edges.get(name).add(best);
     }
   }
   return edges;
@@ -616,13 +616,14 @@ export function resolveRun(cfg, task, members, args) {
     if (i < positionals.length) values[k] = positionals[i];
   });
 
-  // Per-project value set: {env} may be remapped by the project's `envMap` (e.g. a
-  // dependency consumed at a fixed env — RGE at pre/qa talks to SDK@qa). Everything else
-  // is shared. Strict-check and substitution then run against the per-project values.
+  // Per-project value set: {env} is DERIVED from the chain — the entry (root) runs at the
+  // selection env; every other project inherits the env-variant its consumer's env file points
+  // at (see resolveEnvs). Everything else is shared. Strict-check + substitution run per project.
+  const derived = values.env != null ? resolveEnvs(cfg, members, values.env) : { resolved: new Map(), warnings: [] };
   const unresolved = new Set();
   for (const r of runnable) {
-    const env = mappedEnv(r.project, values.env);
-    r._values = env === undefined ? { ...values } : { ...values, env };
+    const env = derived.resolved.get(r.name);
+    r._values = env == null ? { ...values } : { ...values, env };
     for (const p of placeholdersIn(r.template))
       if (!RESERVED.has(p) && !(p in r._values)) unresolved.add(p);
     if (r.project.env)
@@ -643,20 +644,7 @@ export function resolveRun(cfg, task, members, args) {
       ? r.project.env.replace(PLACEHOLDER_RE, (m, k) => (k in r._values ? r._values[k] : m))
       : null;
   }
-  return { runnable, skipped };
-}
-
-// Remap the selection env `g` for a project via its optional `envMap` (a lookup from the
-// selection env to the env this project should actually run at; `default` is the fallback).
-// No envMap, or no matching entry/default -> `g` unchanged. Keeps crew agnostic: it's a
-// plain per-project table, no knowledge of which services map where.
-export function mappedEnv(project, g) {
-  const m = project && project.envMap;
-  if (m && typeof m === 'object') {
-    if (g != null && g in m) return m[g];
-    if ('default' in m) return m.default;
-  }
-  return g;
+  return { runnable, skipped, envWarnings: derived.warnings };
 }
 
 // Scan <dir>/.envs, parse each file's name as <env>[-<slug>] (slug optional; some projects
@@ -792,11 +780,167 @@ export function applyEnvOverrides(text, vars) {
   return { text: out, applied };
 }
 
-// crew graph identity: a project's id comes ONLY from config `match` (complete hostnames,
-// exact string match). No `match` = no id, so nothing can point at it.
+// A project's id comes from config `match`, an ENV-LABELED map `{ env: host | [hosts] }` — the
+// complete hostname(s) it is served under per environment (exact strings, optionally host/path).
+// `tokens` = the flat host list (identity for edges + wiring); `envOf` maps each host token
+// (lowercased) to its env label (so a matched URL reveals which env it points at — the basis for
+// env derivation). No `match` = no id, so nothing can point at it.
 export function projectIdentity(project) {
-  const tokens = Array.isArray(project.match) ? project.match.filter(Boolean) : [];
-  return { tokens, source: tokens.length ? 'match' : 'none' };
+  const m = project && project.match;
+  const tokens = [];
+  const envOf = new Map();
+  if (m && typeof m === 'object' && !Array.isArray(m)) {
+    for (const [env, v] of Object.entries(m)) {
+      for (const h of Array.isArray(v) ? v : [v]) {
+        if (!h) continue;
+        tokens.push(h);
+        envOf.set(String(h).toLowerCase(), env);
+      }
+    }
+  }
+  return { tokens, envOf, source: tokens.length ? 'match' : 'none' };
+}
+
+// A URL from a non-frontend INTO a `type: frontend` project is a REFERENCE (a link-back /
+// allowed-origin / redirect base — e.g. a backend embedding the app's public URL), NOT a runtime
+// dependency. It's still shown in `crew graph` (marked), but excluded from connectivity and env
+// derivation — so a backend that merely links to the frontend can't make an unrelated selection
+// look "connected", nor seed the frontend's env. Nothing legitimately *depends on* a frontend
+// except another frontend embedding it (which stays an edge). Uses the declared `type` only.
+export function isReferenceEdge(cfg, from, to) {
+  const f = cfg.projects && cfg.projects[from];
+  const t = cfg.projects && cfg.projects[to];
+  return !!(t && t.type === 'frontend' && f && f.type !== 'frontend');
+}
+
+// Tarjan's strongly-connected components over adjacency `adj` (Map node -> Set(neighbors)),
+// visiting `nodes`. Returns an array of components (each an array of node names). Used to find
+// the "entry clusters" for env derivation: a dependency cycle (e.g. frontend <-> backend refs)
+// collapses into one component so it's seeded as a single unit rather than breaking root-finding.
+export function stronglyConnected(nodes, adj) {
+  let idx = 0;
+  const index = new Map(), low = new Map(), onStack = new Set(), stack = [], comps = [];
+  const strong = (v) => {
+    index.set(v, idx); low.set(v, idx); idx++; stack.push(v); onStack.add(v);
+    for (const w of adj.get(v) || []) {
+      if (!index.has(w)) { strong(w); low.set(v, Math.min(low.get(v), low.get(w))); }
+      else if (onStack.has(w)) low.set(v, Math.min(low.get(v), index.get(w)));
+    }
+    if (low.get(v) === index.get(v)) {
+      const comp = []; let w;
+      do { w = stack.pop(); onStack.delete(w); comp.push(w); } while (w !== v);
+      comps.push(comp);
+    }
+  };
+  for (const v of nodes) if (!index.has(v)) strong(v);
+  return comps;
+}
+
+// Derive each selected project's run-env from the chain. The selection env `selEnv` seeds the
+// ENTRY CLUSTERS (source SCCs — projects nothing else in the selection depends on); every other
+// project inherits the env-variant its consumer's env file actually points at (host -> env via the
+// labeled `match`). BFS from the seeds, so the claim CLOSEST TO an entry wins; within one file the
+// MAJORITY label wins. Disagreements, missing envs and unreached nodes are reported, never silently
+// mis-resolved. Returns { resolved: Map(name -> env), warnings: string[] }.
+export function resolveEnvs(cfg, selection, selEnv) {
+  const names = (selection || [])
+    .map((m) => (typeof m === 'string' ? m : m.name))
+    .filter((n) => cfg.projects && cfg.projects[n]);
+  const set = new Set(names);
+  const warnings = [];
+  const resolved = new Map();
+  if (selEnv == null || !names.length) return { resolved, warnings };
+
+  const meta = {};
+  for (const n of names) {
+    const p = cfg.projects[n];
+    let dir; try { dir = resolveProjectPath(p.path); } catch { dir = null; }
+    const byEnv = {};
+    if (dir) for (const f of envFilesFor(dir)) if (!(f.env in byEnv)) byEnv[f.env] = f.path;
+    meta[n] = { byEnv, envs: Object.keys(byEnv), ...projectIdentity(p) };
+  }
+
+  // Best (longest-token) peer a URL points at, plus that peer's env label for the matched host.
+  const matchUrl = (host, path) => {
+    let best = null, bestLen = 0, bestEnv = null;
+    for (const t of names)
+      for (const tok of meta[t].tokens) {
+        const len = tokenMatchLen(host, path, tok);
+        if (len > bestLen) { bestLen = len; best = t; bestEnv = meta[t].envOf.get(String(tok).toLowerCase()) ?? null; }
+      }
+    return best ? { target: best, env: bestEnv } : null;
+  };
+
+  // Consumer `n`'s claims when running at env `e`: per target, the MAJORITY env-label its file
+  // points at (tie -> lexical), with minority labels as `alt` (within-file disagreement = dirt).
+  const claimsOf = (n, e) => {
+    const file = meta[n].byEnv[e];
+    if (!file) return [];
+    let text = ''; try { text = readFileSync(file, 'utf8'); } catch { return []; }
+    const byT = new Map(); // target -> Map(env -> count)
+    for (const u of text.match(URL_RE) || []) {
+      const p = urlHostPath(u); if (!p) continue;
+      const hit = matchUrl(p.host, p.path);
+      if (!hit || hit.target === n || hit.env == null) continue;
+      if (isReferenceEdge(cfg, n, hit.target)) continue; // link-back, not a dependency
+      const em = byT.get(hit.target) || new Map();
+      em.set(hit.env, (em.get(hit.env) || 0) + 1); byT.set(hit.target, em);
+    }
+    const out = [];
+    for (const [target, envs] of byT) {
+      const sorted = [...envs.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+      out.push({ target, env: sorted[0][0], alt: sorted.slice(1).map((x) => x[0]) });
+    }
+    return out;
+  };
+
+  // Structural edges (scan ALL of a consumer's env files) for SCC/entry detection.
+  const adj = new Map(names.map((n) => [n, new Set()]));
+  for (const n of names)
+    for (const e of meta[n].envs)
+      for (const c of claimsOf(n, e)) if (set.has(c.target)) adj.get(n).add(c.target);
+
+  // Entry clusters = source SCCs (no inbound edge from another component).
+  const comps = stronglyConnected(names, adj);
+  const compOf = new Map(); comps.forEach((c, i) => c.forEach((n) => compOf.set(n, i)));
+  const inbound = new Array(comps.length).fill(false);
+  for (const n of names) for (const t of adj.get(n)) if (compOf.get(n) !== compOf.get(t)) inbound[compOf.get(t)] = true;
+
+  const q = [];
+  const seed = (n, note) => {
+    resolved.set(n, selEnv);
+    q.push(n);
+    if (!meta[n].envs.includes(selEnv)) warnings.push(`${n}: no '${selEnv}' env file — running ${selEnv} anyway`);
+    if (note) warnings.push(note);
+  };
+  // BFS from the current seeds; first claim wins (closest to an entry); disagreements warned.
+  const drain = () => {
+    while (q.length) {
+      const n = q.shift();
+      for (const c of claimsOf(n, resolved.get(n))) {
+        if (!set.has(c.target)) continue;
+        if (c.alt.length) warnings.push(`${c.target}: ${n}@${resolved.get(n)} points at ${c.env} (also ${c.alt.join(',')}) — dirty?`);
+        if (!resolved.has(c.target)) { resolved.set(c.target, c.env); q.push(c.target); }
+        else if (resolved.get(c.target) !== c.env) warnings.push(`${c.target}: keeping ${resolved.get(c.target)} (closer to entry) vs ${c.env} from ${n}`);
+      }
+    }
+  };
+
+  // Primary entries: source SCCs (nothing in the selection depends on them). Seed at selEnv, derive.
+  comps.forEach((comp, i) => { if (!inbound[i]) for (const n of comp) seed(n); });
+  drain();
+
+  // Any node still unreached is the entry of its OWN subtree — e.g. the product you're running
+  // has an inbound "reference" edge (a backend links back to the frontend), so it isn't a graph
+  // source even though it's the real entry. Seed the most-upstream unreached node(s) at selEnv and
+  // keep deriving; repeat until everything has an env. (This is why no reference-marker is needed.)
+  while (names.some((n) => !resolved.has(n))) {
+    const un = names.filter((n) => !resolved.has(n));
+    const tops = un.filter((n) => !un.some((m) => m !== n && adj.get(m).has(n)));
+    for (const n of tops.length ? tops : [un[0]]) seed(n, `${n}: no upstream consumer selected — running as entry at ${selEnv}`);
+    drain();
+  }
+  return { resolved, warnings };
 }
 
 // ==================== prompt ====================
@@ -1596,6 +1740,9 @@ export function wireRun(userPath, runnable, members, { overrides = {} }) {
     } catch (e) {
       fail(`project '${r.name}': cannot read env file ${basePath}: ${e.message}`);
     }
+    // Normalize CRLF/CR -> LF: some env files ship with Windows line endings, and `. {envfile}`
+    // would otherwise choke on `^M` and leave a trailing \r on every value.
+    baseText = baseText.replace(/\r\n?/g, '\n');
     mkdirSync(tmpDir, { recursive: true });
     const out = join(tmpDir, `${sanitize(r.name)}.env`);
     writeFileSync(out, applyEnvOverrides(wireText(baseText, myPeers), overrideVars).text);
@@ -1675,8 +1822,9 @@ export async function cmdRun(flags, task, rest) {
   if (!members) return;
   validateMemberPaths(members);
 
-  const { runnable, skipped } = resolveRun(cfg, task, members, args);
+  const { runnable, skipped, envWarnings } = resolveRun(cfg, task, members, args);
   for (const s of skipped) console.log(`skipping ${s} (no task '${task}')`);
+  for (const wn of envWarnings || []) warn(wn);
 
   // Materialize wired env files (fills {envfile}); fresh per run, cleaned up after.
   // Env overrides come from local.json (machine-local, untracked) so secrets never hit the config.
@@ -1878,6 +2026,38 @@ export function cmdDir(flags, arg) {
 
 // crew graph [target] — read-only dependency graph derived from env files (no wiring).
 // Each project's id comes ONLY from config `match` (complete hostnames, exact string match);
+// crew resolve <env> [project...] — read-only: show the env each project would run at for a
+// selection (from the chain), without starting anything. No projects given -> the remembered
+// selection (else all). The dry-run that validates derivation before you `crew start`.
+export function cmdResolve(flags, rest) {
+  const { cfg } = loadMerged(flags);
+  const selEnv = (rest || []).find((a) => !a.includes('='));
+  if (!selEnv) fail('resolve: usage: crew resolve <env> [project...]');
+  const explicit = (rest || []).filter((a) => a !== selEnv && !a.includes('='));
+  const machine = loadMachine(flags);
+  let names = explicit.length
+    ? explicit
+    : (Array.isArray(machine.lastSelection) && machine.lastSelection.length ? machine.lastSelection : Object.keys(cfg.projects || {}));
+  names = names.filter((n) => cfg.projects && cfg.projects[n]);
+  if (!names.length) fail('resolve: no known projects to resolve');
+
+  const { resolved, warnings } = resolveEnvs(cfg, names, selEnv);
+  const paint = projectColors(cfg);
+  const w = Math.max(...names.map((n) => n.length));
+  console.log(c.bold('Resolved envs') + c.dim(`  — selection env = ${selEnv}  (${names.length} project${names.length > 1 ? 's' : ''})`));
+  console.log(c.dim('  entry runs at the selection env; deps inherit the env their consumer points at.'));
+  for (const n of names) {
+    const e = resolved.get(n) || selEnv;
+    const tag = e === selEnv ? c.dim(e) : c.cyan(e);
+    const label = paint.get(n) ? paint.get(n)(n) : n;
+    console.log(`  ${label}${' '.repeat(Math.max(2, w - n.length + 2))}${tag}`);
+  }
+  if (warnings.length) {
+    console.log('\n' + c.yellow('⚠ notes:'));
+    for (const wn of warnings) console.log('  ' + c.dim(wn));
+  }
+}
+
 // edge P→T when a URL in P's envs has a host equal to one of T's match hosts (tokenMatchLen).
 // Optional config `internalDomains: [..]` only affects the cosmetic "other hosts" list.
 // localhost URLs match no id, so they drop out.
@@ -1905,9 +2085,9 @@ export function cmdGraph(flags) {
       [
         'How it works:',
         '  1. Give each project an id so crew can recognize it when another project\'s URL',
-        '     points at it: `match` = the complete hostname(s) it is served under (exact',
-        '     strings — list every env variant). E.g. match: ["api.example.com",',
-        '     "qa-api.example.com"]. No `match` = no id, so nothing can point at it (⚠).',
+        '     points at it: `match` = an env-labeled map of the complete hostname(s) it is',
+        '     served under (exact strings). E.g. match: {"pro":"api.example.com",',
+        '     "qa":"qa-api.example.com"}. No `match` = no id, so nothing can point at it (⚠).',
         '  2. Read every env file and pull out every http(s):// URL.',
         '  3. For each URL, compare its host to every `match` string — exact match only, so',
         '     api.example.com never collides with rge-api.example.com.',
@@ -1934,6 +2114,7 @@ export function cmdGraph(flags) {
       }
     }
     const edges = new Set();
+    const refs = new Set(); // non-frontend -> frontend: shown but marked, not a real dep edge
     const other = new Set();
     for (const { host, path } of seen.values()) {
       // Pick the project whose matching token is longest (most specific), so a gateway host
@@ -1949,7 +2130,7 @@ export function cmdGraph(flags) {
           }
         }
       }
-      if (best && best !== name) edges.add(best);
+      if (best && best !== name) { edges.add(best); if (isReferenceEdge(cfg, name, best)) refs.add(best); }
       else if (!best && domains.length && inDomain(host)) other.add(host); // only when configured
     }
 
@@ -1961,8 +2142,11 @@ export function cmdGraph(flags) {
       console.log(`\n${head}  ${c.dim('[' + tokens.join(', ') + ']')}`);
     }
     if (edges.size) {
-      for (const t of [...edges].sort())
-        console.log(`  ${c.green('→')} ${paint.get(t) ? paint.get(t)(t) : t}`);
+      for (const t of [...edges].sort()) {
+        const arrow = refs.has(t) ? c.dim('⇢') : c.green('→');
+        const tag = refs.has(t) ? c.dim(' (ref — not a dep)') : '';
+        console.log(`  ${arrow} ${paint.get(t) ? paint.get(t)(t) : t}${tag}`);
+      }
     } else {
       console.log(`  ${c.dim('→ (no crew-project edges)')}`);
     }
@@ -1970,7 +2154,7 @@ export function cmdGraph(flags) {
   }
   if (warned)
     console.log(
-      '\n' + c.yellow('⚠ ') + c.dim('some projects have no `match` — add `match: ["host.example.com"]` (exact hosts) so peers can link to them.')
+      '\n' + c.yellow('⚠ ') + c.dim('some projects have no `match` — add `match: {"pro":"host.example.com"}` (env-labeled exact hosts) so peers can link to them.')
     );
 }
 
@@ -2076,8 +2260,20 @@ async function collectProject(p, existing, guardNames = []) {
   // Service-wiring fields (all optional; Enter to keep, clear to unset).
   const env = (await p.ask('Env file for {envfile} wiring, e.g. .envs/{env} (empty = none)', existing.env || '')).trim();
   const local = (await p.ask('Local URL, e.g. http://localhost:3000 (empty = none)', existing.local || '')).trim();
-  const matchStr = (await p.ask('Match host globs (space-separated), e.g. *api.example.com (empty = none)', (existing.match || []).join(' '))).trim();
-  const match = matchStr ? matchStr.split(/\s+/) : [];
+  const matchDefault =
+    existing.match && typeof existing.match === 'object' && !Array.isArray(existing.match)
+      ? Object.entries(existing.match).flatMap(([e, v]) => (Array.isArray(v) ? v : [v]).map((h) => `${e}=${h}`)).join(' ')
+      : '';
+  const matchStr = (await p.ask('Match hosts per env, e.g. pro=api.example.com qa=qa-api.example.com (exact host or host/path; empty = none)', matchDefault)).trim();
+  const match = {};
+  if (matchStr)
+    for (const tok of matchStr.split(/\s+/)) {
+      const eq = tok.indexOf('=');
+      if (eq <= 0 || !tok.slice(eq + 1)) continue;
+      const env = tok.slice(0, eq), host = tok.slice(eq + 1);
+      if (match[env] == null) match[env] = host;
+      else match[env] = [].concat(match[env], host);
+    }
 
   const detectedBranch = existing.defaultBranch || detectDefaultBranch(abs);
   const defaultBranch = (await p.ask('Default branch — where new work starts (empty = none)', detectedBranch)).trim();
@@ -2091,7 +2287,7 @@ async function collectProject(p, existing, guardNames = []) {
   setOrDel('runner', runner, !!runner);
   setOrDel('env', env, !!env);
   setOrDel('local', local, !!local);
-  setOrDel('match', match, match.length > 0);
+  setOrDel('match', match, Object.keys(match).length > 0);
   setOrDel('defaultBranch', defaultBranch, !!defaultBranch);
   setOrDel('tasks', tasks, Object.keys(tasks).length > 0);
   setOrDel('guards', guards, guards && guards.length > 0);
@@ -2423,16 +2619,17 @@ export function cmdCheck(flags) {
         else if (!originOf(p.local)) E(`${at}: 'local' must be an http(s) URL (got '${p.local}')`);
       }
       if (p.match != null) {
-        if (!isStrArr(p.match)) E(`${at}: 'match' must be an array of strings`);
+        if (!isObj(p.match) || Array.isArray(p.match)) E(`${at}: 'match' must be an object { env: host | [hosts] }`);
         else
-          for (const h of p.match) {
-            if (/[*?]/.test(h)) W(`${at}: match '${h}' looks like a glob — matching is exact host (optionally + path)`);
-            else if (h.includes('://')) W(`${at}: match '${h}' must not include a scheme — use host or host/path`);
+          for (const [env, v] of Object.entries(p.match)) {
+            const hosts = Array.isArray(v) ? v : [v];
+            if (!hosts.length) W(`${at}: match['${env}'] is empty`);
+            for (const h of hosts) {
+              if (typeof h !== 'string') { E(`${at}: match['${env}'] must be a host string or array of host strings`); continue; }
+              if (/[*?]/.test(h)) W(`${at}: match '${h}' looks like a glob — matching is exact host (optionally + path)`);
+              else if (h.includes('://')) W(`${at}: match '${h}' must not include a scheme — use host or host/path`);
+            }
           }
-      }
-      if (p.envMap != null) {
-        if (!isObj(p.envMap)) E(`${at}: 'envMap' must be an object`);
-        else for (const [k, v] of Object.entries(p.envMap)) if (typeof v !== 'string') E(`${at}: envMap['${k}'] must be a string`);
       }
       if (p.guards != null) {
         if (!isStrArr(p.guards)) E(`${at}: 'guards' must be an array of strings`);
@@ -2440,7 +2637,7 @@ export function cmdCheck(flags) {
       }
       const usesEnvfile = [p.runner, ...Object.values(isObj(p.tasks) ? p.tasks : {})].some((s) => typeof s === 'string' && s.includes('{envfile}'));
       if (usesEnvfile && !p.env) E(`${at}: uses {envfile} but has no 'env' field`);
-      if (isStrArr(p.match) && p.match.length && !p.local) W(`${at}: has 'match' (a wiring target) but no 'local' — peers can't wire to it locally`);
+      if (isObj(p.match) && !Array.isArray(p.match) && Object.keys(p.match).length && !p.local) W(`${at}: has 'match' (a wiring target) but no 'local' — peers can't wire to it locally`);
     }
   }
 
@@ -2588,6 +2785,7 @@ export function help() {
     ['workspace', '', 'Pick projects, open as one VSCode window (alias: code)'],
     ['claude', '[session]', 'Pick projects, launch Claude Code (names the chat history, else auto)'],
     ['graph', '', 'Show the dependency graph derived from .envs'],
+    ['resolve', '<env> [proj…]', 'Show the env each project resolves to for a selection (dry-run)'],
   ];
   const CONFIG = [
     ['add', '', 'Wizard: create a new project'],
@@ -2709,6 +2907,9 @@ async function main() {
       return;
     case 'graph':
       cmdGraph(flags);
+      return;
+    case 'resolve':
+      cmdResolve(flags, rest);
       return;
     case 'config':
       cmdConfig(flags, rest[0]);

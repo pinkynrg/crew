@@ -166,19 +166,33 @@ crew start env=qa   # opens the picker, then fills {env} in each project's start
 crew hardcodes no task names or values beyond the `longRunning` list — no baked-in
 `local`/`pre`/`qa`/`pro` vocabulary.
 
-**Per-project env (`envMap`).** A project can remap the selection's env to the env it
-actually runs at — useful when a dependency is consumed at a fixed env. `{env}` resolves
-per project as `envMap[sel] ?? envMap.default ?? sel`, then feeds the start command, the
-`env` file path, and the wiring:
+**Per-project env — derived from the chain.** You pass one env to the selection
+(`crew start env=pre`); crew works out what env each project *actually* runs at by following
+the dependency graph. The **entry** (the product you're running — the thing nothing else in
+the selection depends on) runs at your selection env. Every other project inherits the
+env-variant its consumer's env file points at — read straight from the files, via the
+env-labeled `match` (below). So the answer is context-dependent, which a static per-project
+setting can never be:
 
-```json
-"sdk-api": { …, "envMap": { "pro": "pro", "default": "qa" } }
+- `crew start env=pre` with **beepro-frontend** as entry → its qa loader is referenced, so
+  `bee-loader`/`sdk-frontend`/`sdk-api` resolve to **qa**, while beepro's own backend chain runs **pre**.
+- `crew start env=pre` with **sdk-frontend** as entry (the SDK team's product) → its pre env
+  points at `pre-bee-message-api`, so `sdk-api` and friends resolve to **pre**.
+
+Same shared config, both teams correct. This matters because a caller's env file carries the
+dependency's **credentials** too; crew rewrites the URL to localhost, so the local dependency
+must run the env those creds are for.
+
+Preview it without starting anything:
+
+```
+crew resolve <env> [project…]   # dry-run: prints the env each project resolves to
 ```
 
-So `crew start env=pre` runs your app at `pre` but `sdk-api` at `qa` (and `env=pro` → both
-`pro`). It's a plain per-project table — crew has no knowledge of which service maps where.
-This matters because a caller's env file carries the dependency's **credentials** too; crew
-rewrites the URL to localhost, so the local dependency must run the env those creds are for.
+Disagreements between consumers, a missing env file, or a project unreachable from any entry
+are reported as warnings (by `crew resolve`, and again at `crew start`) — never silently
+mis-resolved. Cycles (a frontend↔backend reference loop) collapse into one entry cluster, so
+there's nothing extra to configure. Env names are free-form — crew has no baked-in vocabulary.
 
 **Env overrides (`local.json`).** URL swapping isn't always enough — sometimes a *value*
 must change when you run locally: a dev API key the local peer accepts, or a Temporal queue
@@ -226,8 +240,8 @@ crew overrides remove     pick a project, then an entry to drop (or the whole pr
   locally; reach for `whenLocal` when the value should track another service being up.
 
 crew stays agnostic: it's a plain per-project table, no service knowledge. (This is also the
-escape hatch for cross-env wiring — run everything at `pre` and inject the `pre` key your env
-file lacks — instead of pinning a dependency's env with `envMap`.)
+escape hatch when env derivation + the URL swap don't cover a case — inject the exact key/value
+your wired env file needs.)
 
 ## Dependency graph
 
@@ -235,29 +249,37 @@ file lacks — instead of pinning a dependency's env with `envMap`.)
 who calls whom — with no manual edge list. It powers the connectivity check `crew start`
 does on a co-running set.
 
-Give each project a `match`: the **host(s)** it's served under — **exact strings**, listing
-every env variant, each **optionally narrowed by a path**. An edge `P → T` is drawn when a URL
-in P's env files matches one of T's `match` entries.
+Give each project a `match`: an **env-labeled map** of the **host(s)** it's served under —
+**exact strings**, one entry per environment, each **optionally narrowed by a path**. An edge
+`P → T` is drawn when a URL in P's env files matches one of T's `match` hosts; the env *key* of
+the matched host is what env derivation reads to decide which env T runs at.
 
 ```json
 "projects": {
   "api": {
     "path": "api", "runner": "make {task}",
-    "match": ["api.example.com", "qa-api.example.com", "pre-api.example.com"]
+    "match": { "pro": "api.example.com", "qa": "qa-api.example.com", "pre": "pre-api.example.com" }
   }
 }
 ```
 
 - **Exact match**, so `api.example.com` matches only that host — never
   `rge-api.example.com` or `vpc-…-api-….amazonaws.com`. No globs, no collisions.
+- **Env keys are free-form and partial** — label only the envs a project actually has (a loader
+  served only to `qa`/`pro` lists just those two). A value may be a single host or an array.
 - **Host+path** tokens (`cdn.example.com/plugin/v2/BeePlugin.js`) match only URLs on that host
   under that path — for two services sharing a host but differing by path. In **wiring**, a
   host-only token swaps just the origin (path kept); a host+path token replaces the whole URL
   with the peer's full `local` (so set `local` to the full local URL, path included — useful
   when the local path differs from the deployed one).
-- List each env variant (`qa-`, `pre-`, …); add new ones when envs appear.
 - A project with no `match` has no id, so nothing can point at it — `crew graph` flags it.
   crew derives nothing from folder/file/env names; the exact hosts are the whole rule.
+- **Reference edges.** A URL from a **non-frontend into a `type: frontend`** project (a backend
+  embedding the app's public URL — a link-back, allowed origin, redirect base) is treated as a
+  *reference*, not a dependency: shown in `crew graph` as `⇢ … (ref — not a dep)`, but excluded
+  from connectivity and env derivation. So a backend that merely links to your frontend can't
+  make an unrelated selection look "connected." Only `frontend→frontend` edges (one app embedding
+  another) count. Uses the declared `type` — no per-edge marker.
 
 When you `crew start` a set, crew warns if the selection isn't connected in this graph
 (`crew graph` restricted to the chosen projects) — i.e. you're running projects that won't
@@ -315,6 +337,7 @@ crew start [args]               pick projects, run their start task (local wirin
 crew workspace                  pick projects, open one VSCode window (alias: code)
 crew claude                     pick projects, launch Claude Code once (--add-dir)
 crew graph                      dependency graph derived from .envs files
+crew resolve <env> [proj…]      dry-run: the env each project resolves to for a selection
 ```
 
 `start`/`workspace`/`claude` always open the interactive multiselect (preselected with your
