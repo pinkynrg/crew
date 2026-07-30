@@ -672,6 +672,10 @@ export function envFilesFor(dir) {
     return [];
   }
   return names.map((name) => {
+    // Dotfile convention `.env.<env>` (e.g. the loader: .env.qa, .env.pre) → env is <env>.
+    const dot = /^\.env\.(.+)$/.exec(name);
+    if (dot) return { env: dot[1], slug: '', path: join(envsDir, name) };
+    if (name === '.env') return { env: 'default', slug: '', path: join(envsDir, name) };
     const base = name.replace(/\.env$/, '');
     const dash = base.indexOf('-');
     const env = dash > 0 ? base.slice(0, dash) : base;
