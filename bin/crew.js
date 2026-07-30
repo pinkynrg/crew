@@ -780,6 +780,20 @@ export function applyEnvOverrides(text, vars) {
   return { text: out, applied };
 }
 
+// Best-effort copy to the system clipboard (zero-dep: shell out to the platform tool). Returns
+// the tool used, or null if none is available. macOS = pbcopy; Linux = wl-copy / xclip / xsel.
+export function clipboardCopy(text) {
+  const tools =
+    process.platform === 'darwin'
+      ? [['pbcopy', []]]
+      : [['wl-copy', []], ['xclip', ['-selection', 'clipboard']], ['xsel', ['--clipboard', '--input']]];
+  for (const [cmd, args] of tools) {
+    const r = spawnSync(cmd, args, { input: text });
+    if (!r.error && r.status === 0) return cmd;
+  }
+  return null;
+}
+
 // A project's id comes from config `match`, an ENV-LABELED map `{ env: host | [hosts] }` — the
 // complete hostname(s) it is served under per environment (exact strings, optionally host/path).
 // `tokens` = the flat host list (identity for edges + wiring); `envOf` maps each host token
@@ -1360,6 +1374,8 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       let dirty = false;
       let searching = false; // true while typing a search query
       let query = ''; // active substring filter over rows ('' = off)
+      let copyMsg = ''; // transient footer confirmation after a copy
+      let copyTimer = null;
 
       // Uniform prefix width: pad every `[name]` to the longest name so the log text columns line
       // up. Uses the proc's own color (guards are gray). Viewer-only; the piped path keeps `_prefix`.
@@ -1436,6 +1452,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
         return out;
       };
       const footerText = () => {
+        if (copyMsg) return copyMsg;
         if (searching) return c.dim('search: ') + query + c.cyan('▌') + c.dim('   (Enter apply · Esc clear)');
         if (allStopped) return c.red('■ stopped') + c.dim(' — scroll to review · [/] search · [q/esc] exit');
         const pos = scroll > 0 ? c.yellow(`  ↑${scroll}`) : '';
@@ -1443,7 +1460,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
         const nShown = `${shown.size}/${names.length}`;
         const count = shown.size < names.length ? c.red(nShown) : c.dim(nShown);
         const q = query ? c.cyan(`  /${query}`) : '';
-        return c.dim('crew: [f] filter (') + count + c.dim(`)  [/] search  [w] ${wrap ? 'cut' : 'wrap'}  [q/esc] stop`) + q + pos;
+        return c.dim('crew: [f] filter (') + count + c.dim(`)  [/] search  [w] ${wrap ? 'cut' : 'wrap'}  [c] copy  [q/esc] stop`) + q + pos;
       };
       // Full repaint: body rows painted by absolute position (so scroll is exact), footer on the
       // last row. One batched write to minimize flicker; cursor hidden.
@@ -1605,6 +1622,25 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
           saveWrap(wrap); // remember wrap/cut across runs
           return paint();
         }
+        if (s === 'c') {
+          // Copy the FILTERED view (current project + keyword filters) as full lines — ANSI
+          // stripped, `[name]` prefixed, ignoring the wrap/cut display transform. Not the whole
+          // history; not the on-screen window — exactly what the filters select.
+          const lines = history.filter((h) => matches(h.proc, h.text)).map((h) => `[${h.proc._name}] ${h.text.replace(ESC, '')}`);
+          const tool = lines.length ? clipboardCopy(lines.join('\n') + '\n') : 'empty';
+          copyMsg = !lines.length
+            ? c.dim('nothing to copy (filtered view is empty)')
+            : tool
+              ? c.green('✓ ') + c.dim(`copied ${lines.length} line${lines.length === 1 ? '' : 's'} to clipboard`)
+              : c.yellow('⚠ ') + c.dim('no clipboard tool found (pbcopy/wl-copy/xclip/xsel)');
+          paint();
+          if (copyTimer) clearTimeout(copyTimer);
+          copyTimer = setTimeout(() => {
+            copyMsg = '';
+            if (viewer) paint();
+          }, 1600);
+          return;
+        }
         if (s === '\x1b[A' || s === 'k') return scrollBy(1); // up = older
         if (s === '\x1b[B' || s === 'j') return scrollBy(-1); // down = newer
         if (s === '\x1b[5~') return scrollBy(rows() - 1); // PgUp
@@ -1625,6 +1661,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       process.stdout.on('resize', onResize);
       detachKeys = () => {
         clearInterval(tick);
+        if (copyTimer) clearTimeout(copyTimer);
         viewer = null; // stop capturing
         stdin.removeListener('data', onData);
         process.stdout.removeListener('resize', onResize);
