@@ -106,7 +106,10 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   services sharing a host but differing by path stay distinct, and a local path can differ from
   the deployed one (e.g. `…-app-rsrc…/plugin/v2/BeePlugin.js` → `localhost:8088/v2/api/loader`;
   for a path token, set `local` to the full local URL incl. path). `crew graph` derives edges
-  from `.envs/*` URLs (incl. dotfile `.env.<env>`); `crew start` warns when a co-running set isn't connected.
+  from `.envs/*` URLs (incl. dotfile `.env.<env>`); `crew start` warns when a co-running set isn't
+  connected. `crew graph mermaid` (`graphMermaid`/`collectGraphEdges`) emits the graph as mermaid
+  flowchart syntax (deps `-->`, reference edges labeled `-->|ref|` — mermaid-ascii renders labeled
+  edges but not dotted `-.->`) to pipe to `mermaid-ascii` / mermaid.live.
 - Reference edges (`isReferenceEdge`): a URL from a **non-frontend into a `type: frontend`** project
   is a **reference** (link-back / allowed-origin / redirect base — a backend embedding the app's
   public URL), NOT a dependency. It's still shown by `crew graph` (marked `⇢ … (ref)`) but excluded

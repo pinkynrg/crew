@@ -285,6 +285,14 @@ When you `crew start` a set, crew warns if the selection isn't connected in this
 (`crew graph` restricted to the chosen projects) — i.e. you're running projects that won't
 actually talk to each other locally. It's a warning, not a block.
 
+**Mermaid output.** `crew graph mermaid` prints the graph as mermaid flowchart syntax (plain
+stdout — dependency edges `-->`, reference edges labeled `-->|ref|`), to pipe anywhere:
+
+```sh
+crew graph mermaid | mermaid-ascii     # terminal diagram (github.com/AlexanderGrooff/mermaid-ascii)
+crew graph mermaid                     # or paste into mermaid.live / a ```mermaid fence
+```
+
 ## Two execution modes
 
 The mode is decided by whether the task is in `config.longRunning`:

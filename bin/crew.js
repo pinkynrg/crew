@@ -2109,11 +2109,64 @@ export function cmdResolve(flags, rest) {
   }
 }
 
+// Crew-project edges derived from .envs URLs: `real` = dependency edges, `ref` = reference
+// edges (non-frontend -> frontend link-backs). Shared shape for the mermaid emitter.
+export function collectGraphEdges(cfg) {
+  const entries = Object.entries(cfg.projects || {});
+  const meta = {};
+  for (const [name, project] of entries) {
+    let dir;
+    try { dir = resolveProjectPath(project.path); } catch { dir = null; }
+    meta[name] = { files: dir ? envFilesFor(dir) : [], ...projectIdentity(project) };
+  }
+  const real = [], ref = [];
+  for (const [name] of entries) {
+    const seen = new Map();
+    for (const f of meta[name].files) {
+      let text = '';
+      try { text = readFileSync(f.path, 'utf8'); } catch { /* skip */ }
+      for (const u of text.match(URL_RE) || []) {
+        const p = urlHostPath(u);
+        if (p) seen.set(p.host + '\n' + p.path, p);
+      }
+    }
+    const targets = new Set();
+    for (const { host, path } of seen.values()) {
+      let best = null, bestLen = 0;
+      for (const [t] of entries)
+        for (const tok of meta[t].tokens) {
+          const len = tokenMatchLen(host, path, tok);
+          if (len > bestLen) { bestLen = len; best = t; }
+        }
+      if (best && best !== name) targets.add(best);
+    }
+    for (const t of targets) (isReferenceEdge(cfg, name, t) ? ref : real).push([name, t]);
+  }
+  return { nodes: entries.map(([n]) => n), real, ref };
+}
+
+// `crew graph mermaid` — emit the graph as mermaid flowchart syntax (plain stdout, no color) to
+// pipe anywhere: `crew graph mermaid | mermaid-ascii` for a terminal diagram, or paste into
+// mermaid.live / a ```mermaid fence. Node ids are sanitized to alphanumerics (mermaid-ascii wants
+// simple ids); dependency edges are `-->`, reference edges are labeled `-->|ref|` (mermaid-ascii
+// renders labeled edges but NOT dotted `-.->`).
+export function graphMermaid(cfg) {
+  const { nodes, real, ref } = collectGraphEdges(cfg);
+  const id = (n) => n.replace(/[^A-Za-z0-9_]/g, '_');
+  const seen = new Set();
+  const lines = ['graph LR'];
+  for (const [f, t] of real) { lines.push(`  ${id(f)} --> ${id(t)}`); seen.add(f); seen.add(t); }
+  for (const [f, t] of ref) { lines.push(`  ${id(f)} -->|ref| ${id(t)}`); seen.add(f); seen.add(t); }
+  for (const n of nodes) if (!seen.has(n)) lines.push(`  ${id(n)}`); // isolated nodes still appear
+  console.log(lines.join('\n'));
+}
+
 // edge P→T when a URL in P's envs has a host equal to one of T's match hosts (tokenMatchLen).
 // Optional config `internalDomains: [..]` only affects the cosmetic "other hosts" list.
 // localhost URLs match no id, so they drop out.
-export function cmdGraph(flags) {
+export function cmdGraph(flags, rest) {
   const { cfg } = loadMerged(flags);
+  if ((rest || [])[0] === 'mermaid') return graphMermaid(cfg);
   const paint = projectColors(cfg);
   const projects = Object.entries(cfg.projects || {});
   const domains = Array.isArray(cfg.internalDomains) ? cfg.internalDomains : [];
@@ -2835,7 +2888,7 @@ export function help() {
     ['start', '[args]', 'Pick projects, run their start task (local wiring)'],
     ['workspace', '', 'Pick projects, open as one VSCode window (alias: code)'],
     ['claude', '[session]', 'Pick projects, launch Claude Code (names the chat history, else auto)'],
-    ['graph', '', 'Show the dependency graph derived from .envs'],
+    ['graph', '[mermaid]', 'Show the dependency graph derived from .envs (mermaid = flowchart syntax)'],
     ['resolve', '<env> [proj…]', 'Show the env each project resolves to for a selection (dry-run)'],
   ];
   const CONFIG = [
@@ -2957,7 +3010,7 @@ async function main() {
       cmdDir(flags, rest[0]);
       return;
     case 'graph':
-      cmdGraph(flags);
+      cmdGraph(flags, rest);
       return;
     case 'resolve':
       cmdResolve(flags, rest);
