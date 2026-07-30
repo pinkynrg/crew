@@ -2491,11 +2491,32 @@ export function cmdCheck(flags) {
   if (errors.length) process.exitCode = 1;
 }
 
-// crew upgrade — self-update to the latest published version (npm global install of this same
-// package). Inherits npm's stdio so its progress/errors show; exits with npm's status.
+// crew upgrade — self-update to the latest published version. npm's own output is useless here
+// ("changed 1 package…" whether or not anything changed), so we hide it and compare versions
+// ourselves: skip if already latest, else install silently and report old -> new (or surface
+// npm's error on failure).
 export function cmdUpgrade() {
-  console.log(c.dim(`upgrading ${PKG.name} (current ${PKG.version})…`));
-  launch('npm', ['install', '-g', `${PKG.name}@latest`]);
+  const pkg = PKG.name;
+  const current = PKG.version;
+  const view = spawnSync('npm', ['view', pkg, 'version'], { encoding: 'utf8' });
+  const latest = view.status === 0 ? view.stdout.trim() : null;
+  if (latest && latest === current) {
+    console.log(`${c.green('✓')} already up to date ${c.dim(`(v${current})`)}`);
+    return;
+  }
+  process.stdout.write(c.dim(`upgrading ${pkg} ${latest ? `v${current} → v${latest}` : `(v${current})`}… `));
+  const r = spawnSync('npm', ['install', '-g', `${pkg}@latest`], { encoding: 'utf8' });
+  if (r.error) {
+    process.stdout.write('\n');
+    fail(r.error.code === 'ENOENT' ? `'npm' not found on PATH` : `upgrade failed: ${r.error.message}`);
+  }
+  if (r.status !== 0) {
+    process.stdout.write('\n');
+    if (r.stderr) process.stderr.write(r.stderr); // surface the real npm error only on failure
+    fail('upgrade failed — see npm output above');
+  }
+  process.stdout.write(c.green('done\n'));
+  console.log(latest ? `${c.green('✓')} upgraded ${c.dim(`v${current} → v${latest}`)}` : `${c.green('✓')} upgraded to latest ${c.dim(`(was v${current})`)}`);
 }
 
 // ---------------------------------------------------------------------------
