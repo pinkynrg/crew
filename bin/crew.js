@@ -2491,6 +2491,13 @@ export function cmdCheck(flags) {
   if (errors.length) process.exitCode = 1;
 }
 
+// crew upgrade — self-update to the latest published version (npm global install of this same
+// package). Inherits npm's stdio so its progress/errors show; exits with npm's status.
+export function cmdUpgrade() {
+  console.log(c.dim(`upgrading ${PKG.name} (current ${PKG.version})…`));
+  launch('npm', ['install', '-g', `${PKG.name}@latest`]);
+}
+
 // ---------------------------------------------------------------------------
 // Help
 // ---------------------------------------------------------------------------
@@ -2522,6 +2529,7 @@ export function help() {
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
     ['check', '', 'Validate the config; report errors + warnings (alias: validate)'],
     ['pull', '<url>', 'Load config.json from a URL (backs up current)'],
+    ['upgrade', '', 'Self-update crew to the latest npm release (alias: update)'],
   ];
   const FLAGS = [
     ['--config <path>', 'Use a specific config file'],
@@ -2642,6 +2650,10 @@ async function main() {
       return;
     case 'pull':
       await cmdPull(flags, rest[0]);
+      return;
+    case 'upgrade':
+    case 'update':
+      cmdUpgrade();
       return;
     default:
       console.error(c.red(`crew: unknown command '${cmd}'`) + '\n');

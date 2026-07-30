@@ -30,7 +30,13 @@ including its own parallel process runner.
 
 ### Update
 
-npm has no "upgrade one global" command — reinstall at `@latest`:
+Self-update in place:
+
+```sh
+crew upgrade                      # runs npm i -g @pinkynrg/crew@latest for you
+```
+
+Or reinstall manually (npm has no "upgrade one global" command):
 
 ```sh
 npm i -g @pinkynrg/crew@latest
