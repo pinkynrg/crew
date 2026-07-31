@@ -620,7 +620,9 @@ export function resolveRun(cfg, task, members, args) {
     r._values = env == null ? { ...values } : { ...values, env };
     for (const p of placeholdersIn(r.template))
       if (!RESERVED.has(p) && !(p in r._values)) unresolved.add(p);
-    if (r.project.env)
+    // Only the env-file path needs its placeholders resolved when the command actually sources
+    // it via {envfile}; tasks like `install` don't touch the env file, so don't demand {env}.
+    if (r.project.env && r.template.includes('{envfile}'))
       for (const p of placeholdersIn(r.project.env))
         if (!RESERVED.has(p) && !(p in r._values)) unresolved.add(p);
   }
