@@ -245,9 +245,15 @@ your wired env file needs.)
 
 ## Dependency graph
 
-`crew graph` derives a **read-only dependency graph** from each project's `.envs/*` files —
+`crew graph` derives a **read-only dependency graph** from each project's env files —
 who calls whom — with no manual edge list. It powers the connectivity check `crew start`
 does on a co-running set.
+
+crew finds a project's env files from its **`env`** template: it globs the `{env}` placeholder
+(captured consistently across every occurrence) to enumerate the variants — so `.envs/{env}`,
+`.envs/{env}-api.env`, `.envs/.env.{env}`, and nested monorepo layouts like
+`../.envs/<app>/{env}/{env}-foo.env` all work. `env` is the single source of truth for env-file
+location — the same field drives `{envfile}` wiring. No `env` → the default `<dir>/.envs` scan.
 
 Give each project a `match`: an **env-labeled map** of the **host(s)** it's served under —
 **exact strings**, one entry per environment, each **optionally narrowed by a path**. An edge

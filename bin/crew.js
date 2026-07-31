@@ -448,13 +448,7 @@ export const isStrArr = (v) => Array.isArray(v) && v.every((x) => typeof x === '
 export function dependencyEdges(cfg, entries) {
   const meta = {};
   for (const [name, project] of entries) {
-    let dir;
-    try {
-      dir = resolveProjectPath(project.path);
-    } catch {
-      dir = null;
-    }
-    meta[name] = { files: dir ? envFilesFor(dir) : [], ...projectIdentity(project) };
+    meta[name] = { files: projectEnvFiles(project), ...projectIdentity(project) };
   }
   const edges = new Map(entries.map(([n]) => [n, new Set()]));
   for (const [name] of entries) {
@@ -671,6 +665,63 @@ export function envFilesFor(dir) {
     return { env, slug, path: join(envsDir, name) };
   });
 }
+
+// Enumerate a project's env files. If it declares `env` (a path template containing {env}), resolve
+// that template against the filesystem — {env} becomes a wildcard, captured CONSISTENTLY across every
+// occurrence — so monorepo layouts like `.envs/<app>/{env}/{env}-foo.env` (or a `../.envs/...` path)
+// are found and the env label comes from the template, not a fixed `.envs` dir. This makes the `env`
+// field the single source of truth for env-file location (wiring AND the graph). No template (or a
+// static `env` with no {env}) -> the default `<dir>/.envs` scan.
+export function projectEnvFiles(project) {
+  let dir;
+  try {
+    dir = resolveProjectPath(project.path);
+  } catch {
+    return [];
+  }
+  const tmpl = project && project.env;
+  if (!tmpl || !tmpl.includes('{env}')) return envFilesFor(dir);
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const segs = tmpl.split('/');
+  const firstGlob = segs.findIndex((s) => s.includes('{env}'));
+  const base = join(dir, ...segs.slice(0, firstGlob)); // static prefix (path.join collapses . / ..)
+  const rest = segs.slice(firstGlob);
+  const out = [];
+  const walk = (d, i, boundEnv) => {
+    const seg = rest[i];
+    const isLast = i === rest.length - 1;
+    const globbed = seg.includes('{env}');
+    const re = globbed ? new RegExp('^' + seg.split('{env}').map(esc).join('(.+?)') + '$') : null;
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      let env = boundEnv;
+      if (globbed) {
+        if (e.name.startsWith('.') && !seg.startsWith('.')) continue; // dotfiles aren't env variants
+        const m = re.exec(e.name);
+        if (!m) continue;
+        const vals = m.slice(1);
+        if (!vals.every((v) => v === vals[0])) continue; // every {env} occurrence must agree
+        if (boundEnv != null && vals[0] !== boundEnv) continue;
+        env = vals[0];
+      } else if (e.name !== seg) {
+        continue; // literal segment must match exactly
+      }
+      const p = join(d, e.name);
+      if (isLast) {
+        if (!e.isDirectory()) out.push({ env, slug: '', path: p });
+      } else if (e.isDirectory()) {
+        walk(p, i + 1, env);
+      }
+    }
+  };
+  walk(base, 0, null);
+  return out;
+}
 export const URL_RE = /\bhttps?:\/\/[^\s"'`)}<]+/g;
 // Split a URL into host + path (lowercased, scheme/port/query/trailing-slash dropped).
 export function urlHostPath(url) {
@@ -868,9 +919,8 @@ export function resolveEnvs(cfg, selection, selEnv) {
   const meta = {};
   for (const n of names) {
     const p = cfg.projects[n];
-    let dir; try { dir = resolveProjectPath(p.path); } catch { dir = null; }
     const byEnv = {};
-    if (dir) for (const f of envFilesFor(dir)) if (!(f.env in byEnv)) byEnv[f.env] = f.path;
+    for (const f of projectEnvFiles(p)) if (!(f.env in byEnv)) byEnv[f.env] = f.path;
     meta[n] = { byEnv, envs: Object.keys(byEnv), ...projectIdentity(p) };
   }
 
@@ -2115,9 +2165,7 @@ export function collectGraphEdges(cfg) {
   const entries = Object.entries(cfg.projects || {});
   const meta = {};
   for (const [name, project] of entries) {
-    let dir;
-    try { dir = resolveProjectPath(project.path); } catch { dir = null; }
-    meta[name] = { files: dir ? envFilesFor(dir) : [], ...projectIdentity(project) };
+    meta[name] = { files: projectEnvFiles(project), ...projectIdentity(project) };
   }
   const real = [], ref = [];
   for (const [name] of entries) {
@@ -2173,13 +2221,7 @@ export function cmdGraph(flags, rest) {
 
   const meta = {};
   for (const [name, project] of projects) {
-    let dir;
-    try {
-      dir = resolveProjectPath(project.path);
-    } catch {
-      dir = null;
-    }
-    meta[name] = { files: dir ? envFilesFor(dir) : [], ...projectIdentity(project) };
+    meta[name] = { files: projectEnvFiles(project), ...projectIdentity(project) };
   }
   const inDomain = (host) => domains.some((d) => host === d || host.endsWith('.' + d) || host.endsWith(d));
 

@@ -116,6 +116,11 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   from connectivity AND env derivation — so a backend that merely links to the frontend can't make an
   unrelated selection look "connected" nor seed the frontend's env. Only `frontend→frontend` edges
   (one app embedding another) stay real. Uses the declared `type` only; no per-edge config/marker.
+- `env` (per project): the env-file path template — the SINGLE source of truth for env-file location
+  (drives `{envfile}` wiring AND graph/derivation discovery). `projectEnvFiles` resolves it by globbing
+  `{env}` (captured consistently across every occurrence, so `.envs/{env}`, `.envs/{env}-slug.env`,
+  `.envs/.env.{env}`, and nested `../.envs/<app>/{env}/{env}-foo.env` monorepo layouts all enumerate
+  their variants). No `env` (or a static path with no `{env}`) → the default `<dir>/.envs` scan (`envFilesFor`).
 - `defaultBranch` (optional, per project): the branch new work is cut from (repos differ —
   `main`/`master`/`develop`/`trunk`). Pure metadata crew records/displays (`crew list` shows a
   `branch` line); crew runs no git with it. The `crew add`/`edit` wizard prefills it via
