@@ -8,13 +8,16 @@
   },
   "files": [
     "bin/crew.js",
+    "bin/graph.js",
     "README.md"
   ],
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "start": "node bin/crew.js"
+    "start": "node bin/crew.js",
+    "test": "node tests/snapshot.mjs",
+    "test:update": "node tests/snapshot.mjs -u"
   },
   "keywords": [
     "cli",

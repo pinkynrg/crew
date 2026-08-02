@@ -18,12 +18,19 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 
 ## Layout
 
-- `bin/crew.js` — the entire CLI. Single ESM executable, `#!/usr/bin/env node`. Hand-authored;
-  no build step (edit-and-run). This is what ships + what `bin.crew` points at.
+- `bin/crew.js` — the CLI. ESM executable, `#!/usr/bin/env node`. Hand-authored; no build step
+  (edit-and-run). This is what `bin.crew` points at.
+- `bin/graph.js` — zero-dep layered-DAG ASCII renderer for `crew graph` (exports
+  `renderAsciiGraph`; crew.js imports it). Also runnable standalone (`node bin/graph.js file.mmd`,
+  or pipe mermaid on stdin) with its own small mermaid-subset parser. The one allowed split from the
+  single-file rule (see below).
 - `package.json` — `bin.crew`, `type:module`, `engines.node >=18`, zero deps (no build tooling).
-  `files: ["bin/crew.js","README.md"]`.
+  `files: ["bin/crew.js","bin/graph.js","README.md"]` (graph.js MUST stay listed or installs crash
+  on the import). `npm test` runs the snapshot suite.
 - `.github/workflows/publish.yml` — npm publish CI (push to main; auto-bump patch; OIDC trusted
   publishing, npm@11, `--provenance`; no NPM_TOKEN).
+- `tests/` — dev-only (NOT shipped): `graphs/*.mmd` sample graphs, `snapshots/*.txt` golden mono
+  renders, `snapshot.mjs` runner (`node tests/snapshot.mjs [-u] [name…]`).
 - `README.md` — user-facing docs (behavior reference).
 
 ## Hard constraints (do not break)
@@ -31,9 +38,11 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 - **Zero runtime dependencies.** Node built-ins only (`node:fs`, `node:path`, `node:os`,
   `node:child_process`, `node:https`, `node:readline` + `readline/promises`). The parallel
   runner is our own (`runFanout`). No build step, no bundler — the source IS what runs.
-- **Single executable file.** Keep the CLI in `bin/crew.js`; don't split into modules or add a
-  bundler. (We tried an esbuild/`src/` split + Ink for a TUI; both were reverted — the
-  no-build, one-file, hackable-install simplicity is worth more for a zero-dep tool this size.)
+- **Two files, no bundler.** The CLI lives in `bin/crew.js`; the only other source file is
+  `bin/graph.js` (the self-contained ASCII graph renderer — cleanly separable, standalone-usable,
+  and big enough to warrant its own file). Don't split `crew.js` further into modules or add a
+  bundler. (We tried an esbuild/`src/` split + Ink for a TUI; both were reverted — the no-build,
+  hackable-install simplicity is worth more for a zero-dep tool this size.)
 - **POSIX only (macOS + Linux).** The runner relies on `/bin/sh`, `spawn` `detached:true`
   (setsid), and `process.kill(-pgid)`. No Windows.
 - No raw stack traces on expected errors: throw `CrewError`, exit non-zero, one-line msg.
@@ -107,9 +116,10 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   the deployed one (e.g. `…-app-rsrc…/plugin/v2/BeePlugin.js` → `localhost:8088/v2/api/loader`;
   for a path token, set `local` to the full local URL incl. path). `crew graph` derives edges
   from `.envs/*` URLs (incl. dotfile `.env.<env>`); `crew start` warns when a co-running set isn't
-  connected. `crew graph mermaid` (`graphMermaid`/`collectGraphEdges`) emits the graph as mermaid
-  flowchart syntax (deps `-->`, reference edges labeled `-->|ref|` — mermaid-ascii renders labeled
-  edges but not dotted `-.->`) to pipe to `mermaid-ascii` / mermaid.live.
+  connected. `crew graph` (`collectGraphEdges` → `renderAsciiGraph` in `bin/graph.js`) draws the
+  graph as a laid-out ASCII diagram (boxes, per-source colored edges, solid dep arrows, dashed
+  reference arrows) — our own zero-dep layered-DAG renderer, no external tool; `crew graph list`
+  prints the plain adjacency text instead.
 - Reference edges (`isReferenceEdge`): a URL from a **non-frontend into a `type: frontend`** project
   is a **reference** (link-back / allowed-origin / redirect base — a backend embedding the app's
   public URL), NOT a dependency. It's still shown by `crew graph` (marked `⇢ … (ref)`) but excluded

@@ -8,6 +8,7 @@ import { get as httpGet } from 'node:http';
 import { createInterface } from 'node:readline/promises';
 import { emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
+import { renderAsciiGraph } from './graph.js';
 
 // ==================== pkg ====================
 // Read package.json relative to this file. Works both unbundled (src/pkg.js -> ../package.json)
@@ -2127,7 +2128,8 @@ export function cmdDir(flags, arg) {
   console.log(c.dim(`stored in ${tildify(machinePath)} — machine-local, not committed`));
 }
 
-// crew graph [target] — read-only dependency graph derived from env files (no wiring).
+// crew graph [list] — read-only dependency graph derived from env files (no wiring). Default draws
+// the ASCII diagram (bin/graph.js); `crew graph list` prints the plain adjacency text below.
 // Each project's id comes ONLY from config `match` (complete hostnames, exact string match);
 // crew resolve <env> [project...] — read-only: show the env each project would run at for a
 // selection (from the chain), without starting anything. No projects given -> the remembered
@@ -2162,7 +2164,7 @@ export function cmdResolve(flags, rest) {
 }
 
 // Crew-project edges derived from .envs URLs: `real` = dependency edges, `ref` = reference
-// edges (non-frontend -> frontend link-backs). Shared shape for the mermaid emitter.
+// edges (non-frontend -> frontend link-backs). Feeds the ascii renderer (`crew graph`).
 export function collectGraphEdges(cfg) {
   const entries = Object.entries(cfg.projects || {});
   const meta = {};
@@ -2195,28 +2197,18 @@ export function collectGraphEdges(cfg) {
   return { nodes: entries.map(([n]) => n), real, ref };
 }
 
-// `crew graph mermaid` — emit the graph as mermaid flowchart syntax (plain stdout, no color) to
-// pipe anywhere: `crew graph mermaid | mermaid-ascii` for a terminal diagram, or paste into
-// mermaid.live / a ```mermaid fence. Node ids are sanitized to alphanumerics (mermaid-ascii wants
-// simple ids); dependency edges are `-->`, reference edges are labeled `-->|ref|` (mermaid-ascii
-// renders labeled edges but NOT dotted `-.->`).
-export function graphMermaid(cfg) {
-  const { nodes, real, ref } = collectGraphEdges(cfg);
-  const id = (n) => n.replace(/[^A-Za-z0-9_]/g, '_');
-  const seen = new Set();
-  const lines = ['graph LR'];
-  for (const [f, t] of real) { lines.push(`  ${id(f)} --> ${id(t)}`); seen.add(f); seen.add(t); }
-  for (const [f, t] of ref) { lines.push(`  ${id(f)} -->|ref| ${id(t)}`); seen.add(f); seen.add(t); }
-  for (const n of nodes) if (!seen.has(n)) lines.push(`  ${id(n)}`); // isolated nodes still appear
-  console.log(lines.join('\n'));
-}
-
 // edge P→T when a URL in P's envs has a host equal to one of T's match hosts (tokenMatchLen).
 // Optional config `internalDomains: [..]` only affects the cosmetic "other hosts" list.
 // localhost URLs match no id, so they drop out.
 export function cmdGraph(flags, rest) {
   const { cfg } = loadMerged(flags);
-  if ((rest || [])[0] === 'mermaid') return graphMermaid(cfg);
+  if ((rest || [])[0] !== 'list') {                    // default = drawn ascii diagram; `list` = adjacency text
+    const { nodes, real, ref } = collectGraphEdges(cfg);
+    const edges = [...real.map(([f, t]) => ({ from: f, to: t })), ...ref.map(([f, t]) => ({ from: f, to: t, ref: true }))];
+    const paint = projectColors(cfg);
+    const colorOf = (n) => { const f = paint.get(n); if (!f) return ''; const s = f(''); const i = s.indexOf(''); return i > 0 ? s.slice(0, i) : ''; };
+    return void console.log(renderAsciiGraph(nodes, edges, { colorOf }));
+  }
   const paint = projectColors(cfg);
   const projects = Object.entries(cfg.projects || {});
   const domains = Array.isArray(cfg.internalDomains) ? cfg.internalDomains : [];
@@ -2932,7 +2924,7 @@ export function help() {
     ['start', '[args]', 'Pick projects, run their start task (local wiring)'],
     ['workspace', '', 'Pick projects, open as one VSCode window (alias: code)'],
     ['claude', '[session]', 'Pick projects, launch Claude Code (names the chat history, else auto)'],
-    ['graph', '[mermaid]', 'Show the dependency graph derived from .envs (mermaid = flowchart syntax)'],
+    ['graph', '[list]', 'Draw the dependency graph from .envs (list = plain adjacency text instead)'],
     ['resolve', '<env> [proj…]', 'Show the env each project resolves to for a selection (dry-run)'],
   ];
   const CONFIG = [
