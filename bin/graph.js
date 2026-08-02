@@ -242,6 +242,11 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
     const text = ' '.repeat(lp) + lbl + ' '.repeat(Math.max(0, pad - lp));
     for (let i = 0; i < text.length && x0 + 1 + i < x0 + w - 1; i++) put(x0 + 1 + i, t + 1, text[i], cc);
   }
+  for (const c of NODES) { // T-junctions where a line LEAVES a box (source side only — a target side already
+    const t = yTop[cellL.get(c)], cc = colorOf(c);                                // has an arrowhead, so no tick there). DEP=double (╦/╩), REF=single-into-double (╤/╧).
+    for (const s of botSeg.get(c) || []) if (s.to !== c) put(xU(s), t + 2, s.ref ? '╤' : '╦', cc); // leaves the bottom, going down
+    for (const s of topSeg.get(c) || []) if (s.to !== c) put(xL(s), t, s.ref ? '╧' : '╩', cc);     // leaves the top, going up
+  }
 
   for (const s of segs) { // route each segment in its source's color
     const cc = colorOf(s.from), laneRow = gapY(s.gap) + s.lane, a = xU(s), b = xL(s);
