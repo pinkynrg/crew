@@ -117,9 +117,11 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   for a path token, set `local` to the full local URL incl. path). `crew graph` derives edges
   from `.envs/*` URLs (incl. dotfile `.env.<env>`); `crew start` warns when a co-running set isn't
   connected. `crew graph` (`collectGraphEdges` → `renderAsciiGraph` in `bin/graph.js`) draws the
-  graph as a laid-out ASCII diagram (boxes, per-source colored edges, solid dep arrows, dashed
-  reference arrows) — our own zero-dep layered-DAG renderer, no external tool; `crew graph list`
-  prints the plain adjacency text instead.
+  graph as a laid-out ASCII diagram (boxes, per-source colored double-line dep edges, thin single
+  reference edges, `╦╤` box-connect T-junctions) — our own zero-dep layered-DAG renderer, no external
+  tool. On a TTY it's shown in an alternate-screen pager (`pagerView`: scroll, `f` opens a `menu()`
+  node filter, `q` quits leaving no scrollback); piped/redirected → plain print. `crew graph list`
+  prints the adjacency text instead.
 - Reference edges (`isReferenceEdge`): a URL from a **non-frontend into a `type: frontend`** project
   is a **reference** (link-back / allowed-origin / redirect base — a backend embedding the app's
   public URL), NOT a dependency. It's still shown by `crew graph` (marked `⇢ … (ref)`) but excluded

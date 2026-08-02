@@ -295,9 +295,14 @@ actually talk to each other locally. It's a warning, not a block.
 colored edges, dependency arrows solid, reference arrows dashed) — a zero-dependency layered-DAG
 renderer (`bin/graph.js`), no external tool needed:
 
+On a TTY it opens in an alternate-screen pager (scroll `↑↓`/`jk`, page `space`/`b`, `g`/`G`;
+`f` filters which nodes to show via a multiselect; `q` quits and leaves nothing in scrollback).
+Piped or redirected, it prints the diagram plainly.
+
 ```sh
-crew graph              # drawn top-down diagram in the terminal (default)
+crew graph              # drawn top-down diagram, paged (default)
 crew graph list         # or the plain adjacency-list text
+crew graph | less -R    # or pipe it (plain print)
 ```
 
 ## Two execution modes

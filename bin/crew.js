@@ -2200,14 +2200,74 @@ export function collectGraphEdges(cfg) {
 // edge P→T when a URL in P's envs has a host equal to one of T's match hosts (tokenMatchLen).
 // Optional config `internalDomains: [..]` only affects the cosmetic "other hosts" list.
 // localhost URLs match no id, so they drop out.
-export function cmdGraph(flags, rest) {
+// Show a (possibly tall) block in an ALTERNATE-SCREEN pager — like the log viewer, so it vanishes on
+// exit instead of scrolling into the terminal history. Vertical scroll only (graphs fit width; wide
+// lines clip, no wrap). 'f' resolves 'filter' (caller opens a node picker); 'q' resolves 'quit'.
+// Non-TTY: plain print (so `| less`, redirects, CI still work).
+function pagerView(text, title = 'crew graph') {
+  const stdout = process.stdout, stdin = process.stdin;
+  if (!stdout.isTTY || !stdin.isTTY) { console.log(text); return Promise.resolve('quit'); }
+  return new Promise((resolve) => {
+    const lines = text.split('\n');
+    const w = (x) => stdout.write(x);
+    const wasRaw = stdin.isRaw;
+    let top = 0;
+    const body = () => Math.max(1, (stdout.rows || 24) - 1);
+    const maxTop = () => Math.max(0, lines.length - body());
+    const paint = () => {
+      const R = body();
+      top = Math.max(0, Math.min(maxTop(), top));
+      let out = '\x1b[H';
+      for (let i = 0; i < R; i++) out += '\x1b[K' + (lines[top + i] ?? '') + '\x1b[0m\r\n';
+      const pos = lines.length > R ? `${top + 1}-${Math.min(top + R, lines.length)}/${lines.length}` : `${lines.length} lines`;
+      out += `\x1b[7m ${title}  ·  ${pos}  ·  ↑↓ jk / space b / g G / f filter / q \x1b[0m\x1b[K`;
+      w(out);
+    };
+    const cleanup = () => {
+      stdin.removeListener('data', onData);
+      stdout.removeListener('resize', paint);
+      w('\x1b[?7h\x1b[?25h\x1b[?1049l'); // restore wrap + cursor, leave the alternate screen
+      if (stdin.setRawMode) stdin.setRawMode(wasRaw);
+      stdin.pause();
+    };
+    const onData = (buf) => {
+      const k = buf.toString(), R = body();
+      if (k === 'q' || k === '\x03') { cleanup(); return resolve('quit'); }
+      if (k === 'f') { cleanup(); return resolve('filter'); }
+      if (k === 'j' || k === '\x1b[B') top += 1;
+      else if (k === 'k' || k === '\x1b[A') top -= 1;
+      else if (k === ' ' || k === '\x1b[6~') top += R;
+      else if (k === 'b' || k === '\x1b[5~') top -= R;
+      else if (k === 'g') top = 0;
+      else if (k === 'G') top = maxTop();
+      paint();
+    };
+    if (stdin.setRawMode) stdin.setRawMode(true);
+    stdin.resume();
+    w('\x1b[?1049h\x1b[?25l\x1b[?7l'); // alt screen, hide cursor, disable line-wrap
+    stdin.on('data', onData);
+    stdout.on('resize', paint);
+    paint();
+  });
+}
+
+export async function cmdGraph(flags, rest) {
   const { cfg } = loadMerged(flags);
   if ((rest || [])[0] !== 'list') {                    // default = drawn ascii diagram; `list` = adjacency text
-    const { nodes, real, ref } = collectGraphEdges(cfg);
-    const edges = [...real.map(([f, t]) => ({ from: f, to: t })), ...ref.map(([f, t]) => ({ from: f, to: t, ref: true }))];
+    const { nodes: allNodes, real, ref } = collectGraphEdges(cfg);
+    const allEdges = [...real.map(([f, t]) => ({ from: f, to: t })), ...ref.map(([f, t]) => ({ from: f, to: t, ref: true }))];
     const paint = projectColors(cfg);
-    const colorOf = (n) => { const f = paint.get(n); if (!f) return ''; const s = f(''); const i = s.indexOf(''); return i > 0 ? s.slice(0, i) : ''; };
-    return void console.log(renderAsciiGraph(nodes, edges, { colorOf }));
+    const clr = (n) => { const g = paint.get(n); if (!g) return ''; const t = g('\u0001'); const m = t.indexOf('\u0001'); return m > 0 ? t.slice(0, m) : ''; };
+    const draw = (shown) => renderAsciiGraph(allNodes.filter((n) => shown.has(n)), allEdges.filter((e) => shown.has(e.from) && shown.has(e.to)), { colorOf: clr });
+    let shown = new Set(allNodes);
+    if (!process.stdout.isTTY || !process.stdin.isTTY) return void console.log(draw(shown));
+    for (;;) {                                          // page the graph; 'f' opens a node filter, then re-draws
+      const reason = await pagerView(draw(shown), `crew graph  ${shown.size}/${allNodes.length} nodes`);
+      if (reason !== 'filter') break;
+      const picked = await menu({ title: 'Show which nodes?', items: allNodes, multi: true, preselected: allNodes.filter((n) => shown.has(n)), label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)), erase: true });
+      if (picked && picked.length) shown = new Set(picked);
+    }
+    return;
   }
   const paint = projectColors(cfg);
   const projects = Object.entries(cfg.projects || {});
@@ -2924,7 +2984,7 @@ export function help() {
     ['start', '[args]', 'Pick projects, run their start task (local wiring)'],
     ['workspace', '', 'Pick projects, open as one VSCode window (alias: code)'],
     ['claude', '[session]', 'Pick projects, launch Claude Code (names the chat history, else auto)'],
-    ['graph', '[list]', 'Draw the dependency graph from .envs (list = plain adjacency text instead)'],
+    ['graph', '[list]', 'Draw the dependency graph in a scroll/filter pager (f=filter nodes, q=quit; list = adjacency text)'],
     ['resolve', '<env> [proj…]', 'Show the env each project resolves to for a selection (dry-run)'],
   ];
   const CONFIG = [
@@ -3046,7 +3106,7 @@ async function main() {
       cmdDir(flags, rest[0]);
       return;
     case 'graph':
-      cmdGraph(flags, rest);
+      await cmdGraph(flags, rest);
       return;
     case 'resolve':
       cmdResolve(flags, rest);
