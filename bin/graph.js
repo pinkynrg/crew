@@ -23,7 +23,8 @@
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 
-const GLYPH = [' ', '┃', '━', '┗', '┃', '┃', '┏', '┣', '━', '┛', '━', '┻', '┓', '┫', '┳', '╋']; // heavy set, to match the bold ⬇/⬆ arrowheads' stroke weight
+const GLYPH = [' ', '║', '═', '╚', '║', '║', '╔', '╠', '═', '╝', '═', '╩', '╗', '╣', '╦', '╬']; // double-line set: dependency edges (bolder than heavy — max contrast vs the thin ref line)
+const LIGHT = [' ', '│', '─', '└', '│', '│', '┌', '├', '─', '┘', '─', '┴', '┐', '┤', '┬', '┼']; // light set: reference edges. double vs light is a wide, reliably-1-cell delta (unlike the ╍/╏ double-dashes many terminal fonts mis-space)
 const N_ = 1, E_ = 2, S_ = 4, W_ = 8, RESET = '\x1b[0m', GAP = 1;
 
 export function renderAsciiGraph(nodes, edges, opts = {}) {
@@ -220,7 +221,7 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
   const hCol = Array.from({ length: height }, () => new Array(canvasW).fill(null)); // color of E/W owner
   const owner = Array.from({ length: height }, () => new Array(canvasW).fill(-1));
   const multi = Array.from({ length: height }, () => new Uint8Array(canvasW));
-  const dash = new Set();
+  const dashV = new Set(), dashH = new Set(); // cells where a REF edge's vertical / horizontal runs (ref = thin single line)
   const inb = (x, yy) => yy >= 0 && yy < height && x >= 0 && x < canvasW;
   const bit = (x, yy, b, id, c) => {
     if (!inb(x, yy)) return;
@@ -230,14 +231,14 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
     if (owner[yy][x] === -1) owner[yy][x] = id; else if (owner[yy][x] !== id) multi[yy][x] = 1;
   };
   const put = (x, yy, ch2, c) => { if (inb(x, yy)) { chr[yy][x] = ch2; cCol[yy][x] = c; } };
-  const vsg = (y1, y2, x, ref, id, c) => { const [a, b] = y1 <= y2 ? [y1, y2] : [y2, y1]; for (let yy = a; yy <= b; yy++) { if (yy > a) bit(x, yy, N_, id, c); if (yy < b) bit(x, yy, S_, id, c); if (ref) dash.add(x + ',' + yy); } };
-  const hsg = (x1, x2, yy, ref, id, c) => { const [a, b] = x1 <= x2 ? [x1, x2] : [x2, x1]; for (let x = a; x <= b; x++) { if (x > a) bit(x, yy, W_, id, c); if (x < b) bit(x, yy, E_, id, c); if (ref) dash.add(x + ',' + yy); } };
+  const vsg = (y1, y2, x, ref, id, c) => { const [a, b] = y1 <= y2 ? [y1, y2] : [y2, y1]; for (let yy = a; yy <= b; yy++) { if (yy > a) bit(x, yy, N_, id, c); if (yy < b) bit(x, yy, S_, id, c); if (ref) dashV.add(x + ',' + yy); } };
+  const hsg = (x1, x2, yy, ref, id, c) => { const [a, b] = x1 <= x2 ? [x1, x2] : [x2, x1]; for (let x = a; x <= b; x++) { if (x > a) bit(x, yy, W_, id, c); if (x < b) bit(x, yy, E_, id, c); if (ref) dashH.add(x + ',' + yy); } };
 
   for (const c of NODES) { // boxes (own color)
     const x0 = cellX.get(c), w = CW(c), t = yTop[cellL.get(c)], cc = colorOf(c), lbl = ` ${c} `, pad = w - 2 - lbl.length, lp = Math.max(0, pad >> 1);
-    put(x0, t, '┏', cc); put(x0 + w - 1, t, '┓', cc); put(x0, t + 2, '┗', cc); put(x0 + w - 1, t + 2, '┛', cc);
-    for (let x = x0 + 1; x < x0 + w - 1; x++) { put(x, t, '━', cc); put(x, t + 2, '━', cc); }
-    put(x0, t + 1, '┃', cc); put(x0 + w - 1, t + 1, '┃', cc);
+    put(x0, t, '╔', cc); put(x0 + w - 1, t, '╗', cc); put(x0, t + 2, '╚', cc); put(x0 + w - 1, t + 2, '╝', cc);
+    for (let x = x0 + 1; x < x0 + w - 1; x++) { put(x, t, '═', cc); put(x, t + 2, '═', cc); }
+    put(x0, t + 1, '║', cc); put(x0 + w - 1, t + 1, '║', cc);
     const text = ' '.repeat(lp) + lbl + ' '.repeat(Math.max(0, pad - lp));
     for (let i = 0; i < text.length && x0 + 1 + i < x0 + w - 1; i++) put(x0 + 1 + i, t + 1, text[i], cc);
   }
@@ -264,8 +265,9 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
       if (chr[yy][x] != null) { g = chr[yy][x]; c = cCol[yy][x]; }
       else if (mask[yy][x]) {
         const m = mask[yy][x];
-        if (multi[yy][x] && m & (N_ | S_) && m & (E_ | W_)) { g = '┃'; c = vCol[yy][x]; } // crossing hop: vertical over
-        else { g = GLYPH[m]; c = vCol[yy][x] || hCol[yy][x]; if (dash.has(x + ',' + yy)) { if (m === E_ + W_) g = '╍'; else if (m === N_ + S_) g = '╏'; } }
+        const k = x + ',' + yy;
+        if (multi[yy][x] && m & (N_ | S_) && m & (E_ | W_)) { g = dashV.has(k) ? '│' : '║'; c = vCol[yy][x]; } // crossing hop: the VERTICAL passes over, drawn at ITS OWN weight (║ dep stays double, │ ref stays single) — never thinned
+        else { g = (dashV.has(k) || dashH.has(k) ? LIGHT : GLYPH)[m]; c = vCol[yy][x] || hCol[yy][x]; }
       } else { g = ' '; c = null; }
       const want = g === ' ' ? null : c;
       if (want !== cur) { if (cur) line += RESET; if (want) line += want; cur = want; }
