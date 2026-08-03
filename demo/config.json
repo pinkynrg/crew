@@ -1,0 +1,143 @@
+{
+  "longRunning": [
+    "start",
+    "dev",
+    "watch"
+  ],
+  "projects": {
+    "web": {
+      "path": "web",
+      "type": "frontend",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "development": "web.dev.demo.dev",
+        "staging": "web.staging.demo.dev",
+        "production": "web.demo.dev"
+      },
+      "local": "http://localhost:3000"
+    },
+    "admin": {
+      "path": "admin",
+      "type": "frontend",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "development": "admin.dev.demo.dev",
+        "staging": "admin.staging.demo.dev",
+        "production": "admin.demo.dev"
+      },
+      "local": "http://localhost:3001"
+    },
+    "api": {
+      "path": "api",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "development": "api.dev.demo.dev",
+        "staging": "api.staging.demo.dev",
+        "production": "api.demo.dev"
+      },
+      "local": "http://localhost:3002"
+    },
+    "auth": {
+      "path": "auth",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "development": "auth.dev.demo.dev",
+        "staging": "auth.staging.demo.dev",
+        "production": "auth.demo.dev"
+      },
+      "local": "http://localhost:3003"
+    },
+    "billing": {
+      "path": "billing",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "development": "billing.dev.demo.dev",
+        "staging": "billing.staging.demo.dev",
+        "production": "billing.demo.dev"
+      },
+      "local": "http://localhost:3004"
+    },
+    "search": {
+      "path": "search",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "development": "search.dev.demo.dev",
+        "staging": "search.staging.demo.dev",
+        "production": "search.demo.dev"
+      },
+      "local": "http://localhost:3005"
+    },
+    "queue": {
+      "path": "queue",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "development": "queue.dev.demo.dev",
+        "staging": "queue.staging.demo.dev",
+        "production": "queue.demo.dev"
+      },
+      "local": "http://localhost:3006"
+    },
+    "worker": {
+      "path": "worker",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "development": "worker.dev.demo.dev",
+        "staging": "worker.staging.demo.dev",
+        "production": "worker.demo.dev"
+      },
+      "local": "http://localhost:3007"
+    },
+    "db": {
+      "path": "db",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "development": "db.dev.demo.dev",
+        "staging": "db.staging.demo.dev",
+        "production": "db.demo.dev"
+      },
+      "local": "http://localhost:3008"
+    },
+    "cache": {
+      "path": "cache",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "development": "cache.dev.demo.dev",
+        "staging": "cache.staging.demo.dev",
+        "production": "cache.demo.dev"
+      },
+      "local": "http://localhost:3009"
+    }
+  },
+  "version": 2,
+  "workspaceName": "crew"
+}

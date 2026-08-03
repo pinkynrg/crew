@@ -1,0 +1,16 @@
+#!/bin/sh
+# Demo stand-in for the `code` (VS Code) CLI, used ONLY to record the landing-page GIF.
+# `crew workspace` writes a real .code-workspace file then runs `code <file>`; this stub just
+# prints that handoff (the folders crew put in the workspace) so the flow is recordable.
+ws="$1"
+label=$(basename "$ws" .code-workspace)
+n=$(grep -c '"path"' "$ws" 2>/dev/null)
+printf '\n\033[1m  ● VS Code\033[0m  \033[2m· workspace "%s"\033[0m\n\n' "$label"
+printf '  crew wrote one workspace with \033[1m%s\033[0m folders:\n' "$n"
+grep '"path"' "$ws" 2>/dev/null | sed -E 's/.*"path": *"([^"]+)".*/\1/' | while IFS= read -r p; do
+  printf '    \033[36m▸\033[0m %s\n' "$(basename "$p")"
+done
+printf '\n  \033[2mone window, all repos side by side.\033[0m\n\n'
+printf '  \033[2mopening…\033[0m'
+sleep 6
+printf '\n'

@@ -66,17 +66,19 @@
   .subnote a { color:var(--muted); text-decoration:underline; }
 
   /* preview terminals: cross-fade, fixed height so it doesn't jump */
-  .previews { position:relative; min-height:454px; }
+  .previews { display:grid; }  /* all tabs stack in one cell -> container hugs the (GIF) content, no fixed height */
   .term { background:var(--term-bg); border-radius:12px; box-shadow:var(--shadow); overflow:hidden; border:1px solid rgba(255,255,255,.06); }
-  .previews .term { position:absolute; inset:0; opacity:0; transform:translateY(6px); transition:opacity .4s ease, transform .4s ease; pointer-events:none; }
+  .previews .term { grid-area:1 / 1; display:flex; flex-direction:column; opacity:0; transform:translateY(6px); transition:opacity .4s ease, transform .4s ease; pointer-events:none; }
   .previews .term.on { opacity:1; transform:none; pointer-events:auto; }
   @media (prefers-reduced-motion: reduce){ .previews .term { transition:none; transform:none; } }
   .term .bar { display:flex; align-items:center; gap:.5rem; padding:.6rem .8rem; background:var(--term-bar); border-bottom:1px solid rgba(255,255,255,.05); }
   .term .bar i { width:11px; height:11px; border-radius:50%; display:block; }
   .term .bar i:nth-child(1){ background:#ff5f57;} .term .bar i:nth-child(2){ background:#febc2e;} .term .bar i:nth-child(3){ background:#28c840;}
   .term .bar span { margin-left:.5rem; font-family:ui-monospace,Menlo,monospace; font-size:.78rem; color:#6b7286; }
-  .term pre { margin:0; padding:1rem 1.15rem; height:420px; overflow:auto; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12.5px; line-height:1.34; color:var(--term-fg); }
+  .term pre { margin:0; padding:1rem 1.15rem; flex:1; min-height:0; overflow:auto; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12.5px; line-height:1.34; color:var(--term-fg); }
   .term pre .p { color:var(--accent); } .term pre .c { color:#6b7286; } .term pre .ok { color:#5fd38d; }
+  /* start + claude tabs are real recorded sessions (GIF); height:auto -> the window fits the GIF exactly, no letterbox */
+  .term .cast { display:block; width:100%; height:auto; aspect-ratio:900 / 780; }
   .r { color:#ff6b6b; } .g { color:#5fd38d; } .y { color:#e8c34a; } .b { color:#6aa9ff; } .m { color:#d68cf0; } .cy { color:#56cbdb; }
 
   section { padding:clamp(2.4rem,6vw,4.2rem) 0; border-top:1px solid var(--line); }
@@ -103,7 +105,6 @@
 
   @media (max-width:840px){
     .hero .wrap { grid-template-columns:1fr; }
-    .previews { min-height:420px; } .term pre { height:386px; }
     .nav nav a.hidephone { display:none; }
   }
 </style>
@@ -126,12 +127,11 @@
   <div class="wrap">
     <div>
       <p class="eyebrow">local dev for a distributed stack</p>
-      <h1>One command for your whole&nbsp;<span class="amber">local stack</span>.</h1>
+      <h1>One command to run <span class="amber">just the part you're changing</span>,&nbsp;locally.</h1>
       <div class="tabs" role="tablist" aria-label="What crew does">
         <button role="tab" aria-selected="true" data-i="0">crew start</button>
         <button role="tab" aria-selected="false" data-i="1">crew workspace</button>
         <button role="tab" aria-selected="false" data-i="2">crew claude</button>
-        <button role="tab" aria-selected="false" data-i="3">crew graph</button>
       </div>
       <p class="tail" id="tail" aria-live="polite"></p>
       <div class="cmd">
@@ -142,61 +142,20 @@
     </div>
 
     <div class="previews">
-      <!-- 0: start -->
+      <!-- 0: start (real recorded session) -->
       <div class="term on" data-i="0">
         <div class="bar"><i></i><i></i><i></i><span>crew start</span></div>
-        <pre><span class="p">$</span> crew start
-<span class="c">◐ picked  web · api        auth, db stay remote</span>
-<span class="r">[web]</span>  ready on :3000
-<span class="g">[api]</span>  web  &gt;  <span class="g">localhost:3000</span>
-<span class="g">[api]</span>  db   &gt;  <span class="c">db.internal  (remote)</span>
-<span class="r">[web]</span>  GET /health  200
-<span class="ok">✓ group up in 0.4s</span>   <span class="c">Ctrl-C tears it all down</span></pre>
+        <img class="cast" src="media/crew-start.gif" alt="crew start: pick a connected slice of services in the dependency graph, run it locally, watch the labelled logs" loading="lazy" decoding="async">
       </div>
-      <!-- 1: workspace -->
+      <!-- 1: workspace (real recorded session) -->
       <div class="term" data-i="1">
         <div class="bar"><i></i><i></i><i></i><span>crew workspace</span></div>
-        <pre><span class="p">$</span> crew workspace
-<span class="c">◐ picked  web · api · cart · db</span>
-→ writing <span class="y">stack.code-workspace</span>
-→ 4 folders, one window
-→ settings applied  <span class="c">(jest.enable: false)</span>
-<span class="ok">✓ opening VS Code…</span></pre>
+        <img class="cast" src="media/crew-workspace.gif" alt="crew workspace: pick the repos on the dependency graph, open them as one VS Code workspace" loading="lazy" decoding="async">
       </div>
-      <!-- 2: claude -->
+      <!-- 2: claude (real recorded session) -->
       <div class="term" data-i="2">
         <div class="bar"><i></i><i></i><i></i><span>crew claude</span></div>
-        <pre><span class="p">$</span> crew claude checkout-flow
-<span class="c">◐ picked  web · api · cart · payments</span>
-→ launching <span class="m">Claude Code</span>
-    session   <span class="y">"checkout-flow"</span>
-    repos     4
-    history   kept per set
-<span class="ok">✓ one session across the group</span></pre>
-      </div>
-      <!-- 3: graph -->
-      <div class="term" data-i="3">
-        <div class="bar"><i></i><i></i><i></i><span>crew graph</span></div>
-        <pre>          <span class="r">╔═════╗</span>
-          <span class="r">║</span> <span class="r">web</span> <span class="r">║</span>
-          <span class="r">╚╦═══╦╝</span>
-           <span class="r">║</span><span class="g">△</span>  <span class="r">║</span>
-         <span class="g">┌─</span><span class="r">║</span><span class="g">┘</span>  <span class="r">║</span>
-         <span class="g">│</span><span class="r">╔╝</span>   <span class="r">║</span>
-         <span class="g">│</span><span class="r">▼</span>    <span class="r">▼</span>
-      <span class="g">╔══╧══╗</span> <span class="y">╔══════╗</span>
-      <span class="g">║</span> <span class="g">api</span> <span class="g">║</span> <span class="y">║</span> <span class="y">auth</span> <span class="y">║</span>
-      <span class="g">╚╦═══╦╝</span> <span class="y">╚╦═════╝</span>
-       <span class="g">║</span>   <span class="g">╚╗</span>  <span class="y">║</span>
-       <span class="g">▼</span>    <span class="g">▼</span>  <span class="y">▼</span>
- <span class="m">╔═══════╗</span> <span class="b">╔════╗</span>
- <span class="m">║</span> <span class="m">queue</span> <span class="m">║</span> <span class="b">║</span> <span class="b">db</span> <span class="b">║</span>
- <span class="m">╚═══╦═══╝</span> <span class="b">╚════╝</span>
-     <span class="m">║</span>
-     <span class="m">▼</span>
-<span class="cy">╔════════╗</span>
-<span class="cy">║</span> <span class="cy">worker</span> <span class="cy">║</span>
-<span class="cy">╚════════╝</span></pre>
+        <img class="cast" src="media/crew-claude.gif" alt="crew claude: pick the repos on the dependency graph, hand them to one Claude Code session with history kept per set" loading="lazy" decoding="async">
       </div>
     </div>
   </div>
@@ -248,15 +207,8 @@
       <li>
         <div>
           <span class="t">Run the set</span>
-          <pre class="step-cmd"><span class="p">$</span> crew start</pre>
-          <p>Pick projects in the picker; crew runs each one and wires them together.</p>
-        </div>
-      </li>
-      <li>
-        <div>
-          <span class="t">See how they connect</span>
-          <pre class="step-cmd"><span class="p">$</span> crew graph</pre>
-          <p>The dependency graph, drawn in a scroll/filter pager.</p>
+          <pre class="step-cmd"><span class="p">$</span> crew start env=production</pre>
+          <p>Pick a connected slice in the dependency graph (click or arrow keys); crew runs those locally, wires them together, and leaves the rest on their resolved remote env.</p>
         </div>
       </li>
       <li>
@@ -280,7 +232,7 @@
 <footer>
   <div class="wrap">
     <span class="brand mono">cr<b style="color:var(--accent)">ew</b></span>
-    <span>One command for your whole local stack.</span>
+    <span>One command to run just the part you're changing, locally.</span>
     <nav>
       <a href="https://github.com/pinkynrg/crew">GitHub</a>
       <a href="https://www.npmjs.com/package/@pinkynrg/crew">npm</a>
@@ -304,24 +256,32 @@
 
   // carousel
   const tails = [
-    'Run part of your stack locally, <b>auto-wired from your env files</b>; the rest stay remote.',
+    'Pick projects in a <b>live dependency graph</b>: the set runs locally, <b>auto-wired from your env files</b>, and the rest stay on their resolved remote env.',
     'Open the whole picked set as <b>one VS Code workspace</b>: every repo in a single window.',
-    'Hand a group of repos to <b>Claude Code in one session</b>, named, with history kept per set.',
-    'See exactly how your services <b>connect</b>: a diagram discovered from your env files.'
+    'Hand a group of repos to <b>Claude Code in one session</b>, named, with history kept per set.'
   ];
   const tabs = [...document.querySelectorAll('.tabs button')];
   const terms = [...document.querySelectorAll('.previews .term')];
   const tail = document.getElementById('tail');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  terms.forEach((t) => { const img = t.querySelector('img.cast'); if (img) img.dataset.gif = img.getAttribute('src'); }); // remember each GIF's src so we can restart it
+
+  // ms each tab stays up before auto-advancing — a touch longer than that tab's GIF so it plays through once
+  const DWELL = [13000, 14000, 14500]; // [start, workspace, claude], by data-i
   let i = 0, timer = null;
   const show = (n) => {
     i = (n + tabs.length) % tabs.length;
     tabs.forEach((t, k) => t.setAttribute('aria-selected', k === i));
-    terms.forEach((t, k) => t.classList.toggle('on', k === i));
+    terms.forEach((t, k) => {
+      const on = k === i;
+      t.classList.toggle('on', on);
+      const img = t.querySelector('img.cast');
+      if (img && on && img.dataset.gif) { img.removeAttribute('src'); img.src = img.dataset.gif; } // restart the GIF from frame 0
+    });
     tail.innerHTML = tails[i];
   };
-  const start = () => { if (reduce) return; stop(); timer = setInterval(() => show(i + 1), 4200); };
-  const stop = () => { if (timer) clearInterval(timer); timer = null; };
+  const start = () => { if (reduce) return; stop(); timer = setTimeout(() => { show(i + 1); start(); }, DWELL[i]); };
+  const stop = () => { if (timer) clearTimeout(timer); timer = null; };
   tabs.forEach((t) => {
     t.addEventListener('click', () => { show(+t.dataset.i); start(); });
     t.addEventListener('keydown', (e) => {

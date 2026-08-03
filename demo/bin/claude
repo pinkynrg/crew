@@ -1,0 +1,18 @@
+#!/bin/sh
+# Demo stand-in for the real `claude` CLI, used ONLY to record the landing-page GIF.
+# `crew claude` launches Claude Code with the picked repos added via --add-dir; this stub
+# just prints that handoff (which repos crew wired in) so the flow is recordable. No chat is faked.
+dirs=""; n=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --add-dir) shift; dirs="$dirs $(basename "$1")"; n=$((n + 1)) ;;
+  esac
+  shift
+done
+printf '\n\033[1m  ● Claude Code\033[0m  \033[2m· session "%s"\033[0m\n\n' "$(basename "$PWD")"
+printf '  crew added \033[1m%s\033[0m repos to this session:\n' "$n"
+for d in $dirs; do printf '    \033[36m▸\033[0m %s\n' "$d"; done
+printf '\n  \033[2mhistory is kept per set, so this chat resumes next time you pick the same group.\033[0m\n\n'
+printf '  \033[2m>\033[0m '
+sleep 6
+printf '\n'
