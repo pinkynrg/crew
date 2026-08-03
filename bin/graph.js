@@ -29,6 +29,10 @@ const N_ = 1, E_ = 2, S_ = 4, W_ = 8, RESET = '\x1b[0m', GAP = 1;
 
 export function renderAsciiGraph(nodes, edges, opts = {}) {
   const colorOf = opts.colorOf || (() => '');
+  const sublabel = opts.sublabel || (() => '');   // optional short suffix on the name line (e.g. resolved env) — no extra box height
+  const cursor = opts.cursor;                      // optional cursor node (interactive selector)
+  const sel = cursor != null;                      // selector mode: reserve a ▸ marker gutter so moving the cursor never reflows widths
+  const boxLabel = (c) => (sel ? (c === cursor ? '▸ ' : '  ') : '') + c + (sublabel(c) ? ' [' + sublabel(c) + ']' : ''); // env is any string the caller gives; the [brackets] are ours
   const NODES = [...new Set(nodes)];
   if (!NODES.length) return '';
   const has = new Set(NODES);
@@ -93,7 +97,7 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
   // 6. port counts -> box widths ------------------------------------------
   const botSeg = new Map(), topSeg = new Map();
   for (const s of segs) { if (!isDummy(s.upper)) (botSeg.get(s.upper) || botSeg.set(s.upper, []).get(s.upper)).push(s); if (!isDummy(s.lower)) (topSeg.get(s.lower) || topSeg.set(s.lower, []).get(s.lower)).push(s); }
-  const CW = (c) => isDummy(c) ? 1 : Math.max(c.length + 4, Math.max((botSeg.get(c) || []).length, (topSeg.get(c) || []).length) + 2);
+  const CW = (c) => isDummy(c) ? 1 : Math.max(boxLabel(c).length + 4, Math.max((botSeg.get(c) || []).length, (topSeg.get(c) || []).length) + 2);
 
   // 7. coordinates — averaged-median L1 coordinate assignment ----------------------
   // Two anchored single passes (align down to parents' median, align up to children's median), each
@@ -235,7 +239,7 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
   const hsg = (x1, x2, yy, ref, id, c) => { const [a, b] = x1 <= x2 ? [x1, x2] : [x2, x1]; for (let x = a; x <= b; x++) { if (x > a) bit(x, yy, W_, id, c); if (x < b) bit(x, yy, E_, id, c); if (ref) dashH.add(x + ',' + yy); } };
 
   for (const c of NODES) { // boxes (own color)
-    const x0 = cellX.get(c), w = CW(c), t = yTop[cellL.get(c)], cc = colorOf(c), lbl = ` ${c} `, pad = w - 2 - lbl.length, lp = Math.max(0, pad >> 1);
+    const x0 = cellX.get(c), w = CW(c), t = yTop[cellL.get(c)], cc = colorOf(c), lbl = ` ${boxLabel(c)} `, pad = w - 2 - lbl.length, lp = Math.max(0, pad >> 1);
     put(x0, t, '╔', cc); put(x0 + w - 1, t, '╗', cc); put(x0, t + 2, '╚', cc); put(x0 + w - 1, t + 2, '╝', cc);
     for (let x = x0 + 1; x < x0 + w - 1; x++) { put(x, t, '═', cc); put(x, t + 2, '═', cc); }
     put(x0, t + 1, '║', cc); put(x0 + w - 1, t + 1, '║', cc);
@@ -281,7 +285,14 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
     if (cur) line += RESET;
     out.push(line.replace(/[ \t]+(\x1b\[0m)?$/, (mm, r) => r || ''));
   }
-  return out.join('\n');
+  const text = out.join('\n');
+  if (!opts.withLayout) return text;
+  // Layout for an interactive caller (the graph selector): real nodes per layer left-to-right, and each
+  // node's centre-x + top row, so it can move a cursor (←→ within a layer, ↑↓ to the nearest node in the
+  // next) and scroll the box into view.
+  const layers = rows.map((r) => r.filter((c) => !isDummy(c)).sort((a, b) => cxc(a) - cxc(b)));
+  const place = new Map(NODES.map((c) => [c, { layer: cellL.get(c), cx: cxc(c), x0: Math.round(cellX.get(c)), w: CW(c), y0: yTop[cellL.get(c)], h: 3 }]));
+  return { text, layers, place, height };
 }
 
 // ---- standalone CLI: parse a mermaid flowchart and render -------------------

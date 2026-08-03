@@ -23,7 +23,15 @@ const argv = process.argv.slice(2);
 const update = argv.includes('-u') || argv.includes('--update');
 const filters = argv.filter((a) => !a.startsWith('-'));
 const cpw = (s) => [...(s || '')].length;
-const render = (src) => { const { nodes, edges } = parseMermaid(src); return renderAsciiGraph(nodes, edges, {}); }; // no colorOf => mono
+// optional per-fixture opts: a companion <name>.opts.json ({ cursor, sublabel:{node:suffix} }) exercises
+// the selector rendering (inline env + cursor marker). No colorOf -> mono, so snapshots stay ANSI-free.
+const optsFor = (name) => {
+  const p = join(gdir, name + '.opts.json');
+  if (!existsSync(p)) return {};
+  const o = JSON.parse(readFileSync(p, 'utf8'));
+  return { cursor: o.cursor, sublabel: o.sublabel ? (n) => o.sublabel[n] || '' : undefined };
+};
+const render = (src, name) => { const { nodes, edges } = parseMermaid(src); return renderAsciiGraph(nodes, edges, optsFor(name)); };
 
 const files = readdirSync(gdir).filter((f) => f.endsWith('.mmd'))
   .filter((f) => !filters.length || filters.some((x) => f.includes(x))).sort();
@@ -32,7 +40,7 @@ if (!files.length) { console.error('no matching .mmd in tests/graphs'); process.
 let pass = 0; const fails = [];
 for (const f of files) {
   const name = f.replace(/\.mmd$/, '');
-  const out = render(readFileSync(join(gdir, f), 'utf8'));
+  const out = render(readFileSync(join(gdir, f), 'utf8'), name);
   const snap = join(sdir, name + '.txt');
   if (update) { writeFileSync(snap, out + '\n'); continue; }
   const exp = existsSync(snap) ? readFileSync(snap, 'utf8').replace(/\n$/, '') : null;

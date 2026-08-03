@@ -1869,6 +1869,22 @@ export async function selectMembers(flags, cfg, opts = {}) {
   const known = Object.keys(cfg.projects || {});
   if (!known.length) fail('no projects configured yet — run: crew add');
   if (!canInteractive()) fail('crew needs an interactive terminal to pick projects');
+  // Default: pick on the dependency graph itself. `--list` forces the flat multiselect below.
+  if (!flags.list) {
+    let selEnv = opts.selEnv;
+    if (opts.requireEnv && !selEnv) { // start must know the base (remote) env unselected projects point at
+      const { ask, close } = makePrompter();
+      try { selEnv = (await ask('Remote environment (what unselected projects point at, e.g. pre)', '')).trim(); }
+      finally { close(); }
+      if (!selEnv) { console.log(c.dim('no environment — cancelled')); return null; }
+    }
+    const picked = await graphSelect(flags, cfg, { selEnv });
+    if (picked !== undefined) { // ran (confirm or cancel); undefined only if it couldn't (non-TTY) -> fall through
+      if (!picked || !picked.length) { console.log(c.dim('nothing selected')); return null; }
+      saveLastSelection(flags, picked);
+      return membersFor(cfg, picked);
+    }
+  }
   const paint = projectColors(cfg);
   // Precompute the graph once so the live footer is a pure in-memory lookup per keypress.
   const edges = opts.connectivity ? dependencyEdges(cfg, Object.entries(cfg.projects)) : null;
@@ -1921,7 +1937,8 @@ export async function cmdRun(flags, task, rest) {
     }
   } else {
     if (bare.length) warn(`ignoring '${bare.join(' ')}' — projects are chosen in the picker`);
-    members = await selectMembers(flags, cfg, { connectivity: isLong });
+    const envArg = args.find((a) => a.startsWith('env='));
+    members = await selectMembers(flags, cfg, { connectivity: isLong, selEnv: envArg ? envArg.slice(4) : undefined, requireEnv: task === 'start' });
   }
   if (!members) return;
   validateMemberPaths(members);
@@ -2200,10 +2217,93 @@ export function collectGraphEdges(cfg) {
 // edge P→T when a URL in P's envs has a host equal to one of T's match hosts (tokenMatchLen).
 // Optional config `internalDomains: [..]` only affects the cosmetic "other hosts" list.
 // localhost URLs match no id, so they drop out.
+// Interactive graph picker for `crew start` (and workspace / claude): navigate the dependency graph and
+// toggle which projects run. ↑↓ = layer, ←→ = neighbour in the layer, space = toggle, a = all/none,
+// enter = confirm, q/esc = cancel. Selected nodes render in their own colour and read `[local]`; the rest
+// are grayed and read `[<base env>]` (where they stay remote). Returns the picked names, null if cancelled,
+// or undefined if it can't run (non-TTY) so the caller falls back to the flat menu().
+async function graphSelect(flags, cfg, opts = {}) {
+  const stdout = process.stdout, stdin = process.stdin;
+  const names = Object.keys(cfg.projects || {});
+  if (!stdout.isTTY || !stdin.isTTY || !names.length) return undefined; // undefined = can't run here -> caller falls back to flat menu
+  const { nodes, real, ref } = collectGraphEdges(cfg);
+  if (!nodes.length) return undefined;
+  const edges = [...real.map(([f, t]) => ({ from: f, to: t })), ...ref.map(([f, t]) => ({ from: f, to: t, ref: true }))];
+  const paint = projectColors(cfg);
+  const prefix = (n) => { const f = paint.get(n); if (!f) return ''; const s = f('\x01'); const i = s.indexOf('\x01'); return i > 0 ? s.slice(0, i) : ''; };
+  const GRAY = '\x1b[90m', selEnv = opts.selEnv;
+  const depEdges = dependencyEdges(cfg, Object.entries(cfg.projects));
+  let active = new Set(loadLastSelection(flags).filter((n) => nodes.includes(n)));
+  if (!active.size) active = new Set(nodes);        // default: everything selected
+  let cursor = nodes[0];
+  const remoteEnv = selEnv != null ? resolveEnvs(cfg, nodes, selEnv).resolved : new Map(); // where each service is deployed (crew resolve) — shown for the ones NOT run locally
+  const draw = () => renderAsciiGraph(nodes, edges, {
+    colorOf: (n) => (active.has(n) ? prefix(n) : GRAY),                                          // running set keeps per-source colours; the rest grayed
+    sublabel: selEnv != null ? (n) => (active.has(n) ? 'local' : (remoteEnv.get(n) || selEnv)) : undefined, // selected run local; the rest show their resolved remote env
+    cursor, withLayout: true,
+  });
+  return new Promise((resolve) => {
+    const w = (x) => stdout.write(x);
+    const wasRaw = stdin.isRaw;
+    let top = 0, vpad = 0, mxw = 0, layout = draw(); // vpad/mxw = current centring offsets (kept so a mouse click can be mapped back to a node)
+    const body = () => Math.max(3, (stdout.rows || 24) - 1); // reserve 1 row: the footer bar
+    const cleanup = () => { stdin.removeListener('data', onData); stdout.removeListener('resize', repaint); w('\x1b[?1000l\x1b[?1006l\x1b[?7h\x1b[?25h\x1b[?1049l'); if (stdin.setRawMode) stdin.setRawMode(wasRaw); stdin.pause(); };
+    const cpw = (s) => [...s.replace(/\x1b\[[0-9;]*m/g, '')].length; // display width, ANSI-stripped
+    const repaint = () => {
+      const R = body(), cols = stdout.columns || 80, lines = layout.text.split('\n');
+      const gw = Math.max(0, ...lines.map(cpw)), mx = ' '.repeat(Math.max(0, (cols - gw) >> 1)); mxw = mx.length; // centre horizontally
+      vpad = 0;
+      if (lines.length <= R) { vpad = (R - lines.length) >> 1; top = 0; }                          // fits vertically -> centre it
+      else { const y = layout.place.get(cursor).y0; if (y < top) top = y; else if (y + 3 > top + R) top = y + 3 - R; top = Math.max(0, Math.min(top, lines.length - R)); } // taller -> scroll cursor into view
+      let out = '\x1b[H';
+      for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + (li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
+      const split = cpw(connectivityStatus(cfg, depEdges, [...active], false)) > 0; // non-verbose returns islands text only when disconnected
+      const bar = ` ${active.size}/${nodes.length} local${split ? '  ⚠ not connected' : ''}   ↑↓ layer · ←→ node · click/space toggle · a all/none · enter run · q cancel `;
+      out += '\x1b[K\x1b[7m' + bar + ' '.repeat(Math.max(0, cols - cpw(bar))) + '\x1b[0m'; // one full-width reverse-video footer
+      w(out);
+    };
+    const moveH = (d) => { const p = layout.place.get(cursor), list = layout.layers[p.layer], i = list.indexOf(cursor); cursor = list[Math.max(0, Math.min(list.length - 1, i + d))]; };
+    const moveV = (d) => { let l = layout.place.get(cursor).layer + d; while (l >= 0 && l < layout.layers.length && !layout.layers[l].length) l += d; if (l < 0 || l >= layout.layers.length || !layout.layers[l].length) return; const cx = layout.place.get(cursor).cx; let best = layout.layers[l][0], bd = Infinity; for (const n of layout.layers[l]) { const dd = Math.abs(layout.place.get(n).cx - cx); if (dd < bd) { bd = dd; best = n; } } cursor = best; };
+    const hitTest = (col, row) => { // SGR 1-based screen (col,row) -> node whose box contains it, else null
+      const gx = col - 1 - mxw, gy = top + (row - 1 - vpad);
+      for (const n of nodes) { const p = layout.place.get(n); if (p && gx >= p.x0 && gx < p.x0 + p.w && gy >= p.y0 && gy < p.y0 + p.h) return n; }
+      return null;
+    };
+    const onData = (buf) => {
+      const k = buf.toString();
+      const m = k.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/); // SGR mouse: btn;col;row + M(press)/m(release)
+      if (m) {
+        const btn = +m[1];
+        if (m[4] === 'M' && btn === 64) { top -= 3; repaint(); return; }                 // wheel up
+        if (m[4] === 'M' && btn === 65) { top += 3; repaint(); return; }                 // wheel down
+        if (m[4] === 'M' && (btn & 0b11) === 0 && !(btn & 0b1100000)) {                  // left-button press (not motion/wheel)
+          const hit = hitTest(+m[2], +m[3]);
+          if (hit) { cursor = hit; active.has(hit) ? active.delete(hit) : active.add(hit); layout = draw(); repaint(); }
+        }
+        return;
+      }
+      if (k === '\x03' || k === 'q' || k === '\x1b') { cleanup(); return resolve(null); }
+      if (k === '\r' || k === '\n') { cleanup(); return resolve([...active]); }
+      if (k === ' ') { active.has(cursor) ? active.delete(cursor) : active.add(cursor); }
+      else if (k === 'a') { active = active.size === nodes.length ? new Set() : new Set(nodes); }
+      else if (k === '\x1b[C' || k === 'l') moveH(1);
+      else if (k === '\x1b[D' || k === 'h') moveH(-1);
+      else if (k === '\x1b[B' || k === 'j') moveV(1);
+      else if (k === '\x1b[A' || k === 'k') moveV(-1);
+      else return;
+      layout = draw(); repaint();
+    };
+    if (stdin.setRawMode) stdin.setRawMode(true);
+    stdin.resume();
+    w('\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1006h'); // alt screen + hide cursor + no-wrap + SGR mouse reporting
+    stdin.on('data', onData); stdout.on('resize', repaint);
+    repaint();
+  });
+}
+
 // Show a (possibly tall) block in an ALTERNATE-SCREEN pager — like the log viewer, so it vanishes on
-// exit instead of scrolling into the terminal history. Vertical scroll only (graphs fit width; wide
-// lines clip, no wrap). 'f' resolves 'filter' (caller opens a node picker); 'q' resolves 'quit'.
-// Non-TTY: plain print (so `| less`, redirects, CI still work).
+// exit instead of scrolling into the terminal history. Vertical scroll only. 'f' resolves 'filter'
+// (caller opens a node picker); 'q' resolves 'quit'. Non-TTY: plain print (so `| less`, redirects, CI work).
 function pagerView(text, title = 'crew graph') {
   const stdout = process.stdout, stdin = process.stdin;
   if (!stdout.isTTY || !stdin.isTTY) { console.log(text); return Promise.resolve('quit'); }
@@ -2214,13 +2314,17 @@ function pagerView(text, title = 'crew graph') {
     let top = 0;
     const body = () => Math.max(1, (stdout.rows || 24) - 1);
     const maxTop = () => Math.max(0, lines.length - body());
+    const cpw = (s) => [...s.replace(/\x1b\[[0-9;]*m/g, '')].length;
     const paint = () => {
-      const R = body();
-      top = Math.max(0, Math.min(maxTop(), top));
+      const R = body(), cols = stdout.columns || 80;
+      const gw = Math.max(0, ...lines.map(cpw)), mx = ' '.repeat(Math.max(0, (cols - gw) >> 1)); // centre horizontally
+      let vpad = 0;
+      if (lines.length <= R) { vpad = (R - lines.length) >> 1; top = 0; } else top = Math.max(0, Math.min(maxTop(), top)); // centre vertically when it fits
       let out = '\x1b[H';
-      for (let i = 0; i < R; i++) out += '\x1b[K' + (lines[top + i] ?? '') + '\x1b[0m\r\n';
+      for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + (li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
       const pos = lines.length > R ? `${top + 1}-${Math.min(top + R, lines.length)}/${lines.length}` : `${lines.length} lines`;
-      out += `\x1b[7m ${title}  ·  ${pos}  ·  ↑↓ jk / space b / g G / f filter / q \x1b[0m\x1b[K`;
+      const bar = ` ${title}  ·  ${pos}  ·  ↑↓ jk · space b · g G · f filter · q quit `;
+      out += '\x1b[K\x1b[7m' + bar + ' '.repeat(Math.max(0, cols - cpw(bar))) + '\x1b[0m'; // full-width footer bar
       w(out);
     };
     const cleanup = () => {
@@ -3044,6 +3148,7 @@ function parseArgs(argv) {
       flags.config = argv[++i];
       if (flags.config == null) fail('--config requires a path');
     } else if (a.startsWith('--config=')) flags.config = a.slice('--config='.length);
+    else if (a === '--list') flags.list = true; // force the flat multiselect instead of the graph picker
     else if (a.startsWith('-') && a !== '-') fail(`unknown flag: ${a}`);
     else pos.push(a);
   }
