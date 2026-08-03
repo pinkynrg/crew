@@ -1,0 +1,15 @@
+graph TD
+  web --> api
+  web --> auth
+  admin --> api
+  admin --> billing
+  api --> db
+  api --> cache
+  api --> queue
+  auth --> db
+  billing --> api
+  billing --> db
+  queue --> worker
+  worker --> db
+  search --> api
+  search --> cache
