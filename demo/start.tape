@@ -18,7 +18,7 @@ Type "clear"
 Enter
 Show
 
-Type "crew start env=production"
+Type "crew start env=prod"
 Sleep 500ms
 Enter
 Sleep 1800ms

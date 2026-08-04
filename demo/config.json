@@ -13,9 +13,9 @@
       },
       "env": ".envs/{env}.env",
       "match": {
-        "development": "web.dev.demo.dev",
-        "staging": "web.staging.demo.dev",
-        "production": "web.demo.dev"
+        "dev": "web.dev.demo.dev",
+        "stage": "web.staging.demo.dev",
+        "prod": "web.demo.dev"
       },
       "local": "http://localhost:3000"
     },
@@ -27,9 +27,9 @@
       },
       "env": ".envs/{env}.env",
       "match": {
-        "development": "admin.dev.demo.dev",
-        "staging": "admin.staging.demo.dev",
-        "production": "admin.demo.dev"
+        "dev": "admin.dev.demo.dev",
+        "stage": "admin.staging.demo.dev",
+        "prod": "admin.demo.dev"
       },
       "local": "http://localhost:3001"
     },
@@ -40,9 +40,9 @@
       },
       "env": ".envs/{env}.env",
       "match": {
-        "development": "api.dev.demo.dev",
-        "staging": "api.staging.demo.dev",
-        "production": "api.demo.dev"
+        "dev": "api.dev.demo.dev",
+        "stage": "api.staging.demo.dev",
+        "prod": "api.demo.dev"
       },
       "local": "http://localhost:3002"
     },
@@ -53,9 +53,9 @@
       },
       "env": ".envs/{env}.env",
       "match": {
-        "development": "auth.dev.demo.dev",
-        "staging": "auth.staging.demo.dev",
-        "production": "auth.demo.dev"
+        "dev": "auth.dev.demo.dev",
+        "stage": "auth.staging.demo.dev",
+        "prod": "auth.demo.dev"
       },
       "local": "http://localhost:3003"
     },
@@ -66,9 +66,9 @@
       },
       "env": ".envs/{env}.env",
       "match": {
-        "development": "billing.dev.demo.dev",
-        "staging": "billing.staging.demo.dev",
-        "production": "billing.demo.dev"
+        "dev": "billing.dev.demo.dev",
+        "stage": "billing.staging.demo.dev",
+        "prod": "billing.demo.dev"
       },
       "local": "http://localhost:3004"
     },
@@ -79,9 +79,9 @@
       },
       "env": ".envs/{env}.env",
       "match": {
-        "development": "search.dev.demo.dev",
-        "staging": "search.staging.demo.dev",
-        "production": "search.demo.dev"
+        "dev": "search.dev.demo.dev",
+        "stage": "search.staging.demo.dev",
+        "prod": "search.demo.dev"
       },
       "local": "http://localhost:3005"
     },
@@ -92,9 +92,9 @@
       },
       "env": ".envs/{env}.env",
       "match": {
-        "development": "queue.dev.demo.dev",
-        "staging": "queue.staging.demo.dev",
-        "production": "queue.demo.dev"
+        "dev": "queue.dev.demo.dev",
+        "stage": "queue.staging.demo.dev",
+        "prod": "queue.demo.dev"
       },
       "local": "http://localhost:3006"
     },
@@ -105,9 +105,9 @@
       },
       "env": ".envs/{env}.env",
       "match": {
-        "development": "worker.dev.demo.dev",
-        "staging": "worker.staging.demo.dev",
-        "production": "worker.demo.dev"
+        "dev": "worker.dev.demo.dev",
+        "stage": "worker.staging.demo.dev",
+        "prod": "worker.demo.dev"
       },
       "local": "http://localhost:3007"
     },
@@ -118,9 +118,9 @@
       },
       "env": ".envs/{env}.env",
       "match": {
-        "development": "db.dev.demo.dev",
-        "staging": "db.staging.demo.dev",
-        "production": "db.demo.dev"
+        "dev": "db.dev.demo.dev",
+        "stage": "db.staging.demo.dev",
+        "prod": "db.demo.dev"
       },
       "local": "http://localhost:3008"
     },
@@ -131,9 +131,9 @@
       },
       "env": ".envs/{env}.env",
       "match": {
-        "development": "cache.dev.demo.dev",
-        "staging": "cache.staging.demo.dev",
-        "production": "cache.demo.dev"
+        "dev": "cache.dev.demo.dev",
+        "stage": "cache.staging.demo.dev",
+        "prod": "cache.demo.dev"
       },
       "local": "http://localhost:3009"
     }
