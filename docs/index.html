@@ -104,8 +104,24 @@
   #top .pitch-col h1 { font-size:clamp(1.5rem,2.9vw,2.1rem); line-height:1.15; margin:.2rem 0 1.1rem; } /* smaller so the pitch fits inside the GIF's height */
   #top .tail { min-height:3.4em; }                             /* all three descriptions wrap to 2 lines at this width -> switching the tab never changes the page height */
 
+  /* config section: explanation (left) + sample config.json (right) */
+  #config .config-grid { display:grid; grid-template-columns:0.9fr 1.1fr; gap:clamp(1.6rem,4vw,3rem); align-items:start; }
+  #config .points { list-style:none; margin:1.4rem 0 0; padding:0; display:grid; gap:.8rem; }
+  #config .points li { color:var(--muted); font-size:.98rem; padding-left:1.15rem; position:relative; }
+  #config .points li::before { content:"\203A"; position:absolute; left:0; color:var(--accent); font-weight:700; }
+  #config .points b { color:var(--fg); font-weight:600; font-family:ui-monospace,Menlo,monospace; font-size:.9em; }
+  #config .cfg-note { margin:1.4rem 0 0; font-size:.88rem; color:var(--muted); }
+  #config .term pre { margin:0; padding:1rem 1.2rem; overflow-x:auto; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12.5px; line-height:1.5; color:var(--term-fg); }
+  #config .term pre .jk { color:#6aa9ff; }   /* json keys */
+  #config .term pre .js { color:#9ae6b4; }   /* json string values */
+  #config .term pre .jp { color:var(--accent); font-weight:600; }   /* crew {placeholder} */
+  #config .cfg-graph { margin:1.9rem 0 0; text-align:center; }
+  #config .cfg-graph figcaption { margin:0 0 .8rem; font-size:.78rem; letter-spacing:.14em; text-transform:uppercase; font-family:ui-monospace,Menlo,monospace; color:var(--accent); }
+  #config .cfg-graph pre { display:inline-block; text-align:left; margin:0; padding:0; background:none; border:none; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:13px; line-height:1.15; overflow-x:auto; }
+
   @media (max-width:840px){
     #top .top-grid { grid-template-columns:1fr; }
+    #config .config-grid { grid-template-columns:1fr; }
     .nav nav a.hidephone { display:none; }
   }
 </style>
@@ -116,6 +132,7 @@
     <span class="brand">cr<b>ew</b></span>
     <nav>
       <a href="#how" class="hidephone">How it's built</a>
+      <a href="#config" class="hidephone">Config&nbsp;file</a>
       <a href="#start">Get&nbsp;started</a>
       <a href="https://www.npmjs.com/package/@pinkynrg/crew" class="hidephone">npm</a>
       <a href="https://github.com/pinkynrg/crew" class="ghbtn">GitHub</a>
@@ -162,6 +179,84 @@
   </div>
 </section>
 
+<section id="config">
+  <div class="wrap config-grid">
+    <div class="config-copy">
+      <p class="kicker">the config file</p>
+      <h2>One file describes your stack.</h2>
+      <p class="intro">A single <code>config.json</code>: each project's folder, how to start it, and the host(s) it's served under per environment. crew reads it (plus your env files) to draw the dependency graph and wire the set you pick.</p>
+      <ul class="points">
+        <li><b>path</b> + <b>tasks.start</b>: where each repo lives and how to run it. Drop <b>{envfile}</b> in the command and crew injects the wired env file it materializes for the run.</li>
+        <li><b>match</b>: the host(s) it's deployed under, per env. crew matches these against the URLs in your env files to <b>auto-discover who depends on whom</b>.</li>
+        <li><b>local</b>: its local URL, so crew can rewrite a peer's env to point at your local copy instead of the deployed one.</li>
+      </ul>
+      <p class="cfg-note">Committable as-is: no secrets, no machine paths. Those live in a gitignored <code>local.json</code> beside it.</p>
+      <figure class="cfg-graph" aria-label="Dependency graph crew derives from this config: web depends on api and auth; api depends on auth.">
+        <figcaption>the graph crew derives</figcaption>
+        <pre>   <span style="color:rgb(95,211,141)">╔═════╗</span>
+   <span style="color:rgb(95,211,141)">║</span> <span style="color:rgb(95,211,141)">web</span> <span style="color:rgb(95,211,141)">║</span>
+   <span style="color:rgb(95,211,141)">╚╦═══╦╝</span>
+    <span style="color:rgb(95,211,141)">║</span>   <span style="color:rgb(95,211,141)">╚╗</span>
+    <span style="color:rgb(95,211,141)">▼</span>    <span style="color:rgb(95,211,141)">║</span>
+ <span style="color:rgb(86,203,219)">╔═════╗</span> <span style="color:rgb(95,211,141)">║</span>
+ <span style="color:rgb(86,203,219)">║</span> <span style="color:rgb(86,203,219)">api</span> <span style="color:rgb(86,203,219)">║</span> <span style="color:rgb(95,211,141)">║</span>
+ <span style="color:rgb(86,203,219)">╚════╦╝</span> <span style="color:rgb(95,211,141)">║</span>
+      <span style="color:rgb(86,203,219)">║</span> <span style="color:rgb(95,211,141)">╔╝</span>
+      <span style="color:rgb(86,203,219)">▼</span> <span style="color:rgb(95,211,141)">▼</span>
+  <span style="color:rgb(183,148,246)">╔══════╗</span>
+  <span style="color:rgb(183,148,246)">║</span> <span style="color:rgb(183,148,246)">auth</span> <span style="color:rgb(183,148,246)">║</span>
+  <span style="color:rgb(183,148,246)">╚══════╝</span></pre>
+      </figure>
+    </div>
+    <div class="config-code">
+      <div class="term">
+        <div class="bar"><i></i><i></i><i></i><span>config.json</span></div>
+        <pre><span class="jk">{
+  "projects"</span>: {
+    <span class="jk">"web"</span>: {
+      <span class="jk">"path"</span>: <span class="js">"web"</span>,
+      <span class="jk">"type"</span>: <span class="js">"frontend"</span>,
+      <span class="jk">"tasks"</span>: {
+        <span class="jk">"start"</span>: <span class="js">"dotenv -e </span><span class="jp">{envfile}</span><span class="js"> -- npm run dev"</span>
+      },
+      <span class="jk">"env"</span>: <span class="js">".envs/{env}.env"</span>,
+      <span class="jk">"match"</span>: {
+        <span class="jk">"staging"</span>: <span class="js">"web.staging.acme.dev"</span>,
+        <span class="jk">"prod"</span>:    <span class="js">"web.acme.dev"</span>
+      },
+      <span class="jk">"local"</span>: <span class="js">"http://localhost:3000"</span>
+    },
+    <span class="jk">"api"</span>: {
+      <span class="jk">"path"</span>: <span class="js">"api"</span>,
+      <span class="jk">"tasks"</span>: {
+        <span class="jk">"start"</span>: <span class="js">"uvicorn app:main --reload --env-file </span><span class="jp">{envfile}</span><span class="js">"</span>
+      },
+      <span class="jk">"env"</span>: <span class="js">".envs/{env}.env"</span>,
+      <span class="jk">"match"</span>: {
+        <span class="jk">"staging"</span>: <span class="js">"api.staging.acme.dev"</span>,
+        <span class="jk">"prod"</span>:    <span class="js">"api.acme.dev"</span>
+      },
+      <span class="jk">"local"</span>: <span class="js">"http://localhost:4000"</span>
+    },
+    <span class="jk">"auth"</span>: {
+      <span class="jk">"path"</span>: <span class="js">"auth"</span>,
+      <span class="jk">"tasks"</span>: {
+        <span class="jk">"start"</span>: <span class="js">"godotenv -f </span><span class="jp">{envfile}</span><span class="js"> go run ."</span>
+      },
+      <span class="jk">"env"</span>: <span class="js">".envs/{env}.env"</span>,
+      <span class="jk">"match"</span>: {
+        <span class="jk">"staging"</span>: <span class="js">"auth.staging.acme.dev"</span>,
+        <span class="jk">"prod"</span>:    <span class="js">"auth.acme.dev"</span>
+      },
+      <span class="jk">"local"</span>: <span class="js">"http://localhost:4500"</span>
+    }
+  }
+}</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="start">
   <div class="wrap">
     <p class="kicker">get started</p>
@@ -176,37 +271,16 @@
       </li>
       <li>
         <div>
-          <span class="t">Point at your repos</span>
-          <pre class="step-cmd"><span class="p">$</span> crew dir ~/Projects</pre>
-          <p>Where your project folders live; relative paths in your config resolve against it.</p>
-        </div>
-      </li>
-      <li>
-        <div>
-          <span class="t">Register a project</span>
+          <span class="t">Register your projects, or write the config file manually</span>
           <pre class="step-cmd"><span class="p">$</span> crew add</pre>
-          <p>A short wizard: its path, its start command, and the host(s) it's served under (so crew can wire it).</p>
+          <p>A short wizard for each (its path, start command, and the host(s) it's served under), or write the <code>config.json</code> yourself, as shown above.</p>
         </div>
       </li>
       <li>
         <div>
           <span class="t">Run the set</span>
-          <pre class="step-cmd"><span class="p">$</span> crew start env=production</pre>
+          <pre class="step-cmd"><span class="p">$</span> crew start env=staging</pre>
           <p>Pick a connected slice in the dependency graph (click or arrow keys); crew runs those locally, wires them together, and leaves the rest on their resolved remote env.</p>
-        </div>
-      </li>
-      <li>
-        <div>
-          <span class="t">Open the set as one window</span>
-          <pre class="step-cmd"><span class="p">$</span> crew workspace</pre>
-          <p>Every picked repo in a single VS Code workspace.</p>
-        </div>
-      </li>
-      <li>
-        <div>
-          <span class="t">Hand the set to Claude Code</span>
-          <pre class="step-cmd"><span class="p">$</span> crew claude</pre>
-          <p>One session across the group, with history kept per set.</p>
         </div>
       </li>
     </ol>
