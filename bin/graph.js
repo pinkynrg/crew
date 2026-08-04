@@ -163,10 +163,13 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
   const xL = (s) => isDummy(s.lower) ? cxc(s.lower) : portX.get(s).l;
   // §8 port assignment as a callable — the local-search below re-runs it after every box nudge so
   // placement and routing finally co-adapt. Deterministic: same box columns in -> same ports out.
+  let frozen = false; // once true, keep the current port ORDER (the port-swap search permutes it) instead of re-sorting by far-end
   const assignPorts = () => {
     portX.clear();
-    for (const [, list] of botSeg) list.sort((a, b) => cxc(a.lower) - cxc(b.lower));   // fixed order = far-end x (crossing-minimal)
-    for (const [, list] of topSeg) list.sort((a, b) => cxc(a.upper) - cxc(b.upper));
+    if (!frozen) { // seed/refresh port order by far-end (crossing-minimal) — during the box-move phase only
+      for (const [, list] of botSeg) list.sort((a, b) => cxc(a.lower) - cxc(b.lower));
+      for (const [, list] of topSeg) list.sort((a, b) => cxc(a.upper) - cxc(b.upper));
+    }
     for (const [node, list] of botSeg) list.forEach((s) => setPort(s, 'u', cellX.get(node) + (CW(node) >> 1))); // seed at box center
     for (const [node, list] of topSeg) list.forEach((s) => setPort(s, 'l', cellX.get(node) + (CW(node) >> 1)));
     for (let it = 0; it < 4; it++) { // relax both ends toward each other until ports line up
@@ -261,6 +264,30 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
         moveBox(c, nx); assignPorts();
         const cc = metric().cost;
         if (cc < best) { best = cc; improved = true; } else { moveBox(c, cur); assignPorts(); }
+      }
+      // dummy-CHANNEL move: shift a long edge's whole straightened channel sideways (e.g. route B->D
+      // left of C instead of right) — lets the search reroute a through-edge, not just move boxes.
+      for (const ch of chains) {
+        const ds = ch.pts.filter(isDummy); if (!ds.length) continue;
+        for (const delta of [-1, 1, -2, 2, -3, 3]) {
+          if (!ds.every((d) => gapOK(d, cxm.get(d) + delta))) continue;
+          const cur = ds.map((d) => cxm.get(d));
+          ds.forEach((d) => moveBox(d, cxm.get(d) + delta)); assignPorts();
+          if (metric().cost < best) { best = metric().cost; improved = true; } else { ds.forEach((d, i) => moveBox(d, cur[i])); assignPorts(); }
+        }
+      }
+      if (!improved) break;
+    }
+    // port-swap phase: freeze the far-end order, then swap adjacent ports on a border whenever it cuts a
+    // real crossing (e.g. admin->api / billing->api into a shared target). isoPlace keeps ports in list
+    // order, so a swap = a column swap; only strictly-better swaps kept -> monotonic, can't add crossings.
+    frozen = true; assignPorts(); best = metric().cost;
+    for (let pass = 0; pass < 12; pass++) {
+      let improved = false;
+      for (const map of [botSeg, topSeg]) for (const [, list] of map) for (let i = 0; i < list.length - 1; i++) {
+        const sw = () => { const t = list[i]; list[i] = list[i + 1]; list[i + 1] = t; };
+        sw(); assignPorts();
+        if (metric().cost < best) { best = metric().cost; improved = true; } else { sw(); assignPorts(); }
       }
       if (!improved) break;
     }
