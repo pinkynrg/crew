@@ -102,7 +102,7 @@
   #top .top-grid { display:grid; grid-template-columns:0.8fr 1.2fr; gap:clamp(1.6rem,4vw,3.2rem); align-items:stretch; } /* GIF defines the row height; pitch stretches to match */
   #top .pitch-col { display:flex; flex-direction:column; justify-content:center; }
   #top .pitch-col h1 { font-size:clamp(1.5rem,2.9vw,2.1rem); line-height:1.15; margin:.2rem 0 1.1rem; } /* smaller so the pitch fits inside the GIF's height */
-  #top .tail { min-height:3.4em; }                             /* all three descriptions wrap to 2 lines at this width -> switching the tab never changes the page height */
+  #top .tail { min-height:4.9em; }                             /* reserve 3 lines (the longest description wraps to 3) so switching the tab never changes the page height */
 
   /* config section: explanation (left) + sample config.json (right) */
   #config .config-grid { display:grid; grid-template-columns:0.9fr 1.1fr; gap:clamp(1.6rem,4vw,3rem); align-items:start; }
