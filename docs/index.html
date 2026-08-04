@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>crew · one command for your whole local stack</title>
+<meta name="description" content="Run a slice of your services locally, wired to the rest; open the set as one VS Code workspace or hand it to Claude Code; and see how everything connects. Zero-dependency CLI.">
+<style>
+  :root {
+    --ink:#f4f6fa; --panel:#ffffff; --line:#dfe3ec; --fg:#262b36; --muted:#5c6474;
+    --accent:#c8791b; --accent-soft:#f6ead6;
+    --shadow:0 1px 2px rgba(20,24,40,.06), 0 14px 40px rgba(20,24,40,.10);
+    --term-bg:#0c0e15; --term-bar:#171a24; --term-fg:#c7cdda;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink:#0b0d13; --panel:#12151f; --line:#232839; --fg:#c6ccda; --muted:#838ba0;
+            --accent:#e9a94a; --accent-soft:#241d10; --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 48px rgba(0,0,0,.4); }
+  }
+  :root[data-theme="light"]{ --ink:#f4f6fa; --panel:#fff; --line:#dfe3ec; --fg:#262b36; --muted:#5c6474; --accent:#c8791b; --accent-soft:#f6ead6; --shadow:0 1px 2px rgba(20,24,40,.06),0 14px 40px rgba(20,24,40,.10); }
+  :root[data-theme="dark"]{ --ink:#0b0d13; --panel:#12151f; --line:#232839; --fg:#c6ccda; --muted:#838ba0; --accent:#e9a94a; --accent-soft:#241d10; --shadow:0 1px 2px rgba(0,0,0,.4),0 16px 48px rgba(0,0,0,.4); }
+
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  @media (prefers-reduced-motion: reduce){ html{ scroll-behavior:auto; } }
+  body { margin:0; background:var(--ink); color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; line-height:1.6; -webkit-font-smoothing:antialiased; }
+  .mono { font-family:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace; }
+  .wrap { width:min(1080px,92vw); margin:0 auto; }
+  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:5px; }
+
+  header.nav { position:sticky; top:0; z-index:20; backdrop-filter:blur(10px);
+    background:color-mix(in srgb, var(--ink) 82%, transparent); border-bottom:1px solid var(--line); }
+  .nav .wrap { display:flex; align-items:center; gap:1.4rem; height:60px; }
+  .brand { font-family:ui-monospace,"SF Mono",Menlo,monospace; font-weight:700; font-size:1.05rem; letter-spacing:-.02em; color:var(--fg); }
+  .brand b { color:var(--accent); }
+  .nav .brand { font-size:1.4rem; }
+  .nav nav { margin-left:auto; display:flex; gap:1.3rem; align-items:center; font-size:.92rem; }
+  .nav nav a { color:var(--muted); } .nav nav a:hover { color:var(--fg); text-decoration:none; }
+  .nav .ghbtn { color:var(--fg); border:1px solid var(--line); padding:.35rem .7rem; border-radius:7px; }
+  #themeToggle { background:none; border:1px solid var(--line); color:var(--muted); width:34px; height:30px; border-radius:7px; cursor:pointer; font-size:.95rem; }
+  #themeToggle:hover { color:var(--fg); }
+
+  .eyebrow { font-family:ui-monospace,Menlo,monospace; font-size:.76rem; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); margin:0 0 1rem; }
+  h1 { font-size:clamp(2.1rem,4.6vw,3.15rem); line-height:1.06; letter-spacing:-.03em; margin:0 0 1.1rem; text-wrap:balance; font-weight:780; }
+  h1 .amber { color:var(--accent); }
+
+  /* tabs */
+  .tabs { display:flex; flex-wrap:nowrap; align-items:center; gap:.35rem; margin:0 0 1rem; overflow-x:auto; }
+  .tabs button { font-family:ui-monospace,Menlo,monospace; font-size:.82rem; color:var(--muted); white-space:nowrap;
+    background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:.4rem .6rem; cursor:pointer; transition:all .15s; }
+  .tabs button:hover { color:var(--fg); }
+  .tabs button[aria-selected="true"] { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
+  .tail { min-height:3.2em; margin:0 0 1.5rem; font-size:1.12rem; color:var(--muted); max-width:40ch; }
+  .tail b { color:var(--fg); font-weight:600; }
+  .tail .fast { color:var(--accent); font-weight:700; }
+
+  .cmd { display:flex; align-items:center; gap:.6rem; background:var(--term-bg); border:1px solid var(--line);
+    border-radius:10px; padding:.75rem 1rem; font-family:ui-monospace,Menlo,monospace; font-size:.94rem; color:var(--term-fg); box-shadow:var(--shadow); max-width:22rem; }
+  .cmd .p { color:var(--accent); } .cmd code { flex:1; }
+  .cmd button { background:none; border:1px solid #2a3040; color:#8a93a8; border-radius:6px; padding:.26rem .55rem; font:inherit; font-size:.76rem; cursor:pointer; }
+  .cmd button:hover { color:#fff; border-color:#3a4152; }
+  .subnote { margin:.85rem 0 0; font-size:.85rem; color:var(--muted); }
+  .subnote a { color:var(--muted); text-decoration:underline; }
+
+  /* terminal window (the crew start GIF) */
+  .term { background:var(--term-bg); border-radius:12px; box-shadow:var(--shadow); overflow:hidden; border:1px solid rgba(255,255,255,.06); display:flex; flex-direction:column; }
+  .term .bar { display:flex; align-items:center; gap:.5rem; padding:.6rem .8rem; background:var(--term-bar); border-bottom:1px solid rgba(255,255,255,.05); }
+  .term .bar i { width:11px; height:11px; border-radius:50%; display:block; }
+  .term .bar i:nth-child(1){ background:#ff5f57;} .term .bar i:nth-child(2){ background:#febc2e;} .term .bar i:nth-child(3){ background:#28c840;}
+  .term .bar span { margin-left:.5rem; font-family:ui-monospace,Menlo,monospace; font-size:.78rem; color:#6b7286; }
+  /* real recorded session (GIF); height:auto -> the window fits the GIF exactly, no letterbox */
+  .term .cast { display:block; width:100%; height:auto; aspect-ratio:4 / 3; }
+
+  section { padding:clamp(2.4rem,6vw,4.2rem) 0; border-top:1px solid var(--line); }
+  .kicker { font-family:ui-monospace,Menlo,monospace; font-size:.76rem; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); margin:0 0 .7rem; }
+  h2 { font-size:clamp(1.55rem,3.4vw,2.05rem); letter-spacing:-.02em; margin:0 0 .6rem; font-weight:720; text-wrap:balance; }
+  section p.intro { color:var(--muted); max-width:62ch; margin:0 0 2rem; font-size:1.04rem; }
+
+  .prin { display:flex; flex-wrap:wrap; gap:.6rem; }
+  .prin span { font-family:ui-monospace,Menlo,monospace; font-size:.82rem; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:.4rem .9rem; }
+  .prin span b { color:var(--accent); }
+
+  ol.steps { list-style:none; counter-reset:s; margin:0; padding:0; display:grid; gap:.9rem; }
+  ol.steps li { counter-increment:s; display:grid; grid-template-columns:auto 1fr; gap:1.15rem; align-items:start;
+    background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:1.15rem 1.35rem;
+    transition:border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
+  ol.steps li:hover { border-color:color-mix(in srgb, var(--accent) 45%, var(--line)); transform:translateY(-2px); box-shadow:var(--shadow); }
+  ol.steps li::before { content:counter(s); font-family:ui-monospace,Menlo,monospace; font-weight:700; color:var(--accent); background:var(--accent-soft); border:1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); width:34px; height:34px; border-radius:9px; display:grid; place-items:center; font-size:.95rem; }
+  ol.steps .t { font-weight:650; display:block; margin-bottom:.6rem; font-size:1.02rem; }
+  ol.steps .step-cmd { margin:0 0 .5rem; background:var(--term-bg); color:var(--term-fg); border:1px solid var(--line); border-radius:8px; padding:.6rem .85rem; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.9rem; overflow-x:auto; }
+  ol.steps .step-cmd .p { color:var(--accent); }
+  ol.steps code { font-family:ui-monospace,Menlo,monospace; background:var(--term-bg); color:var(--term-fg); padding:.12rem .4rem; border-radius:5px; font-size:.86em; }
+  ol.steps p { margin:0; color:var(--muted); font-size:.94rem; }
+
+  footer { border-top:1px solid var(--line); padding:2.4rem 0 3.4rem; color:var(--muted); font-size:.9rem; }
+  footer .wrap { display:flex; flex-wrap:wrap; gap:1rem 2rem; align-items:center; }
+  footer nav { margin-left:auto; display:flex; gap:1.4rem; } footer a { color:var(--muted); }
+
+  /* top: value prop (left) + crew start GIF (right, full height) */
+  #top { border-top:none; }                                    /* first section: no line right under the nav */
+  #top .top-grid { display:grid; grid-template-columns:0.8fr 1.2fr; gap:clamp(1.6rem,4vw,3.2rem); align-items:stretch; } /* GIF defines the row height; pitch stretches to match */
+  #top .pitch-col { display:flex; flex-direction:column; justify-content:center; }
+  #top .pitch-col h1 { font-size:clamp(1.5rem,2.9vw,2.1rem); line-height:1.15; margin:.2rem 0 1.1rem; } /* smaller so the pitch fits inside the GIF's height */
+  #top .tail { min-height:4.9em; }                             /* reserve 3 lines (the longest description wraps to 3) so switching the tab never changes the page height */
+
+  /* config section: explanation (left) + sample config.json (right) */
+  #config .config-grid { display:grid; grid-template-columns:0.9fr 1.1fr; gap:clamp(1.6rem,4vw,3rem); align-items:start; }
+  #config .points { list-style:none; margin:1.4rem 0 0; padding:0; display:grid; gap:.8rem; }
+  #config .points li { color:var(--muted); font-size:.98rem; padding-left:1.15rem; position:relative; }
+  #config .points li::before { content:"\203A"; position:absolute; left:0; color:var(--accent); font-weight:700; }
+  #config .points b { color:var(--fg); font-weight:600; font-family:ui-monospace,Menlo,monospace; font-size:.9em; }
+  #config .cfg-note { margin:1.4rem 0 0; font-size:.88rem; color:var(--muted); }
+  #config .term pre { margin:0; padding:1rem 1.2rem; overflow-x:auto; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12.5px; line-height:1.5; color:var(--term-fg); }
+  #config .term pre .jk { color:#6aa9ff; }   /* json keys */
+  #config .term pre .js { color:#9ae6b4; }   /* json string values */
+  #config .term pre .jp { color:var(--accent); font-weight:600; }   /* crew {placeholder} */
+  #config .cfg-graph { margin:1.9rem 0 0; text-align:center; }
+  #config .cfg-graph figcaption { margin:0 0 .8rem; font-size:.78rem; letter-spacing:.14em; text-transform:uppercase; font-family:ui-monospace,Menlo,monospace; color:var(--accent); }
+  #config .cfg-graph pre { display:inline-block; text-align:left; margin:0; padding:0; background:none; border:none; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:13px; line-height:1.15; overflow-x:auto; }
+
+  @media (max-width:840px){
+    #top .top-grid { grid-template-columns:1fr; }
+    #config .config-grid { grid-template-columns:1fr; }
+    .nav nav a.hidephone { display:none; }
+  }
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <span class="brand">cr<b>ew</b></span>
+    <nav>
+      <a href="#how" class="hidephone">How it's built</a>
+      <a href="#config" class="hidephone">Config&nbsp;file</a>
+      <a href="#start">Get&nbsp;started</a>
+      <a href="https://www.npmjs.com/package/@pinkynrg/crew" class="hidephone">npm</a>
+      <a href="https://github.com/pinkynrg/crew" class="ghbtn">GitHub</a>
+      <button id="themeToggle" aria-label="Toggle light or dark theme" title="Toggle theme">◑</button>
+    </nav>
+  </div>
+</header>
+
+<section id="top">
+  <div class="wrap top-grid">
+    <div class="pitch-col">
+      <p class="eyebrow">local dev for a distributed stack</p>
+      <h1>Quickly select &amp; run <span class="amber">the slice of your stack you're interested in</span> locally, wired to the rest.</h1>
+      <div class="tabs" role="tablist" aria-label="What crew does">
+        <button role="tab" aria-selected="true" data-i="0">crew start</button>
+        <button role="tab" aria-selected="false" data-i="1">crew workspace</button>
+        <button role="tab" aria-selected="false" data-i="2">crew claude</button>
+      </div>
+      <p class="tail" id="tail" aria-live="polite"></p>
+      <div class="cmd">
+        <span class="p">$</span><code id="install">npx @pinkynrg/crew</code>
+        <button id="copy">copy</button>
+      </div>
+      <p class="subnote">Zero dependencies · macOS &amp; Linux · <a href="https://github.com/pinkynrg/crew">MIT on GitHub</a></p>
+    </div>
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span>crew start</span></div>
+      <img class="cast" src="media/crew-start.gif" alt="crew start: pick a connected slice of services in the dependency graph, run it locally, watch the labelled logs" loading="lazy" decoding="async">
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <p class="kicker">how it's built</p>
+    <h2>Small on purpose.</h2>
+    <p class="intro">crew owns the fan-out (parallelism, labelled output, teardown) and the wiring, and never interprets your tasks beyond one placeholder. Everything else is yours. No runtime dependencies, no build step, no bundler: the source is what runs.</p>
+    <div class="prin">
+      <span><b>0</b> runtime deps</span>
+      <span><b>no</b> build step</span>
+      <span>node built-ins only</span>
+      <span><b>two</b> files, no bundler</span>
+    </div>
+  </div>
+</section>
+
+<section id="config">
+  <div class="wrap config-grid">
+    <div class="config-copy">
+      <p class="kicker">the config file</p>
+      <h2>One file describes your stack.</h2>
+      <p class="intro">A single <code>config.json</code>: each project's folder, how to start it, and the host(s) it's served under per environment. crew reads it (plus your env files) to draw the dependency graph and wire the set you pick.</p>
+      <ul class="points">
+        <li><b>path</b> + <b>tasks.start</b>: where each repo lives and how to run it. Drop <b>{envfile}</b> in the command and crew injects the wired env file it materializes for the run.</li>
+        <li><b>match</b>: the host(s) it's deployed under, per env. crew matches these against the URLs in your env files to <b>auto-discover who depends on whom</b>.</li>
+        <li><b>local</b>: its local URL, so crew can rewrite a peer's env to point at your local copy instead of the deployed one.</li>
+      </ul>
+      <p class="cfg-note">Committable as-is: no secrets, no machine paths. Those live in a gitignored <code>local.json</code> beside it.</p>
+      <figure class="cfg-graph" aria-label="Dependency graph crew derives from this config: web depends on api and auth; api depends on auth.">
+        <figcaption>the graph crew derives</figcaption>
+        <pre>   <span style="color:rgb(95,211,141)">╔═════╗</span>
+   <span style="color:rgb(95,211,141)">║</span> <span style="color:rgb(95,211,141)">web</span> <span style="color:rgb(95,211,141)">║</span>
+   <span style="color:rgb(95,211,141)">╚╦═══╦╝</span>
+    <span style="color:rgb(95,211,141)">║</span>   <span style="color:rgb(95,211,141)">╚╗</span>
+    <span style="color:rgb(95,211,141)">▼</span>    <span style="color:rgb(95,211,141)">║</span>
+ <span style="color:rgb(86,203,219)">╔═════╗</span> <span style="color:rgb(95,211,141)">║</span>
+ <span style="color:rgb(86,203,219)">║</span> <span style="color:rgb(86,203,219)">api</span> <span style="color:rgb(86,203,219)">║</span> <span style="color:rgb(95,211,141)">║</span>
+ <span style="color:rgb(86,203,219)">╚════╦╝</span> <span style="color:rgb(95,211,141)">║</span>
+      <span style="color:rgb(86,203,219)">║</span> <span style="color:rgb(95,211,141)">╔╝</span>
+      <span style="color:rgb(86,203,219)">▼</span> <span style="color:rgb(95,211,141)">▼</span>
+  <span style="color:rgb(183,148,246)">╔══════╗</span>
+  <span style="color:rgb(183,148,246)">║</span> <span style="color:rgb(183,148,246)">auth</span> <span style="color:rgb(183,148,246)">║</span>
+  <span style="color:rgb(183,148,246)">╚══════╝</span></pre>
+      </figure>
+    </div>
+    <div class="config-code">
+      <div class="term">
+        <div class="bar"><i></i><i></i><i></i><span>config.json</span></div>
+        <pre><span class="jk">{
+  "projects"</span>: {
+    <span class="jk">"web"</span>: {
+      <span class="jk">"path"</span>: <span class="js">"web"</span>,
+      <span class="jk">"type"</span>: <span class="js">"frontend"</span>,
+      <span class="jk">"tasks"</span>: {
+        <span class="jk">"start"</span>: <span class="js">"dotenv -e </span><span class="jp">{envfile}</span><span class="js"> -- npm run dev"</span>
+      },
+      <span class="jk">"env"</span>: <span class="js">".envs/{env}.env"</span>,
+      <span class="jk">"match"</span>: {
+        <span class="jk">"staging"</span>: <span class="js">"web.staging.acme.dev"</span>,
+        <span class="jk">"prod"</span>:    <span class="js">"web.acme.dev"</span>
+      },
+      <span class="jk">"local"</span>: <span class="js">"http://localhost:3000"</span>
+    },
+    <span class="jk">"api"</span>: {
+      <span class="jk">"path"</span>: <span class="js">"api"</span>,
+      <span class="jk">"tasks"</span>: {
+        <span class="jk">"start"</span>: <span class="js">"uvicorn app:main --reload --env-file </span><span class="jp">{envfile}</span><span class="js">"</span>
+      },
+      <span class="jk">"env"</span>: <span class="js">".envs/{env}.env"</span>,
+      <span class="jk">"match"</span>: {
+        <span class="jk">"staging"</span>: <span class="js">"api.staging.acme.dev"</span>,
+        <span class="jk">"prod"</span>:    <span class="js">"api.acme.dev"</span>
+      },
+      <span class="jk">"local"</span>: <span class="js">"http://localhost:4000"</span>
+    },
+    <span class="jk">"auth"</span>: {
+      <span class="jk">"path"</span>: <span class="js">"auth"</span>,
+      <span class="jk">"tasks"</span>: {
+        <span class="jk">"start"</span>: <span class="js">"godotenv -f </span><span class="jp">{envfile}</span><span class="js"> go run ."</span>
+      },
+      <span class="jk">"env"</span>: <span class="js">".envs/{env}.env"</span>,
+      <span class="jk">"match"</span>: {
+        <span class="jk">"staging"</span>: <span class="js">"auth.staging.acme.dev"</span>,
+        <span class="jk">"prod"</span>:    <span class="js">"auth.acme.dev"</span>
+      },
+      <span class="jk">"local"</span>: <span class="js">"http://localhost:4500"</span>
+    }
+  }
+}</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <p class="kicker">get started</p>
+    <h2>From zero to a running set.</h2>
+    <ol class="steps">
+      <li>
+        <div>
+          <span class="t">Install</span>
+          <pre class="step-cmd"><span class="p">$</span> npx @pinkynrg/crew</pre>
+          <p>Zero dependencies, so it lands instantly. Or install it globally with <code>npm i -g @pinkynrg/crew</code>.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <span class="t">Register your projects, or write the config file manually</span>
+          <pre class="step-cmd"><span class="p">$</span> crew add</pre>
+          <p>A short wizard for each (its path, start command, and the host(s) it's served under), or write the <code>config.json</code> yourself, as shown above.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <span class="t">Run the set</span>
+          <pre class="step-cmd"><span class="p">$</span> crew start env=staging</pre>
+          <p>Pick a connected slice in the dependency graph (click or arrow keys); crew runs those locally, wires them together, and leaves the rest on their resolved remote env.</p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span class="brand mono">cr<b style="color:var(--accent)">ew</b></span>
+    <span>Quickly select &amp; run the slice of your stack you're interested in locally, wired to the rest.</span>
+    <nav>
+      <a href="https://github.com/pinkynrg/crew">GitHub</a>
+      <a href="https://www.npmjs.com/package/@pinkynrg/crew">npm</a>
+      <a href="https://github.com/pinkynrg/crew/blob/main/README.md">Docs</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+  const root = document.documentElement, TK = 'crew-theme';
+  const saved = localStorage.getItem(TK); if (saved) root.setAttribute('data-theme', saved);
+  document.getElementById('themeToggle').addEventListener('click', () => {
+    const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+    const cur = root.getAttribute('data-theme') || (dark ? 'dark' : 'light');
+    const next = cur === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next); localStorage.setItem(TK, next);
+  });
+  document.getElementById('copy').addEventListener('click', async (e) => {
+    try { await navigator.clipboard.writeText('npx @pinkynrg/crew'); e.target.textContent='copied'; setTimeout(()=>e.target.textContent='copy',1400);} catch(_){}
+  });
+
+  // the 3 buttons just cycle their description (the GIF above is always `crew start` — the only real recording)
+  const tails = [
+    'Pick a connected slice in the <b>dependency graph</b>; crew runs it locally, <b>wired from your env files</b>.',
+    'Open the whole picked set as <b>one VS Code workspace</b>, every repo side by side in a single window.',
+    'Hand the picked set to <b>one Claude Code session</b>, named, with history kept per group of repos.'
+  ];
+  const tabs = [...document.querySelectorAll('.tabs button')];
+  const tail = document.getElementById('tail');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const DWELL = 10000; // ms each description stays up before auto-advancing
+  let i = 0, timer = null;
+  const show = (n) => {
+    i = (n + tabs.length) % tabs.length;
+    tabs.forEach((t, k) => t.setAttribute('aria-selected', k === i));
+    tail.innerHTML = tails[i];
+  };
+  const start = () => { if (reduce) return; stop(); timer = setTimeout(() => { show(i + 1); start(); }, DWELL); };
+  const stop = () => { if (timer) clearTimeout(timer); timer = null; };
+  tabs.forEach((t) => {
+    t.addEventListener('click', () => { show(+t.dataset.i); start(); });
+    t.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight') { show(i + 1); start(); }
+      else if (e.key === 'ArrowLeft') { show(i - 1); start(); }
+    });
+  });
+  const topEl = document.querySelector('#top');
+  if (topEl) { topEl.addEventListener('mouseenter', stop); topEl.addEventListener('mouseleave', start); topEl.addEventListener('focusin', stop); topEl.addEventListener('focusout', start); }
+  show(0); start();
+</script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+{
+  "longRunning": [
+    "start",
+    "dev",
+    "watch"
+  ],
+  "projects": {
+    "web": {
+      "path": "web",
+      "type": "frontend",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "dev": "web.dev.demo.dev",
+        "stage": "web.staging.demo.dev",
+        "prod": "web.demo.dev"
+      },
+      "local": "http://localhost:3000"
+    },
+    "admin": {
+      "path": "admin",
+      "type": "frontend",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "dev": "admin.dev.demo.dev",
+        "stage": "admin.staging.demo.dev",
+        "prod": "admin.demo.dev"
+      },
+      "local": "http://localhost:3001"
+    },
+    "api": {
+      "path": "api",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "dev": "api.dev.demo.dev",
+        "stage": "api.staging.demo.dev",
+        "prod": "api.demo.dev"
+      },
+      "local": "http://localhost:3002"
+    },
+    "auth": {
+      "path": "auth",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "dev": "auth.dev.demo.dev",
+        "stage": "auth.staging.demo.dev",
+        "prod": "auth.demo.dev"
+      },
+      "local": "http://localhost:3003"
+    },
+    "billing": {
+      "path": "billing",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "dev": "billing.dev.demo.dev",
+        "stage": "billing.staging.demo.dev",
+        "prod": "billing.demo.dev"
+      },
+      "local": "http://localhost:3004"
+    },
+    "search": {
+      "path": "search",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "dev": "search.dev.demo.dev",
+        "stage": "search.staging.demo.dev",
+        "prod": "search.demo.dev"
+      },
+      "local": "http://localhost:3005"
+    },
+    "queue": {
+      "path": "queue",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "dev": "queue.dev.demo.dev",
+        "stage": "queue.staging.demo.dev",
+        "prod": "queue.demo.dev"
+      },
+      "local": "http://localhost:3006"
+    },
+    "worker": {
+      "path": "worker",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "dev": "worker.dev.demo.dev",
+        "stage": "worker.staging.demo.dev",
+        "prod": "worker.demo.dev"
+      },
+      "local": "http://localhost:3007"
+    },
+    "db": {
+      "path": "db",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "dev": "db.dev.demo.dev",
+        "stage": "db.staging.demo.dev",
+        "prod": "db.demo.dev"
+      },
+      "local": "http://localhost:3008"
+    },
+    "cache": {
+      "path": "cache",
+      "tasks": {
+        "start": "sh start.sh"
+      },
+      "env": ".envs/{env}.env",
+      "match": {
+        "dev": "cache.dev.demo.dev",
+        "stage": "cache.staging.demo.dev",
+        "prod": "cache.demo.dev"
+      },
+      "local": "http://localhost:3009"
+    }
+  },
+  "version": 2,
+  "workspaceName": "crew"
+}
