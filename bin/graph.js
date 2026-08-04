@@ -32,7 +32,9 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
   const sublabel = opts.sublabel || (() => '');   // optional short suffix on the name line (e.g. resolved env) — no extra box height
   const cursor = opts.cursor;                      // optional cursor node (interactive selector)
   const sel = cursor != null;                      // selector mode: reserve a ▸ marker gutter so moving the cursor never reflows widths
-  const boxLabel = (c) => (sel ? (c === cursor ? '▸ ' : '  ') : '') + c + (sublabel(c) ? ' [' + sublabel(c) + ']' : ''); // env is any string the caller gives; the [brackets] are ours
+  const subW = opts.sublabelWidth || 0;            // pad the [env] field to this INNER width, spaces OUTSIDE the tight brackets (centered), so a box keeps its width when its sublabel changes (local<->qa in the selector). 0 = no padding.
+  const subField = (c) => { const s = sublabel(c); if (!s) return ''; const tok = '[' + s + ']', t = Math.max(0, (subW + 2) - tok.length), l = t >> 1; return ' ' + ' '.repeat(l) + tok + ' '.repeat(t - l); };
+  const boxLabel = (c) => (sel ? (c === cursor ? '▸ ' : '  ') : '') + c + subField(c); // env is any string the caller gives; the [brackets] are ours
   const NODES = [...new Set(nodes)];
   if (!NODES.length) return '';
   const has = new Set(NODES);
@@ -125,17 +127,24 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
     for (const l of order) pava(rows[l], cx);
     return cx;
   };
-  const cxD = runPass(true), cxU = runPass(false);
-  const cxm = new Map(); for (const c of cellL.keys()) cxm.set(c, (cxD.get(c) + cxU.get(c)) / 2);
-  let minx = Infinity; for (const c of cxm.keys()) minx = Math.min(minx, cxm.get(c) - CW(c) / 2);
-  for (const c of cxm.keys()) cxm.set(c, Math.round(cxm.get(c) - minx));
-  for (const r of rows) for (let i = 1; i < r.length; i++) { const need = cxm.get(r[i - 1]) + ((CW(r[i - 1]) + CW(r[i]) + 1) >> 1) + GAP; if (cxm.get(r[i]) < need) cxm.set(r[i], need); }
-  // straighten dummy chains: snap all of one edge's dummies to a shared column so the chain is a clean
-  // vertical and the horizontal offset lands in ONE end-segment (an L) instead of a diagonal staircase.
-  for (const ch of chains) { const ds = ch.pts.filter(isDummy); if (ds.length < 2) continue; const cs = ds.map((d) => cxm.get(d)).sort((p, q) => p - q); const T = cs[cs.length >> 1]; for (const d of ds) cxm.set(d, T); }
-  for (const r of rows) for (let i = 1; i < r.length; i++) { const need = cxm.get(r[i - 1]) + ((CW(r[i - 1]) + CW(r[i]) + 1) >> 1) + GAP; if (cxm.get(r[i]) < need) cxm.set(r[i], need); } // re-enforce order/min-gap after the snap
-  const cellX = new Map(); for (const c of cxm.keys()) cellX.set(c, cxm.get(c) - (CW(c) >> 1));
-  let canvasW = Math.max(1, ...[...cxm.keys()].map((c) => cellX.get(c) + CW(c)));
+  // §7 as a callable — the order-search below re-runs it after reordering a layer so coords co-adapt to
+  // the new within-layer order. Mutates the shared cxm/cellX/canvasW in place (keeps every closure valid).
+  const cxm = new Map(), cellX = new Map();
+  let canvasW = 1;
+  const computeCoords = () => {
+    const cxD = runPass(true), cxU = runPass(false);
+    cxm.clear(); for (const c of cellL.keys()) cxm.set(c, (cxD.get(c) + cxU.get(c)) / 2);
+    let minx = Infinity; for (const c of cxm.keys()) minx = Math.min(minx, cxm.get(c) - CW(c) / 2);
+    for (const c of cxm.keys()) cxm.set(c, Math.round(cxm.get(c) - minx));
+    for (const r of rows) for (let i = 1; i < r.length; i++) { const need = cxm.get(r[i - 1]) + ((CW(r[i - 1]) + CW(r[i]) + 1) >> 1) + GAP; if (cxm.get(r[i]) < need) cxm.set(r[i], need); }
+    // straighten dummy chains: snap all of one edge's dummies to a shared column so the chain is a clean
+    // vertical and the horizontal offset lands in ONE end-segment (an L) instead of a diagonal staircase.
+    for (const ch of chains) { const ds = ch.pts.filter(isDummy); if (ds.length < 2) continue; const cs = ds.map((d) => cxm.get(d)).sort((p, q) => p - q); const T = cs[cs.length >> 1]; for (const d of ds) cxm.set(d, T); }
+    for (const r of rows) for (let i = 1; i < r.length; i++) { const need = cxm.get(r[i - 1]) + ((CW(r[i - 1]) + CW(r[i]) + 1) >> 1) + GAP; if (cxm.get(r[i]) < need) cxm.set(r[i], need); } // re-enforce order/min-gap after the snap
+    cellX.clear(); for (const c of cxm.keys()) cellX.set(c, cxm.get(c) - (CW(c) >> 1));
+    canvasW = Math.max(1, ...[...cxm.keys()].map((c) => cellX.get(c) + CW(c)));
+  };
+  computeCoords();
   const cxc = (c) => cxm.get(c);
 
   // 8. ports — place each on its box border AS NEAR its far end's column as possible, keeping order
@@ -255,6 +264,20 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
   };
   assignPorts();
   if (!opts.noRefine) {
+    // order-search: permute WITHIN-layer node order — the coarsest crossing lever. §4's median is a
+    // heuristic seeded by INPUT order (so the same edges in a different declaration order draw differently
+    // and can carry avoidable crossings). Adjacent-swap hill-climb: swap two neighbours in a layer, re-run
+    // §7 coords + ports, keep iff realCrossings drops. Strictly-better only -> monotonic, deterministic.
+    let obest = metric().cost;
+    for (let pass = 0; pass < 12; pass++) {
+      let improved = false;
+      for (let l = 0; l <= maxL; l++) for (let i = 0; i < rows[l].length - 1; i++) {
+        const sw = () => { const t = rows[l][i]; rows[l][i] = rows[l][i + 1]; rows[l][i + 1] = t; };
+        sw(); computeCoords(); assignPorts();
+        if (metric().cost < obest) { obest = metric().cost; improved = true; } else { sw(); computeCoords(); assignPorts(); }
+      }
+      if (!improved) break;
+    }
     let best = metric().cost;
     for (let pass = 0; pass < 24; pass++) {
       let improved = false;

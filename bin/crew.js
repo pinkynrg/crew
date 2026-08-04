@@ -2237,9 +2237,15 @@ async function graphSelect(flags, cfg, opts = {}) {
   if (!active.size) active = new Set(nodes);        // default: everything selected
   let cursor = nodes[0];
   const remoteEnv = selEnv != null ? resolveEnvs(cfg, nodes, selEnv).resolved : new Map(); // where each service is deployed (crew resolve) — shown for the ones NOT run locally
+  // Keep box widths STABLE across select/deselect. 'local' and a node's remote env differ in length, and
+  // toggling one would change that box's width and reflow the whole (now order-sensitive) layout — nodes
+  // would jump. sublabelWidth = the widest env label; the renderer pads every [env] field to it (spaces
+  // OUTSIDE the tight brackets), so CW is identical for any active set -> geometry never moves on toggle.
+  const envW = selEnv == null ? 0 : Math.max('local'.length, (selEnv || '').length, ...[...remoteEnv.values()].map((v) => (v || '').length));
   const draw = () => renderAsciiGraph(nodes, edges, {
     colorOf: (n) => (active.has(n) ? prefix(n) : GRAY),                                          // running set keeps per-source colours; the rest grayed
     sublabel: selEnv != null ? (n) => (active.has(n) ? 'local' : (remoteEnv.get(n) || selEnv)) : undefined, // selected run local; the rest show their resolved remote env
+    sublabelWidth: envW,                                                                        // fixed [env] field width -> box width stays put when the sublabel changes
     cursor, withLayout: true,
   });
   return new Promise((resolve) => {
