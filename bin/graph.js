@@ -240,9 +240,9 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
       vr.push({ col: b, y0: Math.min(laneRow, dn), y1: Math.max(laneRow, dn), cid: s.cid });
       if (a !== b) hr.push({ row: laneRow, x0: Math.min(a, b), x1: Math.max(a, b), cid: s.cid });
     }
-    let x = 0;
-    for (const v of vr) for (const h of hr) if (v.cid !== h.cid && h.x0 <= v.col && v.col <= h.x1 && v.y0 <= h.row && h.row <= v.y1) x++;
-    return x;
+    const cells = new Set(); // dedupe by crossing CELL — a segment's two vertical runs meet at the lane row, so a horizontal there would otherwise be counted twice
+    for (const v of vr) for (const h of hr) if (v.cid !== h.cid && h.x0 <= v.col && v.col <= h.x1 && v.y0 <= h.row && h.row <= v.y1) cells.add(v.col + ',' + h.row);
+    return cells.size;
   };
   const metric = () => { const cr = realCrossings(); return { cr, cost: 100 * cr }; };
   const moveBox = (c, nx) => { cxm.set(c, nx); cellX.set(c, nx - (CW(c) >> 1)); };

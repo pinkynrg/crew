@@ -1,0 +1,42 @@
+graph TD
+  svc-01xxxxxxxxx
+  svc-02xxxxxxxxxxxxxxxxxxxx
+  svc-03xxxxxxxxxxxxxxxxxxxxx
+  svc-04xxxxxxxxxxxx
+  svc-05xxxxxxxxxxxxxxxxxxxxxx
+  svc-06xxxxx
+  svc-07xxxxxxxxxxxxx
+  svc-08xxxxxxx
+  svc-09x
+  svc-10x
+  svc-11xxxxxxxxxxxxxxxxx
+  svc-12xxxxxx
+  svc-13xxxx
+  svc-14xxxx
+  svc-01xxxxxxxxx --> svc-14xxxx
+  svc-01xxxxxxxxx --> svc-04xxxxxxxxxxxx
+  svc-01xxxxxxxxx --> svc-02xxxxxxxxxxxxxxxxxxxx
+  svc-02xxxxxxxxxxxxxxxxxxxx --> svc-04xxxxxxxxxxxx
+  svc-03xxxxxxxxxxxxxxxxxxxxx --> svc-04xxxxxxxxxxxx
+  svc-04xxxxxxxxxxxx --> svc-08xxxxxxx
+  svc-05xxxxxxxxxxxxxxxxxxxxxx --> svc-04xxxxxxxxxxxx
+  svc-05xxxxxxxxxxxxxxxxxxxxxx --> svc-09x
+  svc-06xxxxx --> svc-04xxxxxxxxxxxx
+  svc-06xxxxx --> svc-09x
+  svc-07xxxxxxxxxxxxx --> svc-13xxxx
+  svc-08xxxxxxx --> svc-09x
+  svc-08xxxxxxx --> svc-06xxxxx
+  svc-09x --> svc-07xxxxxxxxxxxxx
+  svc-09x --> svc-13xxxx
+  svc-09x --> svc-05xxxxxxxxxxxxxxxxxxxxxx
+  svc-09x --> svc-11xxxxxxxxxxxxxxxxx
+  svc-09x --> svc-10x
+  svc-10x --> svc-05xxxxxxxxxxxxxxxxxxxxxx
+  svc-10x --> svc-11xxxxxxxxxxxxxxxxx
+  svc-11xxxxxxxxxxxxxxxxx --> svc-13xxxx
+  svc-12xxxxxx --> svc-11xxxxxxxxxxxxxxxxx
+  svc-12xxxxxx --> svc-09x
+  svc-14xxxx --> svc-12xxxxxx
+  svc-02xxxxxxxxxxxxxxxxxxxx -.-> svc-03xxxxxxxxxxxxxxxxxxxxx
+  svc-02xxxxxxxxxxxxxxxxxxxx -.-> svc-01xxxxxxxxx
+  svc-06xxxxx -.-> svc-01xxxxxxxxx
