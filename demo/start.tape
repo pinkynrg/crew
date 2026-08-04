@@ -4,8 +4,8 @@ Output docs/media/crew-start.gif
 
 Set Shell "bash"
 Set FontSize 16
-Set Width 900
-Set Height 780
+Set Width 960
+Set Height 720
 Set Padding 16
 Set TypingSpeed 45ms
 

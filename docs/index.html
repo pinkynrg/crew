@@ -34,15 +34,13 @@
   .nav .wrap { display:flex; align-items:center; gap:1.4rem; height:60px; }
   .brand { font-family:ui-monospace,"SF Mono",Menlo,monospace; font-weight:700; font-size:1.05rem; letter-spacing:-.02em; color:var(--fg); }
   .brand b { color:var(--accent); }
+  .nav .brand { font-size:1.4rem; }
   .nav nav { margin-left:auto; display:flex; gap:1.3rem; align-items:center; font-size:.92rem; }
   .nav nav a { color:var(--muted); } .nav nav a:hover { color:var(--fg); text-decoration:none; }
   .nav .ghbtn { color:var(--fg); border:1px solid var(--line); padding:.35rem .7rem; border-radius:7px; }
   #themeToggle { background:none; border:1px solid var(--line); color:var(--muted); width:34px; height:30px; border-radius:7px; cursor:pointer; font-size:.95rem; }
   #themeToggle:hover { color:var(--fg); }
 
-  /* hero */
-  .hero { padding:clamp(2.6rem,6vw,4.6rem) 0 3rem; }
-  .hero .wrap { display:grid; grid-template-columns:0.92fr 1.08fr; gap:clamp(1.5rem,4vw,3.2rem); align-items:center; }
   .eyebrow { font-family:ui-monospace,Menlo,monospace; font-size:.76rem; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); margin:0 0 1rem; }
   h1 { font-size:clamp(2.1rem,4.6vw,3.15rem); line-height:1.06; letter-spacing:-.03em; margin:0 0 1.1rem; text-wrap:balance; font-weight:780; }
   h1 .amber { color:var(--accent); }
@@ -65,21 +63,14 @@
   .subnote { margin:.85rem 0 0; font-size:.85rem; color:var(--muted); }
   .subnote a { color:var(--muted); text-decoration:underline; }
 
-  /* preview terminals: cross-fade, fixed height so it doesn't jump */
-  .previews { display:grid; }  /* all tabs stack in one cell -> container hugs the (GIF) content, no fixed height */
-  .term { background:var(--term-bg); border-radius:12px; box-shadow:var(--shadow); overflow:hidden; border:1px solid rgba(255,255,255,.06); }
-  .previews .term { grid-area:1 / 1; display:flex; flex-direction:column; opacity:0; transform:translateY(6px); transition:opacity .4s ease, transform .4s ease; pointer-events:none; }
-  .previews .term.on { opacity:1; transform:none; pointer-events:auto; }
-  @media (prefers-reduced-motion: reduce){ .previews .term { transition:none; transform:none; } }
+  /* terminal window (the crew start GIF) */
+  .term { background:var(--term-bg); border-radius:12px; box-shadow:var(--shadow); overflow:hidden; border:1px solid rgba(255,255,255,.06); display:flex; flex-direction:column; }
   .term .bar { display:flex; align-items:center; gap:.5rem; padding:.6rem .8rem; background:var(--term-bar); border-bottom:1px solid rgba(255,255,255,.05); }
   .term .bar i { width:11px; height:11px; border-radius:50%; display:block; }
   .term .bar i:nth-child(1){ background:#ff5f57;} .term .bar i:nth-child(2){ background:#febc2e;} .term .bar i:nth-child(3){ background:#28c840;}
   .term .bar span { margin-left:.5rem; font-family:ui-monospace,Menlo,monospace; font-size:.78rem; color:#6b7286; }
-  .term pre { margin:0; padding:1rem 1.15rem; flex:1; min-height:0; overflow:auto; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12.5px; line-height:1.34; color:var(--term-fg); }
-  .term pre .p { color:var(--accent); } .term pre .c { color:#6b7286; } .term pre .ok { color:#5fd38d; }
-  /* start + claude tabs are real recorded sessions (GIF); height:auto -> the window fits the GIF exactly, no letterbox */
-  .term .cast { display:block; width:100%; height:auto; aspect-ratio:900 / 780; }
-  .r { color:#ff6b6b; } .g { color:#5fd38d; } .y { color:#e8c34a; } .b { color:#6aa9ff; } .m { color:#d68cf0; } .cy { color:#56cbdb; }
+  /* real recorded session (GIF); height:auto -> the window fits the GIF exactly, no letterbox */
+  .term .cast { display:block; width:100%; height:auto; aspect-ratio:4 / 3; }
 
   section { padding:clamp(2.4rem,6vw,4.2rem) 0; border-top:1px solid var(--line); }
   .kicker { font-family:ui-monospace,Menlo,monospace; font-size:.76rem; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); margin:0 0 .7rem; }
@@ -90,10 +81,13 @@
   .prin span { font-family:ui-monospace,Menlo,monospace; font-size:.82rem; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:.4rem .9rem; }
   .prin span b { color:var(--accent); }
 
-  ol.steps { list-style:none; counter-reset:s; margin:0; padding:0; display:grid; gap:1rem; }
-  ol.steps li { counter-increment:s; display:grid; grid-template-columns:auto 1fr; gap:1rem; align-items:start; }
-  ol.steps li::before { content:counter(s); font-family:ui-monospace,Menlo,monospace; font-weight:700; color:var(--accent); background:var(--accent-soft); border:1px solid var(--line); width:32px; height:32px; border-radius:8px; display:grid; place-items:center; font-size:.9rem; }
-  ol.steps .t { font-weight:600; display:block; margin-bottom:.5rem; }
+  ol.steps { list-style:none; counter-reset:s; margin:0; padding:0; display:grid; gap:.9rem; }
+  ol.steps li { counter-increment:s; display:grid; grid-template-columns:auto 1fr; gap:1.15rem; align-items:start;
+    background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:1.15rem 1.35rem;
+    transition:border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
+  ol.steps li:hover { border-color:color-mix(in srgb, var(--accent) 45%, var(--line)); transform:translateY(-2px); box-shadow:var(--shadow); }
+  ol.steps li::before { content:counter(s); font-family:ui-monospace,Menlo,monospace; font-weight:700; color:var(--accent); background:var(--accent-soft); border:1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); width:34px; height:34px; border-radius:9px; display:grid; place-items:center; font-size:.95rem; }
+  ol.steps .t { font-weight:650; display:block; margin-bottom:.6rem; font-size:1.02rem; }
   ol.steps .step-cmd { margin:0 0 .5rem; background:var(--term-bg); color:var(--term-fg); border:1px solid var(--line); border-radius:8px; padding:.6rem .85rem; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.9rem; overflow-x:auto; }
   ol.steps .step-cmd .p { color:var(--accent); }
   ol.steps code { font-family:ui-monospace,Menlo,monospace; background:var(--term-bg); color:var(--term-fg); padding:.12rem .4rem; border-radius:5px; font-size:.86em; }
@@ -103,8 +97,15 @@
   footer .wrap { display:flex; flex-wrap:wrap; gap:1rem 2rem; align-items:center; }
   footer nav { margin-left:auto; display:flex; gap:1.4rem; } footer a { color:var(--muted); }
 
+  /* top: value prop (left) + crew start GIF (right, full height) */
+  #top { border-top:none; }                                    /* first section: no line right under the nav */
+  #top .top-grid { display:grid; grid-template-columns:0.8fr 1.2fr; gap:clamp(1.6rem,4vw,3.2rem); align-items:stretch; } /* GIF defines the row height; pitch stretches to match */
+  #top .pitch-col { display:flex; flex-direction:column; justify-content:center; }
+  #top .pitch-col h1 { font-size:clamp(1.5rem,2.9vw,2.1rem); line-height:1.15; margin:.2rem 0 1.1rem; } /* smaller so the pitch fits inside the GIF's height */
+  #top .tail { min-height:3.4em; }                             /* all three descriptions wrap to 2 lines at this width -> switching the tab never changes the page height */
+
   @media (max-width:840px){
-    .hero .wrap { grid-template-columns:1fr; }
+    #top .top-grid { grid-template-columns:1fr; }
     .nav nav a.hidephone { display:none; }
   }
 </style>
@@ -123,11 +124,11 @@
   </div>
 </header>
 
-<div class="hero">
-  <div class="wrap">
-    <div>
+<section id="top">
+  <div class="wrap top-grid">
+    <div class="pitch-col">
       <p class="eyebrow">local dev for a distributed stack</p>
-      <h1>One command to run <span class="amber">just the part you're changing</span>,&nbsp;locally.</h1>
+      <h1>Quickly select &amp; run <span class="amber">the slice of your stack you're interested in</span> locally, wired to the rest.</h1>
       <div class="tabs" role="tablist" aria-label="What crew does">
         <button role="tab" aria-selected="true" data-i="0">crew start</button>
         <button role="tab" aria-selected="false" data-i="1">crew workspace</button>
@@ -140,26 +141,12 @@
       </div>
       <p class="subnote">Zero dependencies · macOS &amp; Linux · <a href="https://github.com/pinkynrg/crew">MIT on GitHub</a></p>
     </div>
-
-    <div class="previews">
-      <!-- 0: start (real recorded session) -->
-      <div class="term on" data-i="0">
-        <div class="bar"><i></i><i></i><i></i><span>crew start</span></div>
-        <img class="cast" src="media/crew-start.gif" alt="crew start: pick a connected slice of services in the dependency graph, run it locally, watch the labelled logs" loading="lazy" decoding="async">
-      </div>
-      <!-- 1: workspace (real recorded session) -->
-      <div class="term" data-i="1">
-        <div class="bar"><i></i><i></i><i></i><span>crew workspace</span></div>
-        <img class="cast" src="media/crew-workspace.gif" alt="crew workspace: pick the repos on the dependency graph, open them as one VS Code workspace" loading="lazy" decoding="async">
-      </div>
-      <!-- 2: claude (real recorded session) -->
-      <div class="term" data-i="2">
-        <div class="bar"><i></i><i></i><i></i><span>crew claude</span></div>
-        <img class="cast" src="media/crew-claude.gif" alt="crew claude: pick the repos on the dependency graph, hand them to one Claude Code session with history kept per set" loading="lazy" decoding="async">
-      </div>
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span>crew start</span></div>
+      <img class="cast" src="media/crew-start.gif" alt="crew start: pick a connected slice of services in the dependency graph, run it locally, watch the labelled logs" loading="lazy" decoding="async">
     </div>
   </div>
-</div>
+</section>
 
 <section id="how">
   <div class="wrap">
@@ -170,10 +157,7 @@
       <span><b>0</b> runtime deps</span>
       <span><b>no</b> build step</span>
       <span>node built-ins only</span>
-      <span>POSIX · macOS + Linux</span>
-      <span>one persistent config</span>
-      <span>edges auto-discovered</span>
-      <span><b>MIT</b></span>
+      <span><b>two</b> files, no bundler</span>
     </div>
   </div>
 </section>
@@ -232,7 +216,7 @@
 <footer>
   <div class="wrap">
     <span class="brand mono">cr<b style="color:var(--accent)">ew</b></span>
-    <span>One command to run just the part you're changing, locally.</span>
+    <span>Quickly select &amp; run the slice of your stack you're interested in locally, wired to the rest.</span>
     <nav>
       <a href="https://github.com/pinkynrg/crew">GitHub</a>
       <a href="https://www.npmjs.com/package/@pinkynrg/crew">npm</a>
@@ -254,33 +238,23 @@
     try { await navigator.clipboard.writeText('npx @pinkynrg/crew'); e.target.textContent='copied'; setTimeout(()=>e.target.textContent='copy',1400);} catch(_){}
   });
 
-  // carousel
+  // the 3 buttons just cycle their description (the GIF above is always `crew start` — the only real recording)
   const tails = [
-    'Pick projects in a <b>live dependency graph</b>: the set runs locally, <b>auto-wired from your env files</b>, and the rest stay on their resolved remote env.',
-    'Open the whole picked set as <b>one VS Code workspace</b>: every repo in a single window.',
-    'Hand a group of repos to <b>Claude Code in one session</b>, named, with history kept per set.'
+    'Pick a connected slice in the <b>dependency graph</b>; crew runs it locally, <b>wired from your env files</b>.',
+    'Open the whole picked set as <b>one VS Code workspace</b>, every repo side by side in a single window.',
+    'Hand the picked set to <b>one Claude Code session</b>, named, with history kept per group of repos.'
   ];
   const tabs = [...document.querySelectorAll('.tabs button')];
-  const terms = [...document.querySelectorAll('.previews .term')];
   const tail = document.getElementById('tail');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  terms.forEach((t) => { const img = t.querySelector('img.cast'); if (img) img.dataset.gif = img.getAttribute('src'); }); // remember each GIF's src so we can restart it
-
-  // ms each tab stays up before auto-advancing — a touch longer than that tab's GIF so it plays through once
-  const DWELL = [13000, 14000, 14500]; // [start, workspace, claude], by data-i
+  const DWELL = 10000; // ms each description stays up before auto-advancing
   let i = 0, timer = null;
   const show = (n) => {
     i = (n + tabs.length) % tabs.length;
     tabs.forEach((t, k) => t.setAttribute('aria-selected', k === i));
-    terms.forEach((t, k) => {
-      const on = k === i;
-      t.classList.toggle('on', on);
-      const img = t.querySelector('img.cast');
-      if (img && on && img.dataset.gif) { img.removeAttribute('src'); img.src = img.dataset.gif; } // restart the GIF from frame 0
-    });
     tail.innerHTML = tails[i];
   };
-  const start = () => { if (reduce) return; stop(); timer = setTimeout(() => { show(i + 1); start(); }, DWELL[i]); };
+  const start = () => { if (reduce) return; stop(); timer = setTimeout(() => { show(i + 1); start(); }, DWELL); };
   const stop = () => { if (timer) clearTimeout(timer); timer = null; };
   tabs.forEach((t) => {
     t.addEventListener('click', () => { show(+t.dataset.i); start(); });
@@ -289,9 +263,8 @@
       else if (e.key === 'ArrowLeft') { show(i - 1); start(); }
     });
   });
-  const hero = document.querySelector('.hero');
-  hero.addEventListener('mouseenter', stop); hero.addEventListener('mouseleave', start);
-  hero.addEventListener('focusin', stop); hero.addEventListener('focusout', start);
+  const topEl = document.querySelector('#top');
+  if (topEl) { topEl.addEventListener('mouseenter', stop); topEl.addEventListener('mouseleave', start); topEl.addEventListener('focusin', stop); topEl.addEventListener('focusout', start); }
   show(0); start();
 </script>
 </body>
