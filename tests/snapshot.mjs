@@ -67,12 +67,16 @@ const files = readdirSync(gdir).filter((f) => f.endsWith('.mmd'))
   .filter((f) => !filters.length || filters.some((x) => f.includes(x))).sort();
 if (!files.length) { console.error('no matching .mmd in tests/graphs'); process.exit(2); }
 
-let pass = 0; const fails = []; const gallery = [];
+let pass = 0; const fails = []; const gallery = []; const overlapFails = [];
 for (const f of files) {
   const name = f.replace(/\.mmd$/, '');
   const src = readFileSync(join(gdir, f), 'utf8');
   const { nodes, edges } = parseMermaid(src);
   const out = renderAsciiGraph(nodes, edges, optsFor(name));
+  // INVARIANT: no two edges may draw a collinear overlap (one paints over the other). Checked in the
+  // fixture's real render mode (its optsFor opts) — never disabled, even under -u.
+  const ovl = renderAsciiGraph(nodes, edges, { ...optsFor(name), overlaps: true });
+  if (ovl.length) overlapFails.push({ name, ovl });
   gallery.push({ name, html: ansi2html(renderAsciiGraph(nodes, edges, colorOptsFor(name, nodes))) });
   const snap = join(sdir, name + '.txt');
   if (update) { writeFileSync(snap, out + '\n'); continue; }
@@ -98,6 +102,8 @@ for (const { name, out, exp } of fails) {
     console.log((same ? '  ' : '\x1b[33m▶\x1b[0m ') + pad(a[i]) + ' │ ' + (same ? '' : '\x1b[33m') + (b[i] || '') + '\x1b[0m');
   }
 }
+for (const { name, ovl } of overlapFails) console.log(`\x1b[1;31mOVERLAP\x1b[0m ${name}: ${ovl.length} cell(s) — ${ovl.join(', ')}  \x1b[2m(two edges drawing a collinear line over the same cells)\x1b[0m`);
 console.log(`\n${pass}/${files.length} passed` + (fails.length ? `, \x1b[31m${fails.length} failed\x1b[0m — review, then \`node tests/snapshot.mjs -u\` to accept` : ' \x1b[32m✓\x1b[0m')
+  + (overlapFails.length ? `, \x1b[31m${overlapFails.length} with overlaps\x1b[0m` : '')
   + (filters.length ? '' : `  \x1b[2m· colours: open tests/snapshots/gallery.html\x1b[0m`));
-process.exit(fails.length ? 1 : 0);
+process.exit(fails.length || overlapFails.length ? 1 : 0);
