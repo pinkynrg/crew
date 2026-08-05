@@ -1,0 +1,5 @@
+source tests/e2e/lib.exp
+crun start env=x
+must {check your projects dir}
+must {Nothing to start}
+want_exit 1

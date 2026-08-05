@@ -70,6 +70,16 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   in `config.json` auto-migrates to `local.json` on load. `local.json` reads from beside
   the resolved config (works with `--config`); gitignore it when committing. `local.json`
   also holds `lastSelection` (the remembered picker selection) and `overrides` (below).
+- **Missing-folder gate** (NON-blocking): the folder-consuming commands (`start`/`workspace`/`claude`/
+  `install`/`graph`/`resolve`) run `warnMissing(cfg)` then `presentCfg(cfg)` — a project whose `path`
+  folder is absent is EXCLUDED (as if it didn't exist) from the graph AND the selector, so you can't draw
+  or pick a phantom, and the SHARED config is never mutated. `warnMissing` is **direction-aware**: no
+  projects dir or a MAJORITY missing → "check your projects dir: crew config › Settings › config
+  › projectsDir"; a minority → "fix each path (or remove it): name → path". If NOTHING is left,
+  `emptyProjectsState` prints a friendly message — actions (`start`/…) also `exit 1`; views (`graph`/
+  `resolve`) exit 0. `crew check` keeps its own full report (never gated); `crew list` shows all projects
+  (red/green dot per folder) plus the `warnMissing` banner. So a pulled config on a machine that hasn't
+  cloned everything self-explains instead of erroring cryptically — no "set projectsDir" warning needed.
 - `overrides` (machine-local — in `local.json`, so secrets/personal values never touch the
   shared `config.json`): extra env vars upserted into a project's **wired** env file (the one
   crew materializes for `{envfile}`; a project without `{envfile}` can't be overridden).
