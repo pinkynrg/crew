@@ -2905,6 +2905,10 @@ async function configForm(flags, opts = {}) {
     ? Object.entries(m).flatMap(([e, v]) => (Array.isArray(v) ? v : [v]).map((h) => `${e}=${h}`)).join(' ') : '';
   const toRows = (obj) => Object.entries(obj || {}).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, String(x)]) : [[k, String(v)]]));
   const toObj = (rows, multi) => { const o = {}; for (const [k, v] of rows) { const kk = String(k).trim(); if (!kk) continue; if (multi) o[kk] = o[kk] == null ? String(v) : [].concat(o[kk], String(v)); else o[kk] = String(v); } return o; };
+  // whenLocal is a 2-level map {peer:{VAR:val}}; flatten to `peer.VAR`->val for the row editor and back
+  // (split on the LAST dot — env var names never contain a dot, so a dotted peer name still round-trips).
+  const flattenWL = (wl) => { const o = {}; if (wl && typeof wl === 'object') for (const peer of Object.keys(wl)) { const pv = wl[peer]; if (pv && typeof pv === 'object') for (const k of Object.keys(pv)) o[`${peer}.${k}`] = String(pv[k]); } return o; };
+  const unflattenWL = (flat) => { const wl = {}; for (const key of Object.keys(flat || {})) { const dot = String(key).lastIndexOf('.'); if (dot <= 0) continue; const peer = key.slice(0, dot), v = key.slice(dot + 1); if (!v) continue; (wl[peer] = wl[peer] || {})[v] = String(flat[key]); } return wl; };
   const setOrDel = (o, key, v, keep) => { if (keep == null ? !!v : keep) o[key] = v; else delete o[key]; };
   const usersOf = (n) => Object.entries(cfg.projects).filter(([, p]) => (p.guards || []).includes(n)).map(([pn]) => pn);
 
@@ -2973,7 +2977,43 @@ async function configForm(flags, opts = {}) {
     info: (f) => f.isNew ? '' : `\x1b[90mused by\x1b[39m  ${usersOf(f.orig).join(', ') || '\x1b[90m(no projects)\x1b[39m'}`,
   };
 
-  const sections = [projectsSection, guardsSection];
+  // Overrides live in local.json (machine-local), NOT the user config — keyed by project, each a bare
+  // VAR:val map plus an optional `whenLocal` (peer -> {VAR:val}). v1 edits the bare vars via the map editor;
+  // whenLocal (a 2-level map) stays read-only here, edited via `crew overrides set`.
+  const machine = loadMachine(flags);
+  machine.overrides = machine.overrides && typeof machine.overrides === 'object' ? machine.overrides : {};
+  const overrides = machine.overrides;
+  const overridesSection = {
+    key: 'overrides', title: 'OVERRIDES', noun: 'override', newLabel: '+ New override',
+    names: () => Object.keys(overrides),
+    fields: [
+      { key: 'name', label: 'project', kind: 'name', req: true },
+      { key: 'vars', label: 'vars', kind: 'map', kLabel: 'VAR', vLabel: 'value' },
+      { key: 'whenLocal', label: 'whenLocal', kind: 'map', kLabel: 'peer.VAR', vLabel: 'value' },
+    ],
+    load: (n) => {
+      const e = overrides[n] && typeof overrides[n] === 'object' ? overrides[n] : {};
+      const vars = {}; for (const k of Object.keys(e)) if (k !== OVERRIDE_WHEN_LOCAL) vars[k] = String(e[k]);
+      return { name: n, vars, whenLocal: flattenWL(e[OVERRIDE_WHEN_LOCAL]), isNew: false, orig: n };
+    },
+    blank: () => ({ name: '', vars: {}, whenLocal: {}, isNew: true, orig: null }),
+    save: (f) => {
+      const name = String(f.name).trim();
+      if (!name) return 'project is required';
+      const renaming = !f.isNew && name !== f.orig;
+      if ((f.isNew || renaming) && overrides[name]) return `overrides for '${name}' already exist`;
+      if (renaming) delete overrides[f.orig];
+      const entry = { ...f.vars };
+      const wl = unflattenWL(f.whenLocal);
+      if (Object.keys(wl).length) entry[OVERRIDE_WHEN_LOCAL] = wl;
+      overrides[name] = entry;
+      writeMachine(flags, machine); return null;
+    },
+    del: (n) => { delete overrides[n]; writeMachine(flags, machine); },
+    info: (f) => { const unknown = !f.isNew && !cfg.projects[f.orig] ? '\x1b[33munknown project\x1b[39m  ' : ''; return unknown + '\x1b[90mwhenLocal keys are `peer.VAR` — apply only when that peer co-runs\x1b[39m'; },
+  };
+
+  const sections = [projectsSection, guardsSection, overridesSection];
   const optionsOf = (fld) => (typeof fld.options === 'function' ? fld.options() : fld.options || []);
   const selectable = () => { const out = []; sections.forEach((s, si) => { s.names().forEach((n) => out.push({ si, name: n })); out.push({ si, name: null }); }); return out; };
   let sel = selectable();
@@ -3066,7 +3106,7 @@ async function configForm(flags, opts = {}) {
           let val;
           if (editing && on && (fld.kind === 'text' || fld.kind === 'name')) val = editCell(RW - 12); // block caret, scrolls if long
           else if (fld.kind === 'multiselect') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : '\x1b[90m(none)\x1b[39m'; }
-          else if (fld.kind === 'map') { const o = form[fld.key] || {}, ks = Object.keys(o); val = ks.length ? (fld.multiVal ? serializeMatch(o) : ks.join(', ')) : '\x1b[90m(none)\x1b[39m'; }
+          else if (fld.kind === 'map') { const o = form[fld.key] || {}, ks = Object.keys(o); val = ks.length ? (fld.multiVal ? serializeMatch(o) : Object.entries(o).map(([k, v]) => `${k}=${v}`).join('  ')) : '\x1b[90m(none)\x1b[39m'; }
           else val = String(form[fld.key]) ? String(form[fld.key]) : `\x1b[90m(${fld.req ? 'required' : 'optional'})\x1b[39m`;
           const lab = padP(fld.label, 8);
           Rn.push(`  ${on && !editing ? rev(' ' + lab + ' ') : '\x1b[90m ' + lab + ' \x1b[39m'} ${(editing && on && (fld.kind === 'text' || fld.kind === 'name')) ? val : clipP(val, RW - 12)}`);
@@ -3156,6 +3196,7 @@ async function configForm(flags, opts = {}) {
         if (fld.kind === 'text' || fld.kind === 'name') { editing = true; buf = String(form[fld.key] || ''); caret = buf.length; }
         else if (fld.kind === 'choice' || fld.kind === 'multiselect') openPanel(fld);
         else if (fld.kind === 'map') { mapEdit = { field: fld, rows: toRows(form[fld.key]), ri: 0 }; }
+        else if (fld.kind === 'readonly' && fld.hint) msg = fld.hint;
       }
       else if (k === 's') doSave();
       else if (k === 'd') { if (!form.isNew) pendingDel = form.orig; }
@@ -3269,6 +3310,7 @@ function setProjectGuard(project, name, on) {
 // ---------------------------------------------------------------------------
 const OVERRIDE_ACTIONS = ['set', 'add', 'remove', 'rm', 'unset'];
 export async function cmdOverrides(flags, sub, rest) {
+  if (sub === 'edit') return void (await configForm(flags, { section: 'overrides' })); // two-pane visual editor
   if (sub && OVERRIDE_ACTIONS.includes(sub)) {
     const { cfg } = loadMerged(flags);
     const p = makePrompter();
@@ -3586,7 +3628,7 @@ export function help() {
     ['edit', '[name]', 'No name: two-pane visual editor; name: wizard for one project'],
     ['remove', '<name>', 'Delete a project (alias rm)'],
     ['guards', '[project|edit]', 'List/manage guards; `edit` = two-pane visual editor'],
-    ['overrides', '[set|remove]', 'List/set/remove per-project env overrides (local.json)'],
+    ['overrides', '[set|remove|edit]', 'Per-project env overrides (local.json); `edit` = two-pane visual editor'],
     ['dir', '[path]', 'Show/set the projects directory'],
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
     ['check', '', 'Validate the config; report errors + warnings (alias: validate)'],

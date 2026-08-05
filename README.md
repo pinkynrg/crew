@@ -233,6 +233,7 @@ Manage them without hand-editing:
 
 ```
 crew overrides            list every override (grouped by project; whenLocal shown separately)
+crew overrides edit       two-pane visual editor (bare vars + whenLocal as `peer.VAR` rows, both editable)
 crew overrides set        pick a project, VAR, an optional "only when <peer> is local", value
 crew overrides remove     pick a project, then an entry to drop (or the whole project)
 ```
@@ -374,7 +375,7 @@ crew add                               wizard: create a new project
 crew edit [name]                       no name: two-pane visual editor; name: one-project wizard
 crew remove <name>                     delete a project (confirm) (alias: rm)
 crew guards [project|edit]             list/manage guards; `edit` = two-pane visual editor
-crew overrides [set|remove]            list/set/remove per-project env overrides (local.json)
+crew overrides [set|remove|edit]       per-project env overrides (local.json); `edit` = visual editor
 crew dir [path]                        show/set the projects dir (relative paths resolve here)
 crew config [path|edit]                print merged config / its path / open in $EDITOR
 crew check                             validate config + local.json; list errors/warnings (alias: validate)
