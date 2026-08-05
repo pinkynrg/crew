@@ -348,10 +348,10 @@ Actions:
 
 ```
 crew help                       usage (also: no args)
-crew list                       list projects                      (alias: ls)
+crew list                       list projects
 crew install                    pick a project to install (single-select)
 crew start [args]               pick projects, run their start task (local wiring)
-crew workspace                  pick projects, open one VSCode window (alias: code)
+crew workspace                  pick projects, open one VSCode window
 crew claude                     pick projects, launch Claude Code once (--add-dir)
 crew graph                      dependency graph derived from .envs files
 crew resolve <env> [proj…]      dry-run: the env each project resolves to for a selection
@@ -366,7 +366,7 @@ Config:
 ```
 crew config                            two-pane visual editor for everything (projects, guards, overrides, settings)
 crew config path                       print the config file path (for scripts / `cat "$(crew config path)"`)
-crew check                             validate config + local.json; list errors/warnings (alias: validate)
+crew check                             validate config + local.json; list errors/warnings
 crew pull <url>                        fetch config.json from a URL, install it (backs up current)
 ```
 
