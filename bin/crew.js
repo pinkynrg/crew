@@ -496,13 +496,14 @@ function splitKeys(s) {
   return out;
 }
 
-// A right-anchored multiselect panel that OVERLAYS a graph view (the `crew graph` pager and the
-// start/workspace/claude selector both use it for the `f` node filter). The graph stays drawn to
-// the left; the caller paints `.rows(h)` over the screen's rightmost columns each frame and feeds
-// keys to `.key(k)`. `.key` returns 'apply' (close, take `.selected`), 'cancel' (close, discard),
-// 'change' (stay open, repaint) or null (ignored). Self-contained: own cursor, scroll and selection
-// — no screen clear, so unlike a full-screen `menu()` the graph never disappears. `esc`/`q` cancel.
-function makeFilterPanel(items, { paint, title = 'Show nodes' } = {}) {
+// A right-anchored pick panel that OVERLAYS a graph/form view. The underlying view stays drawn to the
+// left; the caller paints `.rows(h)` over the screen's rightmost columns each frame and feeds keys to
+// `.key(k)`. `.key` returns 'apply' (close, take `.selected`), 'cancel' (close, discard), 'change' (stay
+// open, repaint) or null (ignored). Two modes: MULTI (default) = checkboxes, `space`/`a` toggle, `⏎`
+// applies the whole set (graph node filter, project guard links); SINGLE (`{single:true}`) = radio, `⏎`
+// (or space) picks the cursor row and applies immediately (project `type`). Self-contained cursor/scroll/
+// selection — no screen clear, so the view never disappears. `esc`/`q` cancel.
+function makeFilterPanel(items, { paint, title = 'Show nodes', single = false } = {}) {
   const disp = (s) => [...s.replace(/\x1b\[[0-9;]*m/g, '')].length;         // display width, ANSI-stripped
   const colOf = (n) => { const f = paint && paint.get && paint.get(n); return typeof f === 'function' ? f : (x) => x; };
   const nameMax = items.reduce((m, n) => Math.max(m, disp(n)), 0);
@@ -514,17 +515,21 @@ function makeFilterPanel(items, { paint, title = 'Show nodes' } = {}) {
     get active() { return active; },
     get selected() { return selected; },
     get width() { return innerW + 2; },                                     // │ … │
-    open(pre) { const p = Array.isArray(pre) ? pre.filter((n) => items.includes(n)) : items.slice(); selected = new Set(p); cursor = 0; scroll = 0; active = true; }, // array (even empty) = exact set; null = all
+    open(pre) { // single: pre is the current value (string) -> cursor lands on it; multi: pre is an array (even empty = exact set; null = all)
+      if (single) { const v = Array.isArray(pre) ? pre[0] : pre; selected = new Set(v != null && items.includes(v) ? [v] : []); cursor = Math.max(0, items.indexOf(v)); }
+      else { const p = Array.isArray(pre) ? pre.filter((n) => items.includes(n)) : items.slice(); selected = new Set(p); cursor = 0; }
+      scroll = 0; active = true;
+    },
     close() { active = false; },
     key(k) {
       if (k === '\x1b' || k === 'q') return 'cancel';
+      if (k === 'j' || k === '\x1b[B') { cursor = Math.min(items.length - 1, cursor + 1); return 'change'; }
+      if (k === 'k' || k === '\x1b[A') { cursor = Math.max(0, cursor - 1); return 'change'; }
+      if (single) { if (k === '\r' || k === '\n' || k === ' ') { selected = new Set([items[cursor]]); return 'apply'; } return null; }
       if (k === '\r' || k === '\n') return 'apply';
-      if (k === 'j' || k === '\x1b[B') cursor = Math.min(items.length - 1, cursor + 1);
-      else if (k === 'k' || k === '\x1b[A') cursor = Math.max(0, cursor - 1);
-      else if (k === ' ') { const n = items[cursor]; selected.has(n) ? selected.delete(n) : selected.add(n); }
-      else if (k === 'a') selected = items.every((n) => selected.has(n)) ? new Set() : new Set(items);
-      else return null;
-      return 'change';
+      if (k === ' ') { const n = items[cursor]; selected.has(n) ? selected.delete(n) : selected.add(n); return 'change'; }
+      if (k === 'a') { selected = items.every((n) => selected.has(n)) ? new Set() : new Set(items); return 'change'; }
+      return null;
     },
     // Boxed panel as an array of full rows, capped to `maxH` (scrolls the item list to keep the cursor in view).
     rows(maxH) {
@@ -537,10 +542,11 @@ function makeFilterPanel(items, { paint, title = 'Show nodes' } = {}) {
       const out = ['┌' + t + H.repeat(Math.max(0, innerW - disp(t) - 1)) + (up ? '↑' : H) + '┐'];
       for (let i = 0; i < vis; i++) {
         const idx = scroll + i, n = items[idx], cur = idx === cursor;
-        out.push(pad(` ${cur ? '▸' : ' '}${selected.has(n) ? '[x]' : '[ ]'} ${cur ? n : colOf(n)(n)}`, cur));
+        const mark = single ? (selected.has(n) ? '(•)' : '( )') : (selected.has(n) ? '[x]' : '[ ]');
+        out.push(pad(` ${cur ? '▸' : ' '}${mark} ${cur ? n : colOf(n)(n)}`, cur));
       }
       out.push('├' + H.repeat(innerW - 1) + (down ? '↓' : H) + '┤');
-      const hint = ' space·a·↵·esc';
+      const hint = single ? ' ↑↓·↵·esc' : ' space·a·↵·esc';
       out.push('│' + hint + ' '.repeat(Math.max(0, innerW - disp(hint))) + '│');
       out.push('└' + H.repeat(innerW) + '┘');
       return out;
@@ -2954,7 +2960,7 @@ async function configForm(flags, opts = {}) {
   const optionsOf = (fld) => (typeof fld.options === 'function' ? fld.options() : fld.options || []);
   const selectable = () => { const out = []; sections.forEach((s, si) => { s.names().forEach((n) => out.push({ si, name: n })); out.push({ si, name: null }); }); return out; };
   let sel = selectable();
-  let li = 0, focus = 'left', fi = 0, editing = false, buf = '';
+  let li = 0, focus = 'left', fi = 0, editing = false, buf = '', caret = 0;
   let form = null, pendingDel = null, msg = '', panel = null, panelField = null, leftTop = 0;
 
   const secOf = () => sections[sel[li].si];
@@ -3011,7 +3017,7 @@ async function configForm(flags, opts = {}) {
       s.fields.forEach((fld, i) => {
         const on = focus === 'right' && i === fi;
         let val;
-        if (editing && on && (fld.kind === 'text' || fld.kind === 'name')) val = buf + '\x1b[7m \x1b[27m';
+        if (editing && on && (fld.kind === 'text' || fld.kind === 'name')) val = buf.slice(0, caret) + '\x1b[7m' + (buf[caret] || ' ') + '\x1b[27m' + buf.slice(caret + 1); // block caret at its position
         else if (fld.kind === 'multiselect') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : '\x1b[90m(none)\x1b[39m'; }
         else if (fld.kind === 'readonly') val = String(form[fld.key]) ? String(form[fld.key]) : '\x1b[90m(none)\x1b[39m';
         else val = String(form[fld.key]) ? String(form[fld.key]) : `\x1b[90m(${fld.req ? 'required' : 'optional'})\x1b[39m`;
@@ -3027,10 +3033,10 @@ async function configForm(flags, opts = {}) {
       // ---- footer ----
       let parts;
       if (pendingDel) parts = [`\x1b[31mDelete '${pendingDel}'?\x1b[39m`, ...(s.key === 'guards' && usersOf(pendingDel).length ? [`used by ${usersOf(pendingDel).length} project(s)`] : []), 'y delete', 'esc cancel'];
-      else if (panel) parts = ['space toggle', 'a all', '⏎ apply', 'esc cancel'];
-      else if (editing) parts = ['type to edit', '⏎ commit', 'esc cancel'];
+      else if (panel) parts = panelField.kind === 'choice' ? ['↑↓ pick', '⏎ apply', 'esc cancel'] : ['space toggle', 'a all', '⏎ apply', 'esc cancel'];
+      else if (editing) parts = ['type', '←→ move', '⌥← word', '⏎ commit', 'esc cancel'];
       else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', '→ fields', 'q quit'];
-      else { const fld = s.fields[fi]; const eh = fld.kind === 'choice' ? '⏎ cycle' : fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew ? [] : ['d delete']), '← list', 'q quit'].filter(Boolean); }
+      else { const fld = s.fields[fi]; const eh = fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew ? [] : ['d delete']), '← list', 'q quit'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
       out += '\x1b[K' + footerBar(footerText(parts), C);
       // ---- multiselect overlay (paints over the right columns; graph filter panel reused) ----
@@ -3038,23 +3044,35 @@ async function configForm(flags, opts = {}) {
       w(out);
     };
 
-    const openPanel = (fld) => { const items = optionsOf(fld); if (!items.length) { msg = `no ${fld.label} defined yet`; return; } panelField = fld; panel = makeFilterPanel(items, { paint, title: fld.label }); panel.open(Array.isArray(form[fld.key]) ? form[fld.key] : []); };
+    const openPanel = (fld) => { const items = optionsOf(fld); if (!items.length) { msg = `no ${fld.label} defined yet`; return; } panelField = fld; const single = fld.kind === 'choice'; panel = makeFilterPanel(items, { paint, title: fld.label, single }); panel.open(single ? form[fld.key] : (Array.isArray(form[fld.key]) ? form[fld.key] : [])); };
     const openItem = () => { const cur = sel[li]; form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); focus = 'right'; fi = 0; };
 
     const handleKey = (k) => {
       msg = '';
       if (panel) {
         const r = panel.key(k);
-        if (r === 'apply') { form[panelField.key] = [...panel.selected]; panel = null; }
+        if (r === 'apply') { if (panelField.kind === 'choice') { const v = [...panel.selected][0]; if (v != null) form[panelField.key] = v; } else form[panelField.key] = [...panel.selected]; panel = null; }
         else if (r === 'cancel') panel = null;
         repaint(); return false;
       }
       if (pendingDel) { if (k === 'y' || k === 'Y') doDelete(pendingDel); pendingDel = null; repaint(); return false; }
       if (editing) {
+        const wordL = (i) => { let j = i; while (j > 0 && buf[j - 1] === ' ') j--; while (j > 0 && buf[j - 1] !== ' ') j--; return j; };
+        const wordR = (i) => { let j = i; while (j < buf.length && buf[j] !== ' ') j++; while (j < buf.length && buf[j] === ' ') j++; return j; };
         if (k === '\r' || k === '\n') { form[secOf().fields[fi].key] = buf; editing = false; }
-        else if (k === '\x1b') editing = false;                                  // cancel edit
-        else if (k === '\x7f' || k === '\b') buf = buf.slice(0, -1);
-        else if (k.length === 1 && k >= ' ') buf += k;                           // printable
+        else if (k === '\x1b') editing = false;                                                              // bare esc cancels the edit
+        else if (k === '\x1b[D') caret = Math.max(0, caret - 1);                                             // ← left
+        else if (k === '\x1b[C') caret = Math.min(buf.length, caret + 1);                                    // → right
+        else if (k === '\x1bb' || k === '\x1b[1;3D' || k === '\x1b[1;5D') caret = wordL(caret);              // Option/Ctrl + ← : word left
+        else if (k === '\x1bf' || k === '\x1b[1;3C' || k === '\x1b[1;5C') caret = wordR(caret);              // Option/Ctrl + → : word right
+        else if (k === '\x1b[H' || k === '\x1b[1~' || k === '\x01') caret = 0;                               // Home / Ctrl-A
+        else if (k === '\x1b[F' || k === '\x1b[4~' || k === '\x05') caret = buf.length;                      // End / Ctrl-E
+        else if (k === '\x7f' || k === '\b') { if (caret > 0) { buf = buf.slice(0, caret - 1) + buf.slice(caret); caret--; } } // backspace
+        else if (k === '\x1b[3~') { if (caret < buf.length) buf = buf.slice(0, caret) + buf.slice(caret + 1); }                // delete forward
+        else if (k === '\x17') { const j = wordL(caret); buf = buf.slice(0, j) + buf.slice(caret); caret = j; }                // Ctrl-W delete word left
+        else if (k === '\x15') { buf = buf.slice(caret); caret = 0; }                                        // Ctrl-U kill to start
+        else if (k === '\x0b') buf = buf.slice(0, caret);                                                    // Ctrl-K kill to end
+        else if (k.length === 1 && k >= ' ') { buf = buf.slice(0, caret) + k + buf.slice(caret); caret++; }  // insert printable at caret
         else return false;
         repaint(); return false;
       }
@@ -3073,9 +3091,8 @@ async function configForm(flags, opts = {}) {
       if (k === 'k' || k === '\x1b[A') fi = Math.max(0, fi - 1);
       else if (k === 'j' || k === '\x1b[B') fi = Math.min(fields.length - 1, fi + 1);
       else if (k === '\r' || k === '\n') {
-        if (fld.kind === 'text' || fld.kind === 'name') { editing = true; buf = String(form[fld.key] || ''); }
-        else if (fld.kind === 'choice') { const o = optionsOf(fld); form[fld.key] = o[(o.indexOf(form[fld.key]) + 1) % o.length]; }
-        else if (fld.kind === 'multiselect') openPanel(fld);
+        if (fld.kind === 'text' || fld.kind === 'name') { editing = true; buf = String(form[fld.key] || ''); caret = buf.length; }
+        else if (fld.kind === 'choice' || fld.kind === 'multiselect') openPanel(fld);
         else if (fld.kind === 'readonly' && fld.key === 'tasks') msg = 'edit tasks via: crew edit <name>';
       }
       else if (k === 's') doSave();

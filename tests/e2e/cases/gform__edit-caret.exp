@@ -1,6 +1,6 @@
 source tests/e2e/lib.exp
-crun edit
-must {api}
+crun guards edit
+must {vpn}
 sleep 1
 send "l"
 sleep 1
@@ -8,9 +8,10 @@ send "j"
 send "j"
 sleep 1
 send "\r"
-must {↑↓ pick}
 sleep 1
-send "j"
+send "\001"
+sleep 1
+send "X "
 sleep 1
 send "\r"
 sleep 1
@@ -18,4 +19,4 @@ send "s"
 must {saved}
 send "q"
 want_exit 0
-config_has {"type": "fullstack"}
+config_has {"command": "X true"}
