@@ -2310,7 +2310,7 @@ async function graphSelect(flags, cfg, opts = {}) {
 // Show a (possibly tall) block in an ALTERNATE-SCREEN pager — like the log viewer, so it vanishes on
 // exit instead of scrolling into the terminal history. Vertical scroll only. 'f' resolves 'filter'
 // (caller opens a node picker); 'q' resolves 'quit'. Non-TTY: plain print (so `| less`, redirects, CI work).
-function pagerView(text, title = 'crew graph') {
+function pagerView(text, title = 'crew graph', footerExtra = '') {
   const stdout = process.stdout, stdin = process.stdin;
   if (!stdout.isTTY || !stdin.isTTY) { console.log(text); return Promise.resolve('quit'); }
   return new Promise((resolve) => {
@@ -2329,7 +2329,7 @@ function pagerView(text, title = 'crew graph') {
       let out = '\x1b[H';
       for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + (li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
       const pos = lines.length > R ? `${top + 1}-${Math.min(top + R, lines.length)}/${lines.length}` : `${lines.length} lines`;
-      const bar = ` ${title}  ·  ${pos}  ·  ↑↓ jk · space b · g G · f filter · q quit `;
+      const bar = ` ${title}  ·  ${pos}  ·  ↑↓ jk · space b · g G · f filter${footerExtra} · q quit `;
       out += '\x1b[K\x1b[7m' + bar + ' '.repeat(Math.max(0, cols - cpw(bar))) + '\x1b[0m'; // full-width footer bar
       w(out);
     };
@@ -2344,6 +2344,7 @@ function pagerView(text, title = 'crew graph') {
       const k = buf.toString(), R = body();
       if (k === 'q' || k === '\x03') { cleanup(); return resolve('quit'); }
       if (k === 'f') { cleanup(); return resolve('filter'); }
+      if (k === 'r') { cleanup(); return resolve('refs'); }
       if (k === 'j' || k === '\x1b[B') top += 1;
       else if (k === 'k' || k === '\x1b[A') top -= 1;
       else if (k === ' ' || k === '\x1b[6~') top += R;
@@ -2368,11 +2369,15 @@ export async function cmdGraph(flags, rest) {
     const allEdges = [...real.map(([f, t]) => ({ from: f, to: t })), ...ref.map(([f, t]) => ({ from: f, to: t, ref: true }))];
     const paint = projectColors(cfg);
     const clr = (n) => { const g = paint.get(n); if (!g) return ''; const t = g('\u0001'); const m = t.indexOf('\u0001'); return m > 0 ? t.slice(0, m) : ''; };
-    const draw = (shown) => renderAsciiGraph(allNodes.filter((n) => shown.has(n)), allEdges.filter((e) => shown.has(e.from) && shown.has(e.to)), { colorOf: clr });
+    const draw = (shown, showRef) => renderAsciiGraph(allNodes.filter((n) => shown.has(n)), allEdges.filter((e) => shown.has(e.from) && shown.has(e.to) && (showRef || !e.ref)), { colorOf: clr });
     let shown = new Set(allNodes);
-    if (!process.stdout.isTTY || !process.stdin.isTTY) return void console.log(draw(shown));
-    for (;;) {                                          // page the graph; 'f' opens a node filter, then re-draws
-      const reason = await pagerView(draw(shown), `crew graph  ${shown.size}/${allNodes.length} nodes`);
+    let showRef = true;
+    const hasRef = ref.length > 0;                      // only offer the toggle when there ARE reference edges
+    if (!process.stdout.isTTY || !process.stdin.isTTY) return void console.log(draw(shown, showRef));
+    for (;;) {                                          // page the graph; 'f' filters nodes, 'r' toggles reference edges, then re-draws
+      const title = `crew graph  ${shown.size}/${allNodes.length} nodes${hasRef ? (showRef ? '  · refs on' : '  · refs off') : ''}`;
+      const reason = await pagerView(draw(shown, showRef), title, hasRef ? ' · r refs' : '');
+      if (reason === 'refs') { showRef = !showRef; continue; }
       if (reason !== 'filter') break;
       const picked = await menu({ title: 'Show which nodes?', items: allNodes, multi: true, preselected: allNodes.filter((n) => shown.has(n)), label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)), erase: true });
       if (picked && picked.length) shown = new Set(picked);
