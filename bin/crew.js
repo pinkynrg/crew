@@ -223,6 +223,37 @@ export function missingProjectFolders(cfg, dir) {
   return out;
 }
 
+// Shared NON-blocking gate for the folder-consuming commands (start/workspace/claude/install/graph/
+// resolve). A project whose `path` folder is absent is treated as if it didn't exist: excluded from the
+// graph AND the selector (so you can't pick or draw a phantom), while the SHARED config is never touched.
+// `warnMissing` surfaces the misses with direction-aware advice; the caller shows `emptyProjectsState`
+// when nothing is left. (`crew check` keeps its own full report; `crew list` just adds the banner.)
+function presentCfg(cfg) {
+  const miss = new Set(missingProjectFolders(cfg, PROJECTS_DIR));
+  const projects = {};
+  for (const [n, p] of Object.entries((cfg && cfg.projects) || {})) if (!miss.has(n)) projects[n] = p;
+  return { ...cfg, projects };
+}
+function warnMissing(cfg) {
+  const missing = missingProjectFolders(cfg, PROJECTS_DIR);
+  if (!missing.length) return missing;
+  const total = Object.keys((cfg && cfg.projects) || {}).length;
+  // No projects dir, or a MAJORITY missing -> the projects dir is the likely culprit. A minority -> the
+  // individual paths are. Advise accordingly; informational only — the command runs on whatever remains.
+  if (!PROJECTS_DIR || missing.length > Math.floor(total / 2)) {
+    warn(`${missing.length}/${total} project folder(s) not found${PROJECTS_DIR ? ` under ${tildify(PROJECTS_DIR)}` : ''} — check your projects dir:  crew config › Settings › config › projectsDir`);
+  } else {
+    const where = (p) => { const e = expandHome(String(p.path || '')); const full = isAbsolute(e) ? e : (PROJECTS_DIR ? resolve(PROJECTS_DIR, e) : e); return tildify(full); };
+    warn(`project folder(s) missing — fix each path (or remove it):  ${missing.map((n) => `${n} → ${where(cfg.projects[n])}`).join('  ')}`);
+  }
+  return missing;
+}
+function emptyProjectsState(headline) {
+  console.log('\n  ' + c.bold(headline));
+  console.log(c.dim('  Make sure your config has projects and their paths are correct') + (PROJECTS_DIR ? c.dim(` (checked under ${tildify(PROJECTS_DIR)})`) : '') + c.dim('.'));
+  console.log(c.dim('  Set your projects dir:  crew config › Settings › config › projectsDir') + '\n');
+}
+
 // ---------------------------------------------------------------------------
 // Config — user-level at ~/.config/crew/config.json, project-local ./.crew.json
 // merges on top. v1 configs migrate to v2 in memory and are written back.
@@ -1949,7 +1980,7 @@ export function wireRun(userPath, runnable, members, { overrides = {} }) {
 // adds the live wiring-connectivity footer (for co-running sets).
 export async function selectMembers(flags, cfg, opts = {}) {
   const known = Object.keys(cfg.projects || {});
-  if (!known.length) fail('no projects configured yet — run: crew add');
+  if (!known.length) fail('no projects configured yet — run: crew config');
   if (!canInteractive()) fail('crew needs an interactive terminal to pick projects');
   // Default: pick on the dependency graph itself. `--list` forces the flat multiselect below.
   if (!flags.list) {
@@ -1985,7 +2016,10 @@ export async function selectMembers(flags, cfg, opts = {}) {
 // Commands
 // ---------------------------------------------------------------------------
 export async function cmdRun(flags, task, rest) {
-  const { cfg, userPath } = loadMerged(flags);
+  let { cfg, userPath } = loadMerged(flags);
+  warnMissing(cfg);                 // heads-up about broken paths...
+  cfg = presentCfg(cfg);            // ...then run on only the projects whose folder exists
+  if (!Object.keys(cfg.projects).length) { emptyProjectsState(`Nothing to ${task} — no project folders found.`); process.exit(1); }
   const args = rest.filter((a) => a.includes('='));
   const bare = rest.filter((a) => !a.includes('='));
   const isLong = (cfg.longRunning || []).includes(task);
@@ -2091,7 +2125,9 @@ function selectionLabel(members) {
 }
 
 export async function cmdWorkspace(flags, rest) {
-  const { cfg, userPath } = loadMerged(flags);
+  let { cfg, userPath } = loadMerged(flags);
+  warnMissing(cfg); cfg = presentCfg(cfg);
+  if (!Object.keys(cfg.projects).length) { emptyProjectsState('Nothing to open — no project folders found.'); process.exit(1); }
   if (rest.length) warn(`ignoring '${rest.join(' ')}' — projects are chosen in the picker`);
   const members = await selectMembers(flags, cfg);
   if (!members) return;
@@ -2112,7 +2148,9 @@ export async function cmdWorkspace(flags, rest) {
 }
 
 export async function cmdClaude(flags, rest) {
-  const { cfg, userPath } = loadMerged(flags);
+  let { cfg, userPath } = loadMerged(flags);
+  warnMissing(cfg); cfg = presentCfg(cfg);
+  if (!Object.keys(cfg.projects).length) { emptyProjectsState('Nothing to open — no project folders found.'); process.exit(1); }
   // Optional first bare arg = a session name for the chat history (always kept under crew's
   // sessions dir). Omitted => a stable name auto-derived from the selected projects.
   const session = rest.filter((a) => !a.includes('='))[0];
@@ -2139,9 +2177,10 @@ export function cmdList(flags) {
   const paint = projectColors(cfg);
   if (projects.length === 0) {
     console.log(c.dim('No projects configured yet.'));
-    console.log(`Run ${c.cyan('crew add')} to add one.`);
+    console.log(`Run ${c.cyan('crew config')} to add one.`);
     return;
   }
+  warnMissing(cfg);   // list shows ALL projects (red/green dot below), plus a direction-aware banner
 
   // --- Projects -------------------------------------------------------------
   console.log(c.bold(c.underline('Projects')));
@@ -2200,7 +2239,8 @@ export function cmdList(flags) {
 // selection (from the chain), without starting anything. No projects given -> the remembered
 // selection (else all). The dry-run that validates derivation before you `crew start`.
 export function cmdResolve(flags, rest) {
-  const { cfg } = loadMerged(flags);
+  let { cfg } = loadMerged(flags);
+  warnMissing(cfg); cfg = presentCfg(cfg);             // resolve reads env files — skip projects whose folder is absent
   const selEnv = (rest || []).find((a) => !a.includes('='));
   if (!selEnv) fail('resolve: usage: crew resolve <env> [project...]');
   const explicit = (rest || []).filter((a) => a !== selEnv && !a.includes('='));
@@ -2209,7 +2249,7 @@ export function cmdResolve(flags, rest) {
     ? explicit
     : (Array.isArray(machine.lastSelection) && machine.lastSelection.length ? machine.lastSelection : Object.keys(cfg.projects || {}));
   names = names.filter((n) => cfg.projects && cfg.projects[n]);
-  if (!names.length) fail('resolve: no known projects to resolve');
+  if (!names.length) return void emptyProjectsState('Nothing to resolve.');
 
   const { resolved, warnings } = resolveEnvs(cfg, names, selEnv);
   const paint = projectColors(cfg);
@@ -2463,9 +2503,11 @@ function pagerView(text, meta = {}) {
 }
 
 export async function cmdGraph(flags, rest) {
-  const { cfg } = loadMerged(flags);
+  let { cfg } = loadMerged(flags);
+  warnMissing(cfg); cfg = presentCfg(cfg);             // broken projects are dropped from the graph (as if absent)
   if ((rest || [])[0] !== 'list') {                    // default = drawn ascii diagram; `list` = adjacency text
     const { nodes: allNodes, real, ref } = collectGraphEdges(cfg);
+    if (!allNodes.length) return void emptyProjectsState('Nothing to show here.');
     const allEdges = [...real.map(([f, t]) => ({ from: f, to: t })), ...ref.map(([f, t]) => ({ from: f, to: t, ref: true }))];
     const paint = projectColors(cfg);
     const clr = (n) => { const g = paint.get(n); if (!g) return ''; const t = g('\u0001'); const m = t.indexOf('\u0001'); return m > 0 ? t.slice(0, m) : ''; };
@@ -2488,6 +2530,7 @@ export async function cmdGraph(flags, rest) {
   }
   const paint = projectColors(cfg);
   const projects = Object.entries(cfg.projects || {});
+  if (!projects.length) return void emptyProjectsState('Nothing to show here.');
 
   const meta = {};
   for (const [name, project] of projects) {
