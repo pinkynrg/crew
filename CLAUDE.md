@@ -84,9 +84,15 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   VAR=` line in place, else append; values quoted only when unsafe (non-string values skipped
   with a warning). Also the escape hatch for cross-env wiring (inject a key an env lacks) when
   env derivation + the URL swap don't cover a case. crew stays agnostic — a plain
-  per-project table. Edited in `crew config` as two `map` fields at the END of each project's form —
-  `envOverride` (bare `VAR:val`) and `whenLocal` (flattened `peer.VAR`→val rows) — which write `local.json`
-  (moved on a project rename, cleared on delete; empty = no entry). `crew check` validates both forms.
+  per-project table. Edited in `crew config` as one **Environment Overrides** block at the END of each
+  project's form (`kind: 'overrides'`): an INLINE list, one line per override — `VAR = value   when <peer>
+  local` (peer blank = unconditional/bare). Bare `VAR:val` and `whenLocal` are flattened into ONE flat row
+  list `{var, value, peer}` (`overridesToRows`) and rebuilt to the stored shape on save (`rowsToOverrides`) —
+  so `whenLocal` is a per-row OPTION (the `when local` column, a single-select picker of the other projects +
+  an "always" choice), NOT a separate field. `⏎` on the block enters in-place row-edit (`ovEdit = {rows, ri,
+  ci}`, `ci` 0=VAR 1=value 2=when): `↑↓` rows, `←→` columns, `⏎` edits the focused cell (VAR/value inline,
+  `when` opens the picker), `d` removes, `esc` commits. Writes `local.json` (moved on rename, cleared on
+  delete; empty = no entry). `crew check` validates both stored forms.
 - No groups, no `run` command. `start`/`workspace`/`claude` act on a **multiselect selection**
   (`selectMembers`, preselected with `lastSelection`); projects are never named on the CLI there
   (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
@@ -185,7 +191,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   groups duplicate keys into host-arrays); the form carries these as objects, serialized on `save`; a `json`
   map (`workspaceSettings`) parses each value so `false`/`3` keep their type), `list` (the same row editor
   minus the key column — one value per row, e.g. `longRunning`, carried as a string array),
-  `readonly` (display only). Editing any of choice/multiselect/map **TAKES OVER the whole right pane**
+  `overrides` (a project's Environment Overrides — an INLINE 3-column row editor `VAR / value / when <peer>
+  local`, rendered in the form (NOT a full-pane takeover) and edited in place via the `ovEdit` mode; see the
+  Overrides config bullet), `readonly` (display only). Editing any of choice/multiselect/map **TAKES OVER the whole right pane**
   (full width + height, left column stays for context) rather than a cramped popup — so long task commands /
   match hosts have room, and `text`/`map` cells horizontally scroll to keep the caret in view (`editCell`).
   choice/multiselect reuse `makeFilterPanel`'s state/keys via `bareRows(h, w)` (unboxed, full-width); the
@@ -195,11 +203,10 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   top-level to `TOP_KEYS`, per-project to `PROJECT_KEYS`, per-guard to `GUARD_KEYS`), so a save normalizes the
   file. (The migration write-back in `loadUserConfig` does NOT prune — load never silently strips.) Each
   section owns `load/save/del`: Projects/Guards write the user config; the Settings `projectsDir` field AND
-  each project's `envOverride`/`whenLocal` fields write `local.json` via `writeMachine`. Env **overrides live on the PROJECT form** (last two fields):
-  `envOverride` = per-project bare `VAR:val` (`map`), `whenLocal` = the 2-level `peer→{VAR:val}` flattened to
-  `peer.VAR`→val rows (split on the LAST dot — env var names have no dots) and round-tripped to nested on
-  save; the project's `save` writes both stores (moving overrides on a rename, deleting them with the
-  project), so there's no separate Overrides section. **Semi-auto add**: `⏎` on a project's `path` field opens
+  each project's `overrides` block write `local.json` via `writeMachine`. Env **overrides live on the PROJECT
+  form** as one inline **Environment Overrides** block (`kind: 'overrides'`, the `overridesToRows`/
+  `rowsToOverrides` round-trip described above) — the project's `save` writes both stores (moving overrides on
+  a rename, deleting them with the project), so there's no separate Overrides section. **Semi-auto add**: `⏎` on a project's `path` field opens
   a **folder picker** (`openFolderPick` — the subfolders of `projectsDir` via `projectDirs()`, single-select,
   plus a `✎ type a path…` escape that drops to the inline editor). Picking a folder (or committing a typed
   path) for a NEW project runs `detectProject(abs)` and prefills only the still-EMPTY fields — `name`

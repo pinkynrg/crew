@@ -7,12 +7,17 @@ sleep 1
 send "jjjjjjjjjj"
 sleep 1
 send "\r"
-must {add VAR}
+must {Environment Overrides}
 sleep 1
-send "j"
+# to the "+ add override" row (2 existing rows), append + type the VAR
+send "jj"
 sleep 1
 send "\r"
 send "DEBUG"
+send "\r"
+sleep 1
+# move to the value column, edit it
+send "l"
 send "\r"
 send "1"
 send "\r"

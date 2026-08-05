@@ -4,8 +4,8 @@ must {config editor}
 sleep 1
 send "l"
 sleep 1
-must {envOverride}
+# collapsed project form shows the titled block + the override summary (VAR=value, @peer)
+must {Environment Overrides}
 must {AWS_PROFILE}
-must {whenLocal}
 send "\033"
 want_exit 0
