@@ -84,10 +84,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   VAR=` line in place, else append; values quoted only when unsafe (non-string values skipped
   with a warning). Also the escape hatch for cross-env wiring (inject a key an env lacks) when
   env derivation + the URL swap don't cover a case. crew stays agnostic — a plain
-  per-project table. Edited in the visual editor (`crew config` → Overrides section), which lists EVERY
-  project (the row IS the project — no `+ New`, no project field; blank form = no override, clearing all
-  fields removes the entry, `d` clears it): bare vars and `whenLocal` (as flattened `peer.VAR` rows) both
-  via the `map` field; writes `local.json`. `crew check` validates both forms.
+  per-project table. Edited in `crew config` as two `map` fields at the END of each project's form —
+  `envOverride` (bare `VAR:val`) and `whenLocal` (flattened `peer.VAR`→val rows) — which write `local.json`
+  (moved on a project rename, cleared on delete; empty = no entry). `crew check` validates both forms.
 - No groups, no `run` command. `start`/`workspace`/`claude` act on a **multiselect selection**
   (`selectMembers`, preselected with `lastSelection`); projects are never named on the CLI there
   (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
@@ -168,7 +167,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   prints its message and aborts. Run before `crew start`. Managed via
   the **visual editor** below (`crew config` → Guards section: create/update/delete/link).
 - **Visual editor (`configForm`, TTY-only)**: `crew config` is the SOLE config command — one two-pane raw-mode
-  editor for everything. Left column stacks the SECTIONS (Settings + Projects + Guards + Overrides) as a
+  editor for everything. Left column stacks the SECTIONS (Settings + Projects + Guards) as a
   name list, each item-section ending in a green `+ New …` row; scroll (`↑↓`) to reach a section. The right
   column is the highlighted item's form. The three actions fall out of
   position + key — CREATE = a `+ New` row (blank form), UPDATE = edit fields then `s` save, DELETE = `d` +
@@ -191,13 +190,13 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   match hosts have room, and `text`/`map` cells horizontally scroll to keep the caret in view (`editCell`).
   choice/multiselect reuse `makeFilterPanel`'s state/keys via `bareRows(h, w)` (unboxed, full-width); the
   graph views still use its boxed `.rows()` overlay. `save` starts from the existing object so unmanaged/future
-  keys survive. Each section owns `load/save/del` (Projects/Guards write the user config via
-  `writeUserConfig`; **Overrides + `projectsDir` write `local.json`** via `writeMachine`). The **Overrides**
-  section is `noNew` (lists EVERY project — `names()` = `Object.keys(cfg.projects)` — with no `+ New` and no
-  editable project field; the row identifies the project, `save` writes/clears `overrides[row]`): per-project
-  bare `VAR:val` via the `map` kind, and the 2-level `whenLocal` (peer→{VAR:val}) flattened to `peer.VAR`→val
-  rows (split on the LAST dot — env var names have no dots) so it edits with the same row editor and
-  round-trips back to nested on save. Renaming a guard migrates its key AND every
+  keys survive. Each section owns `load/save/del`: Projects/Guards write the user config via
+  `writeUserConfig`; the Settings `projectsDir` field AND each project's `envOverride`/`whenLocal` fields
+  write `local.json` via `writeMachine`. Env **overrides live on the PROJECT form** (last two fields):
+  `envOverride` = per-project bare `VAR:val` (`map`), `whenLocal` = the 2-level `peer→{VAR:val}` flattened to
+  `peer.VAR`→val rows (split on the LAST dot — env var names have no dots) and round-tripped to nested on
+  save; the project's `save` writes both stores (moving overrides on a rename, deleting them with the
+  project), so there's no separate Overrides section. Renaming a guard migrates its key AND every
   `project.guards` link; deleting a guard unlinks it everywhere (warns if in use). A `readonly` field with a
   `.hint` shows it as a status message on `⏎`. `↑↓` move, `tab`/`←→` switch pane, `esc` quits (only `s` writes; field edits
   and the multiselect overlay are discarded on `esc`). Same raw-mode primitives as the graph views
@@ -249,7 +248,7 @@ No unit-test framework. Two suites, both run by `npm test`:
   tmp dir (sed `__DIR__`→tmp in `local.json`) and runs each `cases/<fx>__<scenario>.exp`; `lib.exp`
   gives the helpers `crun`/`must`/`want_exit`/`want_done`/`config_has`/`local_has`. Covers check (+error/exit
   codes), v1 migration (asserts the rewritten config), graph/resolve/list, dir (+ orphan warning)/config
-  (path + removed `edit`), the visual editor (`crew config`, scrolling to the Settings/Projects/Guards/Overrides
+  (path + removed `edit`), the visual editor (`crew config`, scrolling to the Settings/Projects/Guards
   sections: create/update/delete/map-rows/list-rows/pick panels), the retired-command errors
   (`add`/`remove`/`guards`/`overrides`), and the runner: `crew start`
   (picker → run-to-completion AND streamed viewer + teardown),

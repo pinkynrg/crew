@@ -227,9 +227,9 @@ Each `overrides["<project>"]` table has two kinds of entry:
   `REACT_APP_BEEPLUGINURL` at your local `bee-loader` (exact host **and** path, which the
   host-only URL swap can't do), but leave it remote when the loader isn't running.
 
-Manage them in the visual editor — `crew config`, then scroll the left column to the **Overrides**
-section. It lists **every project**; pick one and edit its `vars` and `whenLocal` (as `peer.VAR` rows)
-right there — a blank form means no override yet, and clearing everything (or `d`) removes the entry.
+Manage them in the visual editor — `crew config`, open a project, and edit the last two fields of its
+form: **`envOverride`** (bare `VAR=value` rows) and **`whenLocal`** (`peer.VAR=value` rows). They're
+machine-local (written to `local.json`); leaving them empty means no override.
 
 - Overrides win over the base env file **and** the localhost URL swap; `whenLocal` wins over bare.
 - Upsert = replace an existing `VAR=` / `export VAR=` line in place, else append it.
