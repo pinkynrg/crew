@@ -69,8 +69,7 @@ selection, so tabs 2 and 3 open the same set you started.
 ```sh
 crew add          # wizard: create a project (run once per project)
 crew install      # pick projects, install them (waits, reports pass/fail)
-crew start        # pick projects to run locally (remembers your pick)
-crew start env=qa # same, passing a placeholder value to the start task
+crew start env=qa # pick projects to run locally; env = what the rest point at (remembers your pick)
 crew workspace    # open the remembered set as one VSCode window
 crew claude       # launch Claude Code over the remembered set
 crew edit         # wizard: change a project later
@@ -159,6 +158,8 @@ Resolution rules:
   nothing runs;
 - a `key=value` that matches no placeholder is **skipped with a yellow warning** (so
   `crew start env=local` still runs when nothing has an `{env}`);
+- `crew start` **requires** `env=<name>` — the base env the unselected projects point at
+  (it drives the `{env}` chain and wiring); without it, start errors before the picker opens;
 - substituted values are shell-quoted, so spaces and metacharacters are safe.
 
 ```sh

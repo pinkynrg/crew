@@ -452,11 +452,16 @@ export function saveGraphShown(flags, names) {
 // Order: state -> how to move -> what to toggle (f/r together) -> action -> exit. Count turns RED when
 // not all nodes are shown/selected. `scroll` (pager, only when the graph overflows) and `warn` (select,
 // e.g. "not connected") are optional. Returns the inner bar text; the caller adds the reverse-video + pad.
-function graphFooter({ mode, shown, total, hasRef, showRef, warn = '', scroll = '' }) {
-  const count = shown < total ? `\x1b[31m${shown}/${total}\x1b[39m` : `${shown}/${total}`; // red fg (kept inside the reverse bar via 39m, not a full reset)
-  const parts = [count + (warn ? ` ${warn}` : '')];
-  if (mode === 'select') parts.push('↑↓←→ move', 'space pick', 'a all');
-  else if (scroll) parts.push(scroll);
+function graphFooter({ mode, total, sel, vis, shown, hasRef, showRef, warn = '', scroll = '' }) {
+  const red = (n, d) => (n < d ? `\x1b[31m${n}/${d}\x1b[39m` : `${n}/${d}`); // red when partial; 39m keeps the reverse bar (not a full reset)
+  const parts = [];
+  if (mode === 'select') { // selector shows TWO counts: `sel` = picked-to-run, `shown` = visible after the f-filter
+    parts.push(`${sel}/${total} sel · ${red(vis, total)} shown${warn ? ` ${warn}` : ''}`);
+    parts.push('↑↓←→ move', 'space pick', 'a all');
+  } else {
+    parts.push(red(shown, total) + ' shown' + (warn ? ` ${warn}` : ''));
+    if (scroll) parts.push(scroll);
+  }
   parts.push('f filter');
   if (hasRef) parts.push(`r refs ${showRef ? 'on' : 'off'}`);
   if (mode === 'select') parts.push('enter run');
@@ -1903,14 +1908,7 @@ export async function selectMembers(flags, cfg, opts = {}) {
   if (!canInteractive()) fail('crew needs an interactive terminal to pick projects');
   // Default: pick on the dependency graph itself. `--list` forces the flat multiselect below.
   if (!flags.list) {
-    let selEnv = opts.selEnv;
-    if (opts.requireEnv && !selEnv) { // start must know the base (remote) env unselected projects point at
-      const { ask, close } = makePrompter();
-      try { selEnv = (await ask('Remote environment (what unselected projects point at, e.g. pre)', '')).trim(); }
-      finally { close(); }
-      if (!selEnv) { console.log(c.dim('no environment — cancelled')); return null; }
-    }
-    const picked = await graphSelect(flags, cfg, { selEnv });
+    const picked = await graphSelect(flags, cfg, { selEnv: opts.selEnv });
     if (picked !== undefined) { // ran (confirm or cancel); undefined only if it couldn't (non-TTY) -> fall through
       if (!picked || !picked.length) { console.log(c.dim('nothing selected')); return null; }
       saveLastSelection(flags, picked);
@@ -1970,7 +1968,10 @@ export async function cmdRun(flags, task, rest) {
   } else {
     if (bare.length) warn(`ignoring '${bare.join(' ')}' — projects are chosen in the picker`);
     const envArg = args.find((a) => a.startsWith('env='));
-    members = await selectMembers(flags, cfg, { connectivity: isLong, selEnv: envArg ? envArg.slice(4) : undefined, requireEnv: task === 'start' });
+    // start must know the base env unselected projects point at (drives the {env} chain + wiring);
+    // require it up front and fail fast, rather than prompting after the picker.
+    if (task === 'start' && !envArg) fail('crew start needs an environment (what unselected projects point at) — e.g. crew start env=pre');
+    members = await selectMembers(flags, cfg, { connectivity: isLong, selEnv: envArg ? envArg.slice(4) : undefined });
   }
   if (!members) return;
   validateMemberPaths(members);
@@ -2269,14 +2270,17 @@ async function graphSelect(flags, cfg, opts = {}) {
   const depEdges = dependencyEdges(cfg, Object.entries(cfg.projects));
   let active = new Set(loadLastSelection(flags).filter((n) => nodes.includes(n)));
   if (!active.size) active = new Set(nodes);        // default: everything selected
-  let cursor = nodes[0];
+  let shown = new Set((loadGraphShown(flags) || nodes).filter((n) => nodes.includes(n))); // visible set (f-filter), persisted + shared with `crew graph`
+  if (!shown.size) shown = new Set(nodes);
+  for (const n of [...active]) if (!shown.has(n)) active.delete(n); // a hidden node can't be run
+  let cursor = [...nodes].find((n) => shown.has(n)) || nodes[0];
   const remoteEnv = selEnv != null ? resolveEnvs(cfg, nodes, selEnv).resolved : new Map(); // where each service is deployed (crew resolve) — shown for the ones NOT run locally
   // Keep box widths STABLE across select/deselect. 'local' and a node's remote env differ in length, and
   // toggling one would change that box's width and reflow the whole (now order-sensitive) layout — nodes
   // would jump. sublabelWidth = the widest env label; the renderer pads every [env] field to it (spaces
   // OUTSIDE the tight brackets), so CW is identical for any active set -> geometry never moves on toggle.
   const envW = selEnv == null ? 0 : Math.max('local'.length, (selEnv || '').length, ...[...remoteEnv.values()].map((v) => (v || '').length));
-  const draw = () => renderAsciiGraph(nodes, edges.filter((e) => showRef || !e.ref), {
+  const draw = () => renderAsciiGraph(nodes.filter((n) => shown.has(n)), edges.filter((e) => shown.has(e.from) && shown.has(e.to) && (showRef || !e.ref)), {
     colorOf: (n) => (active.has(n) ? prefix(n) : GRAY),                                          // running set keeps per-source colours; the rest grayed
     sublabel: selEnv != null ? (n) => (active.has(n) ? 'local' : (remoteEnv.get(n) || selEnv)) : undefined, // selected run local; the rest show their resolved remote env
     sublabelWidth: envW,                                                                        // fixed [env] field width -> box width stays put when the sublabel changes
@@ -2298,7 +2302,7 @@ async function graphSelect(flags, cfg, opts = {}) {
       let out = '\x1b[H';
       for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + (li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
       const split = cpw(connectivityStatus(cfg, depEdges, [...active], false)) > 0; // non-verbose returns islands text only when disconnected
-      const bar = graphFooter({ mode: 'select', shown: active.size, total: nodes.length, hasRef, showRef, warn: split ? '⚠ not connected' : '' });
+      const bar = graphFooter({ mode: 'select', total: nodes.length, sel: active.size, vis: shown.size, hasRef, showRef, warn: split ? '⚠ not connected' : '' });
       out += '\x1b[K\x1b[7m' + bar + ' '.repeat(Math.max(0, cols - cpw(bar))) + '\x1b[0m'; // one full-width reverse-video footer
       w(out);
     };
@@ -2325,14 +2329,40 @@ async function graphSelect(flags, cfg, opts = {}) {
       if (k === '\x03' || k === 'q' || k === '\x1b') { cleanup(); return resolve(null); }
       if (k === '\r' || k === '\n') { cleanup(); return resolve([...active]); }
       if (k === 'r' && hasRef) { showRef = !showRef; saveGraphRefs(flags, showRef); layout = draw(); repaint(); return; }
+      if (k === 'f') return void openFilter();
       if (k === ' ') { active.has(cursor) ? active.delete(cursor) : active.add(cursor); }
-      else if (k === 'a') { active = active.size === nodes.length ? new Set() : new Set(nodes); }
+      else if (k === 'a') { active = [...shown].every((n) => active.has(n)) ? new Set() : new Set(shown); } // all/none among the VISIBLE nodes
       else if (k === '\x1b[C' || k === 'l') moveH(1);
       else if (k === '\x1b[D' || k === 'h') moveH(-1);
       else if (k === '\x1b[B' || k === 'j') moveV(1);
       else if (k === '\x1b[A' || k === 'k') moveV(-1);
       else return;
       layout = draw(); repaint();
+    };
+    // 'f' opens the node-visibility filter (shared idea with the crew-graph pager): pause our raw-mode
+    // loop, run menu() on the same alt screen, then re-assert raw + mouse and repaint. Hidden nodes are
+    // dropped from the run set (can't start what you can't see) and the filter is persisted (graphShown).
+    let menuOpen = false;
+    const openFilter = async () => {
+      if (menuOpen) return;
+      menuOpen = true;
+      stdin.removeListener('data', onData);
+      w('\x1b[?1000l\x1b[?1006l\x1b[2J\x1b[H\x1b[?25h'); // disable mouse, clear, show cursor for the menu
+      let picked = null;
+      try { picked = await menu({ title: 'Show which nodes?', items: nodes, label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)), multi: true, preselected: [...shown], erase: true }); } catch { picked = null; }
+      if (Array.isArray(picked) && picked.length) {
+        shown = new Set(picked);
+        saveGraphShown(flags, picked);
+        for (const n of [...active]) if (!shown.has(n)) active.delete(n);
+        if (!shown.has(cursor)) cursor = nodes.find((n) => shown.has(n)) || cursor;
+        layout = draw();
+      }
+      if (stdin.setRawMode) stdin.setRawMode(true);
+      stdin.resume();
+      w('\x1b[?25l\x1b[?1000h\x1b[?1006h'); // hide cursor + re-enable mouse (still on the alt screen)
+      stdin.on('data', onData);
+      menuOpen = false;
+      repaint();
     };
     if (stdin.setRawMode) stdin.setRawMode(true);
     stdin.resume();
