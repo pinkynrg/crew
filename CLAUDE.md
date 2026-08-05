@@ -124,11 +124,15 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   graph overflows — `f` opens a `menu()` node filter, `r` toggles reference edges, `q` quits leaving no
   scrollback); piped/redirected → plain print. `crew graph list` prints the adjacency text instead.
   Both graph UIs — the pager AND the start/workspace/claude selector (`graphSelect`) — share one footer
-  builder `graphFooter({mode, shown, total, hasRef, showRef, warn, scroll})` (order: state → move → `f`/`r`
-  toggles → action → exit; the `shown/total` count turns RED when not all nodes are shown/selected) and
-  one ref filter (`e => showRef || !e.ref`). `r` toggles refs in both. Both prefs are machine-local
-  (`local.json`): `graphRefs` (shared show-refs) + `graphShown` (the pager's node filter) — see
-  `loadGraphRefs`/`saveGraphRefs`/`loadGraphShown`/`saveGraphShown`, mirroring `loadLogWrap`.
+  builder `graphFooter({mode, total, sel, vis, shown, hasRef, showRef, warn, scroll})` (order: state → move
+  → `f`/`r` toggles → action → exit). The pager shows one `shown/total` count; the selector shows TWO —
+  `sel/total sel` (projects picked to run) then `vis/total shown` (nodes left visible after the `f` filter).
+  Any count that isn't full turns RED (via `\x1b[31m…\x1b[39m`, so it survives the reverse-video bar). Both
+  UIs share one ref filter (`e => showRef || !e.ref`) and one node-visibility filter: `f` opens a `menu()`
+  of nodes (`openFilter`; in the selector, hidden nodes are also dropped from the run set), `r` toggles refs.
+  Both prefs are machine-local (`local.json`) and shared across the two UIs: `graphRefs` (show-refs) +
+  `graphShown` (node filter) — see `loadGraphRefs`/`saveGraphRefs`/`loadGraphShown`/`saveGraphShown`,
+  mirroring `loadLogWrap`.
 - Reference edges (`isReferenceEdge`): a URL from a **non-frontend into a `type: frontend`** project
   is a **reference** (link-back / allowed-origin / redirect base — a backend embedding the app's
   public URL), NOT a dependency. It's still shown by `crew graph` (marked `⇢ … (ref)`) but excluded
@@ -197,7 +201,8 @@ No unit-test framework. Two suites, both run by `npm test`:
   `workspace`/`claude` (via `code`/`claude` stubs on `PATH`), env wiring + guards. Interactive tips:
   `spawn`-in-a-proc needs `global spawn_id`; the graph `pager`/picker/viewer are raw-mode alt-screen so
   quit them (`q`/Ctrl-C) or they hang; `longRunning: []` makes `crew start` run-to-completion (auto-exit
-  0), pass `env=x` to skip the env prompt. Coverage: `npm run test:cov` (c8 over `NODE_V8_COVERAGE`);
+  0); `crew start` REQUIRES `env=<name>` (errors before the picker without it — pass `env=x`).
+  Coverage: `npm run test:cov` (c8 over `NODE_V8_COVERAGE`);
   it's black-box so it works per-language (Go `-cover`+`GOCOVERDIR`, Python coverage.py) — same tests.
 
 Also verify manually against a throwaway config (no build — run the file):
