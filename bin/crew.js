@@ -749,11 +749,13 @@ export function resolveRun(cfg, task, members, args) {
     else positionals.push(a);
   }
 
-  // Unknown key=value (matches no placeholder in the target): warn and skip, don't abort
-  // — lets `crew start backend env=local` run even though backend has no {env}.
+  // Unknown key=value (matches no placeholder in the target): collect a warning and skip, don't
+  // abort — lets `crew start backend env=local` run even though backend has no {env}. Returned (not
+  // printed here) so the caller can route it into the viewer instead of leaking onto the screen.
+  const argWarnings = [];
   const unknown = Object.keys(keyVals).filter((k) => !union.has(k));
   if (unknown.length)
-    warn(
+    argWarnings.push(
       `ignoring unused argument(s): ${unknown.join(', ')}. ` +
         `Task '${task}' takes: ${[...union].join(', ') || '(none)'}`
     );
@@ -800,7 +802,7 @@ export function resolveRun(cfg, task, members, args) {
       ? r.project.env.replace(PLACEHOLDER_RE, (m, k) => (k in r._values ? r._values[k] : m))
       : null;
   }
-  return { runnable, skipped, envWarnings: derived.warnings };
+  return { runnable, skipped, warnings: [...argWarnings, ...derived.warnings] };
 }
 
 // Scan <dir>/.envs, parse each file's name as <env>[-<slug>] (slug optional; some projects
@@ -974,14 +976,15 @@ export function envOverrideValue(v) {
 // `export`-prefixed) in place, else append. Returns the new text and the keys applied.
 export function applyEnvOverrides(text, vars) {
   const applied = [];
+  const warnings = []; // collected (not printed) so the caller can route them into the viewer, not the screen
   let out = text;
   for (const [k, v] of Object.entries(vars || {})) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) {
-      warn(`override: skipping invalid env var name '${k}'`);
+      warnings.push(`override: skipping invalid env var name '${k}'`);
       continue;
     }
     if (v === null || typeof v === 'object') {
-      warn(`override: '${k}' must be a string value — got ${Array.isArray(v) ? 'array' : typeof v}`);
+      warnings.push(`override: '${k}' must be a string value — got ${Array.isArray(v) ? 'array' : typeof v}`);
       continue;
     }
     const line = `${k}=${envOverrideValue(v)}`;
@@ -990,7 +993,7 @@ export function applyEnvOverrides(text, vars) {
     else out += (out === '' || out.endsWith('\n') ? '' : '\n') + line + '\n';
     applied.push(k);
   }
-  return { text: out, applied };
+  return { text: out, applied, warnings };
 }
 
 // Best-effort copy to the system clipboard (zero-dep: shell out to the platform tool). Returns
@@ -1283,7 +1286,7 @@ const KILL_GRACE_MS = Number(process.env.CREW_KILL_GRACE_MS) || 5000;
 // gunicorn-style children). Within the window, extra Ctrl-C is ignored with a nudge.
 const SIGINT_FORCE_AFTER_MS = Number(process.env.CREW_FORCE_AFTER_MS) || 10000;
 
-export function runFanout(commands, { killOthers, announceExits, interactive = false, guards = [], hidden = [], saveHidden = () => {}, logWrap = true, saveWrap = () => {} }) {
+export function runFanout(commands, { killOthers, announceExits, interactive = false, notices = [], guards = [], hidden = [], saveHidden = () => {}, logWrap = true, saveWrap = () => {} }) {
   return new Promise((resolve) => {
     const results = [];
     const live = new Set();
@@ -1497,7 +1500,8 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       // project names in the filter list + hidden memory. Rows are added live by viewerRunGuards.
       const guardProcs = new Map(guards.map((g) => [g.name, { _name: g.name, _color: (s) => c.gray(s) }]));
       const names = [...commands.map((cmd) => cmd.name), ...guards.map((g) => g.name)];
-      const history = []; // { proc, text } complete lines (capped at LOG_HISTORY)
+      const history = []; // { proc, text } complete lines (capped at LOG_HISTORY); { notice:true } rows are unprefixed + always shown
+      for (const n of notices) history.push({ proc: null, text: c.yellow(n), notice: true }); // pre-run skips/warnings, shown inside the viewer (not leaked to the main screen)
       const pending = new Map(); // proc -> partial line not yet terminated
       const shown = new Set(names.filter((n) => !hidden.includes(n))); // persisted hidden applied
       let wrap = logWrap; // wrap long lines vs cut them to one row (persisted preference)
@@ -1576,8 +1580,9 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
         const w = cols();
         const out = [];
         for (const h of history) {
-          if (!matches(h.proc, h.text)) continue;
-          const line = prefixFor(h.proc) + h.text;
+          if (h.notice) { if (query && !h.text.replace(ESC, '').toLowerCase().includes(query.toLowerCase())) continue; } // notice rows ignore the project (`f`) filter, honor search
+          else if (!matches(h.proc, h.text)) continue;
+          const line = (h.notice ? '' : prefixFor(h.proc)) + h.text;
           if (wrap) for (const rr of splitRows(line, w)) out.push(rr);
           else out.push(cutRow(line, w));
         }
@@ -1767,7 +1772,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
           // Copy the FILTERED view (current project + keyword filters) as full lines — ANSI
           // stripped, `[name]` prefixed, ignoring the wrap/cut display transform. Not the whole
           // history; not the on-screen window — exactly what the filters select.
-          const lines = history.filter((h) => matches(h.proc, h.text)).map((h) => `[${h.proc._name}] ${h.text.replace(ESC, '')}`);
+          const lines = history.filter((h) => !h.notice && matches(h.proc, h.text)).map((h) => `[${h.proc._name}] ${h.text.replace(ESC, '')}`); // notice rows are crew meta, not log output
           const tool = lines.length ? clipboardCopy(lines.join('\n') + '\n') : 'empty';
           copyMsg = !lines.length
             ? c.dim('nothing to copy (filtered view is empty)')
@@ -1903,6 +1908,7 @@ export function wireRun(userPath, runnable, members, { overrides = {} }) {
     .map((m) => ({ name: m.name, tokens: projectIdentity(m.project).tokens, origin: originOf(m.project.local) || m.project.local, local: m.project.local }));
   const tmpDir = join(crewHomeFor(userPath), 'tmp');
   const tempPaths = [];
+  const warnings = []; // override warnings, collected (not printed) so the caller can route them into the viewer
   // Trigger set for `whenLocal` overrides: every project being started (self included).
   const running = runnable.map((r) => r.name);
   for (const r of runnable) {
@@ -1923,11 +1929,13 @@ export function wireRun(userPath, runnable, members, { overrides = {} }) {
     baseText = baseText.replace(/\r\n?/g, '\n');
     mkdirSync(tmpDir, { recursive: true });
     const out = join(tmpDir, `${sanitize(r.name)}.env`);
-    writeFileSync(out, applyEnvOverrides(wireText(baseText, myPeers), overrideVars).text);
+    const ov = applyEnvOverrides(wireText(baseText, myPeers), overrideVars);
+    for (const w of ov.warnings) warnings.push(`${r.name}: ${w}`);
+    writeFileSync(out, ov.text);
     tempPaths.push(out);
     r.resolved = r.resolved.replace(/\{envfile\}/g, shellQuote(out));
   }
-  return { cleanup: () => tempPaths.forEach((p) => { try { unlinkSync(p); } catch {} }) };
+  return { cleanup: () => tempPaths.forEach((p) => { try { unlinkSync(p); } catch {} }), warnings };
 }
 
 // ==================== selection ====================
@@ -2009,18 +2017,23 @@ export async function cmdRun(flags, task, rest) {
   if (!members) return;
   validateMemberPaths(members);
 
-  const { runnable, skipped, envWarnings } = resolveRun(cfg, task, members, args);
-  for (const s of skipped) console.log(`skipping ${s} (no task '${task}')`);
-  for (const wn of envWarnings || []) warn(wn);
+  const { runnable, skipped, warnings } = resolveRun(cfg, task, members, args);
 
   // Materialize wired env files (fills {envfile}); fresh per run, cleaned up after.
   // Env overrides come from local.json (machine-local, untracked) so secrets never hit the config.
   const overrides = loadMachine(flags).overrides || {};
-  const { cleanup } = wireRun(userPath, runnable, members, { overrides });
+  const { cleanup, warnings: wireWarnings } = wireRun(userPath, runnable, members, { overrides });
 
   const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
 
   const interactive = isLong && process.stdin.isTTY && process.stdout.isTTY;
+  // Skips + warnings (from resolveRun AND wireRun's env overrides). When the interactive viewer owns
+  // an alternate screen, printing these to the MAIN screen would leave them as scrollback residue
+  // once the viewer exits (the "spirit" of the run). So in interactive mode feed them INTO the viewer
+  // as notice rows; otherwise (piped / run-to-completion — no alt screen) print inline as before.
+  const allWarnings = [...(warnings || []), ...(wireWarnings || [])];
+  const notices = [...skipped.map((s) => `skipping ${s} (no task '${task}')`), ...allWarnings];
+  if (!interactive) { for (const s of skipped) console.log(`skipping ${s} (no task '${task}')`); for (const wn of allWarnings) warn(wn); }
   // Guards gate `start`. Interactive: pass the specs to runFanout, which runs them as live rows
   // inside the viewer (so the screen appears immediately) and gates the spawn. Non-interactive:
   // run them here (prints the ✓/✗ block, aborts on failure) before anything starts.
@@ -2045,6 +2058,7 @@ export async function cmdRun(flags, task, rest) {
       killOthers: true,
       announceExits: true,
       interactive,
+      notices,
       guards: guardSpecs,
       hidden: loadHiddenLog(flags),
       saveHidden: (h) => saveHiddenLog(flags, h),
@@ -2954,8 +2968,10 @@ async function configForm(flags, opts = {}) {
         const info = s.info ? s.info(form) : '';
         if (info) { Rn.push(''); Rn.push('  ' + info); }
       }
-      // ---- compose ----
-      let out = '\x1b[H\x1b[2J';
+      // ---- compose ---- (home + per-row \x1b[K, NEVER a full-screen \x1b[2J: 2J pushes the erased
+      // lines into scrollback on some terminals, making the editor "scrollable". The graph pager and
+      // log viewer avoid it the same way — every row is rewritten each frame, so [K is enough.)
+      let out = '\x1b[H';
       out += '\x1b[K ' + '\x1b[1mcrew\x1b[22m' + '\x1b[90m  ·  config editor\x1b[39m' + '\r\n';
       for (let r = 0; r < body; r++) out += '\x1b[K ' + padP(L[r] || '', LW) + ' \x1b[90m│\x1b[39m ' + (Rn[r] || '') + '\r\n';
       // ---- footer ----
