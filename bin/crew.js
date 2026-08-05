@@ -469,6 +469,75 @@ function graphFooter({ mode, total, sel, vis, shown, hasRef, showRef, warn = '',
   return ` ${parts.join(' · ')} `;
 }
 
+// Split one stdin `data` chunk into individual key tokens — a single read can bundle several
+// keystrokes (fast typing, paste, PTY batching, e.g. space+Enter arriving as " \r"). An escape
+// sequence (CSI `\x1b[…<final>`, SS3 `\x1bO…`, incl. SGR mouse ending in M/m) stays one token;
+// everything else is one char. Lets a key handler process a coalesced chunk key-by-key.
+function splitKeys(s) {
+  const out = [];
+  for (let i = 0; i < s.length; ) {
+    if (s[i] === '\x1b' && (s[i + 1] === '[' || s[i + 1] === 'O')) {
+      let j = i + 2;
+      while (j < s.length && !/[A-Za-z~]/.test(s[j])) j++; // params run until the final letter/~
+      out.push(s.slice(i, j + 1)); i = j + 1;
+    } else if (s[i] === '\x1b' && s[i + 1] !== undefined) { out.push(s.slice(i, i + 2)); i += 2; } // ESC + key (Alt-x)
+    else { out.push(s[i]); i++; }
+  }
+  return out;
+}
+
+// A right-anchored multiselect panel that OVERLAYS a graph view (the `crew graph` pager and the
+// start/workspace/claude selector both use it for the `f` node filter). The graph stays drawn to
+// the left; the caller paints `.rows(h)` over the screen's rightmost columns each frame and feeds
+// keys to `.key(k)`. `.key` returns 'apply' (close, take `.selected`), 'cancel' (close, discard),
+// 'change' (stay open, repaint) or null (ignored). Self-contained: own cursor, scroll and selection
+// — no screen clear, so unlike a full-screen `menu()` the graph never disappears. `esc`/`q` cancel.
+function makeFilterPanel(items, { paint, title = 'Show nodes' } = {}) {
+  const disp = (s) => [...s.replace(/\x1b\[[0-9;]*m/g, '')].length;         // display width, ANSI-stripped
+  const colOf = (n) => { const f = paint && paint.get && paint.get(n); return typeof f === 'function' ? f : (x) => x; };
+  const nameMax = items.reduce((m, n) => Math.max(m, disp(n)), 0);
+  const innerW = Math.max(disp(title) + 4, nameMax + 6);                    // "─ title ─" and " ▸[x] name" both fit
+  const H = '─';
+  let selected = new Set(items), cursor = 0, scroll = 0, active = false;
+  const pad = (s, cur) => { const body = s + ' '.repeat(Math.max(0, innerW - disp(s))); return '│' + (cur ? '\x1b[7m' + body + '\x1b[27m' : body) + '│'; };
+  return {
+    get active() { return active; },
+    get selected() { return selected; },
+    get width() { return innerW + 2; },                                     // │ … │
+    open(pre) { const p = (pre || []).filter((n) => items.includes(n)); selected = new Set(p.length ? p : items); cursor = 0; scroll = 0; active = true; },
+    close() { active = false; },
+    key(k) {
+      if (k === '\x1b' || k === 'q') return 'cancel';
+      if (k === '\r' || k === '\n') return 'apply';
+      if (k === 'j' || k === '\x1b[B') cursor = Math.min(items.length - 1, cursor + 1);
+      else if (k === 'k' || k === '\x1b[A') cursor = Math.max(0, cursor - 1);
+      else if (k === ' ') { const n = items[cursor]; selected.has(n) ? selected.delete(n) : selected.add(n); }
+      else if (k === 'a') selected = items.every((n) => selected.has(n)) ? new Set() : new Set(items);
+      else return null;
+      return 'change';
+    },
+    // Boxed panel as an array of full rows, capped to `maxH` (scrolls the item list to keep the cursor in view).
+    rows(maxH) {
+      const chrome = 4;                                                     // title border + separator + hint + bottom border
+      const vis = Math.max(1, Math.min(items.length, (maxH || items.length + chrome) - chrome));
+      if (cursor < scroll) scroll = cursor; else if (cursor >= scroll + vis) scroll = cursor - vis + 1;
+      scroll = Math.max(0, Math.min(scroll, Math.max(0, items.length - vis)));
+      const up = scroll > 0, down = scroll + vis < items.length;           // more items off-screen?
+      const t = `${H} ${title} `;
+      const out = ['┌' + t + H.repeat(Math.max(0, innerW - disp(t) - 1)) + (up ? '↑' : H) + '┐'];
+      for (let i = 0; i < vis; i++) {
+        const idx = scroll + i, n = items[idx], cur = idx === cursor;
+        out.push(pad(` ${cur ? '▸' : ' '}${selected.has(n) ? '[x]' : '[ ]'} ${cur ? n : colOf(n)(n)}`, cur));
+      }
+      out.push('├' + H.repeat(innerW - 1) + (down ? '↓' : H) + '┤');
+      const hint = ' space·a·↵·esc';
+      out.push('│' + hint + ' '.repeat(Math.max(0, innerW - disp(hint))) + '│');
+      out.push('└' + H.repeat(innerW) + '┘');
+      return out;
+    },
+  };
+}
+
 export const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 
 // ---------------------------------------------------------------------------
@@ -2274,6 +2343,7 @@ async function graphSelect(flags, cfg, opts = {}) {
   if (!shown.size) shown = new Set(nodes);
   for (const n of [...active]) if (!shown.has(n)) active.delete(n); // a hidden node can't be run
   let cursor = [...nodes].find((n) => shown.has(n)) || nodes[0];
+  const panel = makeFilterPanel(nodes, { paint, title: 'Show nodes' }); // `f` overlays this on the graph's right
   const remoteEnv = selEnv != null ? resolveEnvs(cfg, nodes, selEnv).resolved : new Map(); // where each service is deployed (crew resolve) — shown for the ones NOT run locally
   // Keep box widths STABLE across select/deselect. 'local' and a node's remote env differ in length, and
   // toggling one would change that box's width and reflow the whole (now order-sensitive) layout — nodes
@@ -2304,8 +2374,21 @@ async function graphSelect(flags, cfg, opts = {}) {
       const split = cpw(connectivityStatus(cfg, depEdges, [...active], false)) > 0; // non-verbose returns islands text only when disconnected
       const bar = graphFooter({ mode: 'select', total: nodes.length, sel: active.size, vis: shown.size, hasRef, showRef, warn: split ? '⚠ not connected' : '' });
       out += '\x1b[K\x1b[7m' + bar + ' '.repeat(Math.max(0, cols - cpw(bar))) + '\x1b[0m'; // one full-width reverse-video footer
+      if (panel.active) {                                                                 // filter panel overlays the graph's right columns (graph stays visible)
+        const pr = panel.rows(R), col = Math.max(1, cols - panel.width + 1);
+        for (let i = 0; i < pr.length && i < R; i++) out += `\x1b[${i + 1};${col}H` + pr[i];
+        out += '\x1b[0m';
+      }
       w(out);
     };
+    let snap = null; // pre-open state captured when `f` opens the panel, so esc can revert
+    const previewShown = (list) => { // live preview while toggling: update the graph now, DON'T persist (that waits for Enter)
+      shown = new Set(list);
+      for (const n of [...active]) if (!shown.has(n)) active.delete(n); // a hidden node can't be run
+      if (!shown.has(cursor)) cursor = nodes.find((n) => shown.has(n)) || cursor;
+      layout = draw();
+    };
+    const restoreSnap = () => { if (!snap) return; shown = new Set(snap.shown); active = new Set(snap.active); cursor = snap.cursor; layout = draw(); };
     const moveH = (d) => { const p = layout.place.get(cursor), list = layout.layers[p.layer], i = list.indexOf(cursor); cursor = list[Math.max(0, Math.min(list.length - 1, i + d))]; };
     const moveV = (d) => { let l = layout.place.get(cursor).layer + d; while (l >= 0 && l < layout.layers.length && !layout.layers[l].length) l += d; if (l < 0 || l >= layout.layers.length || !layout.layers[l].length) return; const cx = layout.place.get(cursor).cx; let best = layout.layers[l][0], bd = Infinity; for (const n of layout.layers[l]) { const dd = Math.abs(layout.place.get(n).cx - cx); if (dd < bd) { bd = dd; best = n; } } cursor = best; };
     const hitTest = (col, row) => { // SGR 1-based screen (col,row) -> node whose box contains it, else null
@@ -2313,57 +2396,44 @@ async function graphSelect(flags, cfg, opts = {}) {
       for (const n of nodes) { const p = layout.place.get(n); if (p && gx >= p.x0 && gx < p.x0 + p.w && gy >= p.y0 && gy < p.y0 + p.h) return n; }
       return null;
     };
-    const onData = (buf) => {
-      const k = buf.toString();
-      const m = k.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/); // SGR mouse: btn;col;row + M(press)/m(release)
+    // Handle ONE key. Returns true once the selector has resolved (so onData stops feeding the rest of a
+    // coalesced chunk — e.g. Enter then 'q' arriving as one read must apply the filter AND still quit).
+    const handleKey = (key) => {
+      const m = key.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/); // SGR mouse: btn;col;row + M(press)/m(release)
       if (m) {
+        if (panel.active) return false;                                                  // ignore mouse while the filter panel is open
         const btn = +m[1];
-        if (m[4] === 'M' && btn === 64) { top -= 3; repaint(); return; }                 // wheel up
-        if (m[4] === 'M' && btn === 65) { top += 3; repaint(); return; }                 // wheel down
-        if (m[4] === 'M' && (btn & 0b11) === 0 && !(btn & 0b1100000)) {                  // left-button press (not motion/wheel)
+        if (m[4] === 'M' && btn === 64) { top -= 3; repaint(); return false; }            // wheel up
+        if (m[4] === 'M' && btn === 65) { top += 3; repaint(); return false; }            // wheel down
+        if (m[4] === 'M' && (btn & 0b11) === 0 && !(btn & 0b1100000)) {                   // left-button press (not motion/wheel)
           const hit = hitTest(+m[2], +m[3]);
           if (hit) { cursor = hit; active.has(hit) ? active.delete(hit) : active.add(hit); layout = draw(); repaint(); }
         }
-        return;
+        return false;
       }
-      if (k === '\x03' || k === 'q' || k === '\x1b') { cleanup(); return resolve(null); }
-      if (k === '\r' || k === '\n') { cleanup(); return resolve([...active]); }
-      if (k === 'r' && hasRef) { showRef = !showRef; saveGraphRefs(flags, showRef); layout = draw(); repaint(); return; }
-      if (k === 'f') return void openFilter();
-      if (k === ' ') { active.has(cursor) ? active.delete(cursor) : active.add(cursor); }
-      else if (k === 'a') { active = [...shown].every((n) => active.has(n)) ? new Set() : new Set(shown); } // all/none among the VISIBLE nodes
-      else if (k === '\x1b[C' || k === 'l') moveH(1);
-      else if (k === '\x1b[D' || k === 'h') moveH(-1);
-      else if (k === '\x1b[B' || k === 'j') moveV(1);
-      else if (k === '\x1b[A' || k === 'k') moveV(-1);
-      else return;
+      if (panel.active) { // filter panel owns keys while open: space previews live, Enter confirms + persists, esc/q revert
+        const r = panel.key(key);
+        if (r === 'change') previewShown([...panel.selected]);                           // graph updates on every toggle (no persist yet)
+        else if (r === 'apply') { if (panel.selected.size) saveGraphShown(flags, [...shown]); else restoreSnap(); panel.close(); } // Enter: keep + persist (nothing left -> revert)
+        else if (r === 'cancel') { restoreSnap(); panel.close(); }                       // esc/q: back to the pre-open graph
+        repaint();
+        return false;
+      }
+      if (key === '\x03' || key === 'q' || key === '\x1b') { cleanup(); resolve(null); return true; }
+      if (key === '\r' || key === '\n') { cleanup(); resolve([...active]); return true; }
+      if (key === 'r' && hasRef) { showRef = !showRef; saveGraphRefs(flags, showRef); layout = draw(); repaint(); return false; }
+      if (key === 'f') { snap = { shown: new Set(shown), active: new Set(active), cursor }; panel.open([...shown]); repaint(); return false; }
+      if (key === ' ') { active.has(cursor) ? active.delete(cursor) : active.add(cursor); }
+      else if (key === 'a') { active = [...shown].every((n) => active.has(n)) ? new Set() : new Set(shown); } // all/none among the VISIBLE nodes
+      else if (key === '\x1b[C' || key === 'l') moveH(1);
+      else if (key === '\x1b[D' || key === 'h') moveH(-1);
+      else if (key === '\x1b[B' || key === 'j') moveV(1);
+      else if (key === '\x1b[A' || key === 'k') moveV(-1);
+      else return false;
       layout = draw(); repaint();
+      return false;
     };
-    // 'f' opens the node-visibility filter (shared idea with the crew-graph pager): pause our raw-mode
-    // loop, run menu() on the same alt screen, then re-assert raw + mouse and repaint. Hidden nodes are
-    // dropped from the run set (can't start what you can't see) and the filter is persisted (graphShown).
-    let menuOpen = false;
-    const openFilter = async () => {
-      if (menuOpen) return;
-      menuOpen = true;
-      stdin.removeListener('data', onData);
-      w('\x1b[?1000l\x1b[?1006l\x1b[2J\x1b[H\x1b[?25h'); // disable mouse, clear, show cursor for the menu
-      let picked = null;
-      try { picked = await menu({ title: 'Show which nodes?', items: nodes, label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)), multi: true, preselected: [...shown], erase: true }); } catch { picked = null; }
-      if (Array.isArray(picked) && picked.length) {
-        shown = new Set(picked);
-        saveGraphShown(flags, picked);
-        for (const n of [...active]) if (!shown.has(n)) active.delete(n);
-        if (!shown.has(cursor)) cursor = nodes.find((n) => shown.has(n)) || cursor;
-        layout = draw();
-      }
-      if (stdin.setRawMode) stdin.setRawMode(true);
-      stdin.resume();
-      w('\x1b[?25l\x1b[?1000h\x1b[?1006h'); // hide cursor + re-enable mouse (still on the alt screen)
-      stdin.on('data', onData);
-      menuOpen = false;
-      repaint();
-    };
+    const onData = (buf) => { for (const key of splitKeys(buf.toString())) if (handleKey(key)) return; };
     if (stdin.setRawMode) stdin.setRawMode(true);
     stdin.resume();
     w('\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1006h'); // alt screen + hide cursor + no-wrap + SGR mouse reporting
@@ -2373,15 +2443,20 @@ async function graphSelect(flags, cfg, opts = {}) {
 }
 
 // Show a (possibly tall) block in an ALTERNATE-SCREEN pager — like the log viewer, so it vanishes on
-// exit instead of scrolling into the terminal history. Vertical scroll only. 'f' resolves 'filter'
-// (caller opens a node picker); 'q' resolves 'quit'. Non-TTY: plain print (so `| less`, redirects, CI work).
+// exit instead of scrolling into the terminal history. Vertical scroll only. 'r' resolves 'refs',
+// 'q' resolves 'quit'. If `meta.filter` is given ({nodes, shown, paint, render(shownSet)->text,
+// onApply(list)}), 'f' overlays a node-filter panel IN PLACE (graph stays visible) and re-renders on
+// apply — otherwise 'f' resolves 'filter'. Non-TTY: plain print (so `| less`, redirects, CI work).
 function pagerView(text, meta = {}) {
   const stdout = process.stdout, stdin = process.stdin;
   if (!stdout.isTTY || !stdin.isTTY) { console.log(text); return Promise.resolve('quit'); }
   return new Promise((resolve) => {
-    const lines = text.split('\n');
+    let lines = text.split('\n');
     const w = (x) => stdout.write(x);
     const wasRaw = stdin.isRaw;
+    const filter = meta.filter || null;
+    const panel = filter ? makeFilterPanel(filter.nodes, { paint: filter.paint, title: 'Show nodes' }) : null;
+    let shown = filter ? new Set(filter.shown) : null, shownCount = meta.shown, snap = null;
     let top = 0;
     const body = () => Math.max(1, (stdout.rows || 24) - 1);
     const maxTop = () => Math.max(0, lines.length - body());
@@ -2394,8 +2469,13 @@ function pagerView(text, meta = {}) {
       let out = '\x1b[H';
       for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + (li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
       const scroll = lines.length > R ? `↑↓ scroll ${top + 1}-${Math.min(top + R, lines.length)}/${lines.length}` : ''; // position only when it overflows
-      const bar = graphFooter({ mode: 'pager', shown: meta.shown, total: meta.total, hasRef: meta.hasRef, showRef: meta.showRef, scroll });
+      const bar = graphFooter({ mode: 'pager', shown: shownCount, total: meta.total, hasRef: meta.hasRef, showRef: meta.showRef, scroll });
       out += '\x1b[K\x1b[7m' + bar + ' '.repeat(Math.max(0, cols - cpw(bar))) + '\x1b[0m'; // full-width footer bar
+      if (panel && panel.active) {                                                        // filter panel overlays the graph's right columns
+        const pr = panel.rows(R), col = Math.max(1, cols - panel.width + 1);
+        for (let i = 0; i < pr.length && i < R; i++) out += `\x1b[${i + 1};${col}H` + pr[i];
+        out += '\x1b[0m';
+      }
       w(out);
     };
     const cleanup = () => {
@@ -2405,17 +2485,29 @@ function pagerView(text, meta = {}) {
       if (stdin.setRawMode) stdin.setRawMode(wasRaw);
       stdin.pause();
     };
-    const onData = (buf) => {
-      const k = buf.toString(), R = body();
-      if (k === 'q' || k === '\x03') { cleanup(); return resolve('quit'); }
-      if (k === 'f') { cleanup(); return resolve('filter'); }
-      if (k === 'r') { cleanup(); return resolve('refs'); }
-      if (k === 'j' || k === '\x1b[B') top += 1;
-      else if (k === 'k' || k === '\x1b[A') top -= 1;
-      else if (k === ' ' || k === '\x1b[6~') top += R;
-      else if (k === 'b' || k === '\x1b[5~') top -= R;
+    const filterRender = (set) => { shown = new Set(set); shownCount = shown.size; lines = filter.render(shown).split('\n'); };
+    // Handle ONE key; returns true once the pager has resolved, so onData stops feeding the rest of a
+    // coalesced chunk (e.g. Enter then 'q' arriving as one read must apply the filter AND still quit).
+    const handleKey = (key) => {
+      const R = body();
+      if (panel && panel.active) { // filter panel owns keys while open: space previews live, Enter confirms, esc/q revert
+        const r = panel.key(key);
+        if (r === 'change') filterRender(panel.selected);                    // graph re-renders on every toggle (no persist yet)
+        else if (r === 'apply') { if (shown.size) filter.onApply([...shown]); else filterRender(snap); panel.close(); } // Enter: persist (nothing left -> revert)
+        else if (r === 'cancel') { filterRender(snap); panel.close(); }      // esc/q: back to the pre-open graph
+        paint(); return false;
+      }
+      if (key === 'q' || key === '\x03') { cleanup(); resolve('quit'); return true; }
+      if (key === 'f') { if (panel) { snap = new Set(shown); panel.open([...shown]); paint(); return false; } cleanup(); resolve('filter'); return true; }
+      if (key === 'r') { cleanup(); resolve('refs'); return true; }
+      if (key === 'j' || key === '\x1b[B') top += 1;
+      else if (key === 'k' || key === '\x1b[A') top -= 1;
+      else if (key === ' ' || key === '\x1b[6~') top += R;
+      else if (key === 'b' || key === '\x1b[5~') top -= R;
       paint();
+      return false;
     };
+    const onData = (buf) => { for (const key of splitKeys(buf.toString())) if (handleKey(key)) return; };
     if (stdin.setRawMode) stdin.setRawMode(true);
     stdin.resume();
     w('\x1b[?1049h\x1b[?25l\x1b[?7l'); // alt screen, hide cursor, disable line-wrap
@@ -2439,12 +2531,13 @@ export async function cmdGraph(flags, rest) {
     if (!shown.size) shown = new Set(allNodes);
     const hasRef = ref.length > 0;                      // only offer the toggle when there ARE reference edges
     if (!process.stdout.isTTY || !process.stdin.isTTY) return void console.log(draw(shown, showRef));
-    for (;;) {                                          // page the graph; 'f' filters nodes, 'r' toggles reference edges, then re-draws
-      const reason = await pagerView(draw(shown, showRef), { mode: 'pager', shown: shown.size, total: allNodes.length, hasRef, showRef });
+    for (;;) {                                          // page the graph; 'f' overlays a node filter in place, 'r' toggles reference edges
+      const reason = await pagerView(draw(shown, showRef), {
+        mode: 'pager', shown: shown.size, total: allNodes.length, hasRef, showRef,
+        filter: { nodes: allNodes, shown, paint, render: (s) => draw(s, showRef), onApply: (list) => { shown = new Set(list); saveGraphShown(flags, list); } },
+      });
       if (reason === 'refs') { showRef = !showRef; saveGraphRefs(flags, showRef); continue; }
-      if (reason !== 'filter') break;
-      const picked = await menu({ title: 'Show which nodes?', items: allNodes, multi: true, preselected: allNodes.filter((n) => shown.has(n)), label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)), erase: true });
-      if (picked && picked.length) { shown = new Set(picked); saveGraphShown(flags, picked); }
+      break;                                            // 'quit'
     }
     return;
   }

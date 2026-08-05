@@ -1,16 +1,14 @@
 source tests/e2e/lib.exp
-crun start env=x
-must {enter run}
+crun graph
+must {web}
 sleep 1
 send "f"
 must {Show nodes}
 sleep 1
-send "j"
-sleep 1
 send " "
+must {2/3}
 sleep 1
-send "\r"
-sleep 1
-must {1/2 sel}
+send "\033"
+must {3/3 shown}
 send "q"
-want_done
+want_exit 0
