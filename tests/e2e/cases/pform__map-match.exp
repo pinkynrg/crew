@@ -1,0 +1,24 @@
+source tests/e2e/lib.exp
+crun edit
+must {api}
+sleep 1
+send "l"
+sleep 1
+send "jjjjjj"
+sleep 1
+send "\r"
+must {add env}
+sleep 1
+send "\r"
+send "qa"
+send "\r"
+send "qa-api.demo.dev"
+send "\r"
+sleep 1
+send "\033"
+sleep 1
+send "s"
+must {saved}
+send "q"
+want_exit 0
+config_has {"qa": "qa-api.demo.dev"}

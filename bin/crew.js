@@ -490,8 +490,8 @@ function splitKeys(s) {
       let j = i + 2;
       while (j < s.length && !/[A-Za-z~]/.test(s[j])) j++; // params run until the final letter/~
       out.push(s.slice(i, j + 1)); i = j + 1;
-    } else if (s[i] === '\x1b' && s[i + 1] !== undefined) { out.push(s.slice(i, i + 2)); i += 2; } // ESC + key (Alt-x)
-    else { out.push(s[i]); i++; }
+    } else if (s[i] === '\x1b' && (s[i + 1] === 'b' || s[i + 1] === 'f')) { out.push(s.slice(i, i + 2)); i += 2; } // Alt-b / Alt-f only (word move) — the sole meta bindings
+    else { out.push(s[i]); i++; } // everything else, INCLUDING a lone ESC: its following key stays a separate token (so a coalesced "esc then s" isn't misread as Alt-s)
   }
   return out;
 }
@@ -2888,7 +2888,8 @@ async function configForm(flags, opts = {}) {
 
   const serializeMatch = (m) => (m && typeof m === 'object' && !Array.isArray(m))
     ? Object.entries(m).flatMap(([e, v]) => (Array.isArray(v) ? v : [v]).map((h) => `${e}=${h}`)).join(' ') : '';
-  const parseMatch = (s) => { const m = {}; for (const tok of String(s).trim().split(/\s+/).filter(Boolean)) { const eq = tok.indexOf('='); if (eq <= 0 || !tok.slice(eq + 1)) continue; const e = tok.slice(0, eq), h = tok.slice(eq + 1); m[e] = m[e] == null ? h : [].concat(m[e], h); } return m; };
+  const toRows = (obj) => Object.entries(obj || {}).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, String(x)]) : [[k, String(v)]]));
+  const toObj = (rows, multi) => { const o = {}; for (const [k, v] of rows) { const kk = String(k).trim(); if (!kk) continue; if (multi) o[kk] = o[kk] == null ? String(v) : [].concat(o[kk], String(v)); else o[kk] = String(v); } return o; };
   const setOrDel = (o, key, v, keep) => { if (keep == null ? !!v : keep) o[key] = v; else delete o[key]; };
   const usersOf = (n) => Object.entries(cfg.projects).filter(([, p]) => (p.guards || []).includes(n)).map(([pn]) => pn);
 
@@ -2902,13 +2903,13 @@ async function configForm(flags, opts = {}) {
       { key: 'runner', label: 'runner', kind: 'text' },
       { key: 'env', label: 'env', kind: 'text' },
       { key: 'local', label: 'local', kind: 'text' },
-      { key: 'match', label: 'match', kind: 'text' },
+      { key: 'match', label: 'match', kind: 'map', multiVal: true, kLabel: 'env', vLabel: 'host' },
       { key: 'guards', label: 'guards', kind: 'multiselect', options: () => Object.keys(cfg.guards) },
       { key: 'defaultBranch', label: 'branch', kind: 'text' },
-      { key: 'tasks', label: 'tasks', kind: 'readonly' },
+      { key: 'tasks', label: 'tasks', kind: 'map', kLabel: 'task', vLabel: 'command' },
     ],
-    load: (n) => { const p = cfg.projects[n] || {}; return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', env: p.env || '', local: p.local || '', match: serializeMatch(p.match), guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: Object.keys(p.tasks || {}).join(', '), isNew: false, orig: n }; },
-    blank: () => ({ name: '', path: '', type: 'other', runner: '', env: '', local: '', match: '', guards: [], defaultBranch: '', tasks: '', isNew: true, orig: null }),
+    load: (n) => { const p = cfg.projects[n] || {}; return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', env: p.env || '', local: p.local || '', match: (p.match && typeof p.match === 'object' && !Array.isArray(p.match)) ? { ...p.match } : {}, guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: { ...(p.tasks || {}) }, isNew: false, orig: n }; },
+    blank: () => ({ name: '', path: '', type: 'other', runner: '', env: '', local: '', match: {}, guards: [], defaultBranch: '', tasks: {}, isNew: true, orig: null }),
     save: (f) => {
       const name = String(f.name).trim();
       if (!name) return 'name is required';
@@ -2922,7 +2923,8 @@ async function configForm(flags, opts = {}) {
       setOrDel(proj, 'env', String(f.env).trim());
       setOrDel(proj, 'local', String(f.local).trim());
       setOrDel(proj, 'defaultBranch', String(f.defaultBranch).trim());
-      const m = parseMatch(f.match); setOrDel(proj, 'match', m, Object.keys(m).length > 0);
+      setOrDel(proj, 'match', f.match, f.match && Object.keys(f.match).length > 0);
+      setOrDel(proj, 'tasks', f.tasks, f.tasks && Object.keys(f.tasks).length > 0);
       setOrDel(proj, 'guards', f.guards, Array.isArray(f.guards) && f.guards.length > 0);
       cfg.projects[name] = proj; writeUserConfig(path, cfg); return null;
     },
@@ -2962,6 +2964,7 @@ async function configForm(flags, opts = {}) {
   let sel = selectable();
   let li = 0, focus = 'left', fi = 0, editing = false, buf = '', caret = 0;
   let form = null, pendingDel = null, msg = '', panel = null, panelField = null, leftTop = 0;
+  let mapEdit = null, editTarget = null, newKey = ''; // mapEdit = {field, rows:[[k,v]], ri}; editTarget routes an inline edit's commit (null=field, 'val'/'newkey'/'newval'=map cell)
 
   const secOf = () => sections[sel[li].si];
   const loadForm = () => { const cur = sel[li]; form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); };
@@ -3019,6 +3022,7 @@ async function configForm(flags, opts = {}) {
         let val;
         if (editing && on && (fld.kind === 'text' || fld.kind === 'name')) val = buf.slice(0, caret) + '\x1b[7m' + (buf[caret] || ' ') + '\x1b[27m' + buf.slice(caret + 1); // block caret at its position
         else if (fld.kind === 'multiselect') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : '\x1b[90m(none)\x1b[39m'; }
+        else if (fld.kind === 'map') { const o = form[fld.key] || {}, ks = Object.keys(o); val = ks.length ? (fld.multiVal ? serializeMatch(o) : ks.join(', ')) : '\x1b[90m(none)\x1b[39m'; }
         else if (fld.kind === 'readonly') val = String(form[fld.key]) ? String(form[fld.key]) : '\x1b[90m(none)\x1b[39m';
         else val = String(form[fld.key]) ? String(form[fld.key]) : `\x1b[90m(${fld.req ? 'required' : 'optional'})\x1b[39m`;
         const lab = padP(fld.label, 8);
@@ -3035,12 +3039,42 @@ async function configForm(flags, opts = {}) {
       if (pendingDel) parts = [`\x1b[31mDelete '${pendingDel}'?\x1b[39m`, ...(s.key === 'guards' && usersOf(pendingDel).length ? [`used by ${usersOf(pendingDel).length} project(s)`] : []), 'y delete', 'esc cancel'];
       else if (panel) parts = panelField.kind === 'choice' ? ['↑↓ pick', '⏎ apply', 'esc cancel'] : ['space toggle', 'a all', '⏎ apply', 'esc cancel'];
       else if (editing) parts = ['type', '←→ move', '⌥← word', '⏎ commit', 'esc cancel'];
+      else if (mapEdit) parts = ['↑↓ row', '⏎ edit', 'd remove', 'esc done'];
       else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', '→ fields', 'q quit'];
       else { const fld = s.fields[fi]; const eh = fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew ? [] : ['d delete']), '← list', 'q quit'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
       out += '\x1b[K' + footerBar(footerText(parts), C);
       // ---- multiselect overlay (paints over the right columns; graph filter panel reused) ----
       if (panel) { const pr = panel.rows(body); const col = Math.max(1, C - panel.width + 1); for (let i = 0; i < pr.length && i < body; i++) out += `\x1b[${i + 2};${col}H` + pr[i]; out += '\x1b[0m'; }
+      // ---- map-editor popup overlay (key → value rows + a green "+ add" row; cells use the inline editor) ----
+      if (mapEdit) {
+        const F = mapEdit, fld = F.field, H2 = '─';
+        const dw = (x) => [...String(x).replace(/\x1b\[[0-9;]*m/g, '')].length;
+        const caretCell = () => buf.slice(0, caret) + '\x1b[7m' + (buf[caret] || ' ') + '\x1b[27m' + buf.slice(caret + 1);
+        const kW = Math.max(dw(fld.kLabel || 'key'), 3, ...F.rows.map(([k]) => dw(k)));
+        const vW = 22, addTxt = `+ add ${fld.kLabel || 'row'}`;
+        const innerW = Math.max(dw(fld.label) + 4, kW + 2 + vW + 2, addTxt.length + 3);
+        const rowsTxt = [];
+        F.rows.forEach(([k, v], i) => {
+          const on = F.ri === i;
+          const vc = (editing && editTarget === 'val' && on) ? caretCell() : clipP(String(v), vW);
+          rowsTxt.push({ text: ` ${padP(String(k), kW)}  ${vc}`, on: on && !editing });
+        });
+        if (editing && (editTarget === 'newkey' || editTarget === 'newval')) {
+          const kc = editTarget === 'newkey' ? caretCell() : padP(newKey, kW);
+          const vc = editTarget === 'newval' ? caretCell() : '';
+          rowsTxt.push({ text: ` ${kc}  ${vc}`, on: false });
+        } else rowsTxt.push({ text: ` \x1b[32m${addTxt}\x1b[39m`, on: F.ri === F.rows.length });
+        const t = `${H2} ${fld.label} `;
+        const box = ['┌' + t + H2.repeat(Math.max(0, innerW - dw(t))) + '┐'];
+        for (const r of rowsTxt) { const b2 = r.text + ' '.repeat(Math.max(0, innerW - dw(r.text))); box.push('│' + (r.on ? '\x1b[7m' + b2 + '\x1b[27m' : b2) + '│'); }
+        box.push('├' + H2.repeat(innerW) + '┤');
+        const hint = editing ? ' type · ↵ ok · esc' : ' ↑↓ · ↵ · d · esc';
+        box.push('│' + hint + ' '.repeat(Math.max(0, innerW - dw(hint))) + '│', '└' + H2.repeat(innerW) + '┘');
+        const col = Math.max(1, C - (innerW + 2) + 1);
+        for (let i = 0; i < box.length && i < body; i++) out += `\x1b[${i + 2};${col}H` + box[i];
+        out += '\x1b[0m';
+      }
       w(out);
     };
 
@@ -3059,8 +3093,13 @@ async function configForm(flags, opts = {}) {
       if (editing) {
         const wordL = (i) => { let j = i; while (j > 0 && buf[j - 1] === ' ') j--; while (j > 0 && buf[j - 1] !== ' ') j--; return j; };
         const wordR = (i) => { let j = i; while (j < buf.length && buf[j] !== ' ') j++; while (j < buf.length && buf[j] === ' ') j++; return j; };
-        if (k === '\r' || k === '\n') { form[secOf().fields[fi].key] = buf; editing = false; }
-        else if (k === '\x1b') editing = false;                                                              // bare esc cancels the edit
+        if (k === '\r' || k === '\n') { // route the commit: a map cell, a chained new key->value, or a plain field
+          if (editTarget === 'val') { mapEdit.rows[mapEdit.ri][1] = buf; editing = false; editTarget = null; }
+          else if (editTarget === 'newkey') { newKey = buf; buf = ''; caret = 0; editTarget = 'newval'; } // key entered -> now the value (stay editing)
+          else if (editTarget === 'newval') { if (newKey.trim()) { mapEdit.rows.push([newKey.trim(), buf]); mapEdit.ri = mapEdit.rows.length - 1; } editing = false; editTarget = null; }
+          else { form[secOf().fields[fi].key] = buf; editing = false; }
+        }
+        else if (k === '\x1b') { editing = false; editTarget = null; }                                       // bare esc cancels the edit
         else if (k === '\x1b[D') caret = Math.max(0, caret - 1);                                             // ← left
         else if (k === '\x1b[C') caret = Math.min(buf.length, caret + 1);                                    // → right
         else if (k === '\x1bb' || k === '\x1b[1;3D' || k === '\x1b[1;5D') caret = wordL(caret);              // Option/Ctrl + ← : word left
@@ -3073,6 +3112,16 @@ async function configForm(flags, opts = {}) {
         else if (k === '\x15') { buf = buf.slice(caret); caret = 0; }                                        // Ctrl-U kill to start
         else if (k === '\x0b') buf = buf.slice(0, caret);                                                    // Ctrl-K kill to end
         else if (k.length === 1 && k >= ' ') { buf = buf.slice(0, caret) + k + buf.slice(caret); caret++; }  // insert printable at caret
+        else return false;
+        repaint(); return false;
+      }
+      if (mapEdit) { // map-editor row navigation (cell edits are handled by the `editing` branch above)
+        const F = mapEdit, n = F.rows.length;
+        if (k === 'k' || k === '\x1b[A') F.ri = Math.max(0, F.ri - 1);
+        else if (k === 'j' || k === '\x1b[B') F.ri = Math.min(n, F.ri + 1);                                  // n = the "+ add" row
+        else if (k === '\r' || k === '\n') { if (F.ri === n) { editing = true; buf = ''; caret = 0; editTarget = 'newkey'; newKey = ''; } else { editing = true; buf = String(F.rows[F.ri][1]); caret = buf.length; editTarget = 'val'; } }
+        else if (k === 'd') { if (F.ri < n) { F.rows.splice(F.ri, 1); F.ri = Math.min(F.ri, F.rows.length); } }
+        else if (k === '\x1b' || k === 'q' || k === '\x03') { form[F.field.key] = toObj(F.rows, F.field.multiVal); mapEdit = null; } // commit rows back to the form field
         else return false;
         repaint(); return false;
       }
@@ -3093,7 +3142,7 @@ async function configForm(flags, opts = {}) {
       else if (k === '\r' || k === '\n') {
         if (fld.kind === 'text' || fld.kind === 'name') { editing = true; buf = String(form[fld.key] || ''); caret = buf.length; }
         else if (fld.kind === 'choice' || fld.kind === 'multiselect') openPanel(fld);
-        else if (fld.kind === 'readonly' && fld.key === 'tasks') msg = 'edit tasks via: crew edit <name>';
+        else if (fld.kind === 'map') { mapEdit = { field: fld, rows: toRows(form[fld.key]), ri: 0 }; }
       }
       else if (k === 's') doSave();
       else if (k === 'd') { if (!form.isNew) pendingDel = form.orig; }

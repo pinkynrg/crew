@@ -137,7 +137,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   the pre-open state. In the selector, hidden nodes are also dropped from the run set. `r` toggles refs.
   Both UIs process input one key at a time via a `handleKey` fed from `splitKeys` — one stdin chunk can
   bundle several keys (e.g. Enter+`q` as `"\rq"`), so a panel-closing key mid-chunk must not swallow the
-  rest (Enter applies the filter AND the trailing `q` still quits).
+  rest (Enter applies the filter AND the trailing `q` still quits). `splitKeys` keeps CSI/SS3 sequences
+  whole and treats a lone `\x1b` as its own key — it merges `ESC`+char ONLY for `Alt-b`/`Alt-f` (word-jump),
+  so a coalesced "Esc then s" (`"\x1bs"`) parses as `[esc, s]`, not a bogus `Alt-s` (which would be dropped).
   Both prefs are machine-local (`local.json`) and shared across the two UIs: `graphRefs` (show-refs) +
   `graphShown` (node filter) — see `loadGraphRefs`/`saveGraphRefs`/`loadGraphShown`/`saveGraphShown`,
   mirroring `loadLogWrap`.
@@ -175,10 +177,11 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `name` (the item key, rename-aware, same editor),
   `choice` (`⏎` opens a SINGLE-select `makeFilterPanel` popup — radio `(•)`, `↑↓`+`⏎`, e.g. project `type`),
   `multiselect` (`⏎` opens the same panel in MULTI mode — checkboxes `[x]`, e.g. a project's guard links),
-  `readonly` (display only, e.g. project
-  `tasks`, still edited via the `crew edit <name>` wizard). A project's `match` is edited as the compact
-  `env=host …` string (same as the wizard) and parsed on save; `save` starts from the existing object so
-  `tasks`/unmanaged keys survive. Each section owns `load/save/del`, so adding Overrides is just another
+  `map` (`⏎` opens an inline **row editor** popup — `key → value` rows + a green `+ add`; `⏎` on a row edits
+  its value via the same line-editor, `+ add` chains key→value, `d` removes; e.g. project `tasks` (task→cmd)
+  and `match` (`multiVal` groups duplicate keys into host-arrays); the form carries these as objects,
+  serialized on `save`), `readonly` (display only). `save` starts from the existing object so unmanaged/future
+  keys survive. Each section owns `load/save/del`, so adding Overrides is just another
   descriptor. Renaming a guard migrates its key AND every `project.guards` link; deleting a guard unlinks it
   everywhere (warns if in use). `↑↓` move, `tab`/`←→` switch pane, `q` quits (only `s` writes; field edits
   and the multiselect overlay are discarded on `esc`). Same raw-mode primitives as the graph views
