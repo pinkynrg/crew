@@ -2601,6 +2601,61 @@ export async function cmdPull(flags, url) {
 
 
 
+// Derive a project's fields from the folder on disk (best-effort) — used by the config editor when a NEW
+// project's `path` points at an existing folder, to prefill the empty fields. Reads package.json / lockfiles
+// / manifests / .envs / dev scripts. Returns { type, runner, env, local, start }; `match` (deployed host)
+// is intentionally not derived — the guess was too weak, so the user always fills it by hand.
+export function detectProject(abs) {
+  const rd = (rel) => { try { return readFileSync(join(abs, rel), 'utf8'); } catch { return ''; } };
+  const isFile = (rel) => { try { return statSync(join(abs, rel)).isFile(); } catch { return false; } };
+  const ls = (rel) => { try { return readdirSync(join(abs, rel)); } catch { return []; } };
+  let pkg = null; try { pkg = JSON.parse(rd('package.json') || 'null'); } catch { /* malformed */ }
+  const deps = pkg ? { ...pkg.dependencies, ...pkg.devDependencies } : {};
+  const scripts = (pkg && pkg.scripts) || {};
+
+  const FRONT = ['react', 'vue', 'next', 'nuxt', '@angular/core', 'vite', 'svelte', 'gatsby', 'solid-js', 'preact'];
+  let type = '';
+  if (FRONT.some((d) => d in deps) || isFile('index.html') || isFile('public/index.html')) type = 'frontend';
+  else if (pkg || ['go.mod', 'manage.py', 'pyproject.toml', 'requirements.txt', 'Gemfile', 'pom.xml', 'Cargo.toml', 'composer.json'].some(isFile)) type = 'backend';
+
+  let runner = '';
+  if (isFile('yarn.lock')) runner = 'yarn {task}';
+  else if (isFile('pnpm-lock.yaml')) runner = 'pnpm {task}';
+  else if (pkg) runner = 'npm run {task}';
+  else if (isFile('Makefile') || isFile('makefile')) runner = 'make {task}';
+
+  const envNames = ls('.envs').filter((f) => f !== '.gitkeep' && isFile(join('.envs', f)));
+  let env = '';
+  const envText = envNames.map((f) => rd(join('.envs', f))).join('\n');
+  if (envNames.length) {
+    const cp = (a, b) => { let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++; return a.slice(0, i); };
+    let pre = envNames.reduce(cp);
+    let suf = [...envNames.map((s) => [...s].reverse().join('')).reduce(cp)].reverse().join('');
+    pre = pre.replace(/[^/._-]*$/, ''); suf = suf.replace(/^[^/._-]*/, '');
+    const labels = envNames.map((s) => s.slice(pre.length, s.length - suf.length || undefined));
+    env = labels.some((l) => l) ? `.envs/${pre}{env}${suf}` : `.envs/${envNames[0]}`;
+  }
+
+  let port = (envText.match(/(?:^|\n)\s*(?:export\s+)?PORT\s*=\s*(\d{2,5})/) || [])[1] || '';
+  if (!port) for (const s of Object.values(scripts)) { const m = String(s).match(/(?:--port|-p)[ =](\d{2,5})/); if (m) { port = m[1]; break; } }
+  if (!port) port = ((rd('vite.config.ts') || rd('vite.config.js') || rd('next.config.js')).match(/port\s*[:=]\s*(\d{2,5})/) || [])[1] || '';
+  if (!port) port = ('next' in deps || 'react-scripts' in deps) ? '3000' : ('vite' in deps ? '5173' : '');
+  const local = port ? `http://localhost:${port}` : '';
+
+  let start = '';
+  const cand = Object.keys(scripts).find((k) => /^(dev|start|serve)[:.]/.test(k)) || ['dev', 'start', 'serve'].find((k) => k in scripts);
+  if (cand) {
+    let cmd = String(scripts[cand]).replace(/(?:\.\/)?\.envs\/\S+/g, '{envfile}');
+    const sufTok = /[:.]/.test(cand) ? cand.split(/[:.]/).pop() : '';
+    if (sufTok) cmd = cmd.replace(new RegExp('\\b' + sufTok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g'), '{env}');
+    start = cmd;
+  }
+
+  // NB: `match` (deployed hosts) is deliberately NOT derived — guessing it from env-file hosts vs the
+  // folder name was too unreliable. It's the one field the user always fills by hand.
+  return { type, runner, env, local, start };
+}
+
 // Two-pane raw-mode config editor. Left column stacks every SECTION (Projects, Guards) as a name list,
 // each ending in a green "+ New" row; the right column is the highlighted item's form. The three actions
 // fall out of position + key: CREATE = a +New row (blank form), UPDATE = edit fields then `s` save, DELETE
@@ -2778,6 +2833,34 @@ async function configForm(flags, opts = {}) {
     return null;
   };
   const doDelete = (name) => { const s = secOf(), si = sel[li].si; s.del(name); reselect(si, null); focus = 'left'; msg = `removed '${name}'`; };
+  // When a NEW project's `path` points at a real folder, prefill the still-empty fields from folder signals
+  // (detectProject). Non-destructive: only blanks are filled, so it never clobbers what you typed.
+  const maybeDetect = () => {
+    if (secOf().key !== 'projects' || !form.isNew) return;
+    const pth = String(form.path || '').trim(); if (!pth) return;
+    let abs; try { abs = resolveProjectPath(pth); } catch { return; }
+    if (!pathExists(abs)) return;
+    const d = detectProject(abs), got = [];
+    if (!form.name) { form.name = pth.split(/[\\/]/).filter(Boolean).pop() || ''; if (form.name) got.push('name'); }
+    if ((!form.type || form.type === 'other') && d.type) { form.type = d.type; got.push('type'); }
+    if (!form.runner && d.runner) { form.runner = d.runner; got.push('runner'); }
+    if (!form.env && d.env) { form.env = d.env; got.push('env'); }
+    if (!form.local && d.local) { form.local = d.local; got.push('local'); }
+    if (d.start && !(form.tasks && form.tasks.start)) { form.tasks = { ...(form.tasks || {}), start: d.start }; got.push('tasks.start'); }
+    if (got.length) { dirty = true; msg = `\x1b[90mauto-filled from folder: ${got.join(', ')}\x1b[39m`; }
+  };
+  // Folder picker for the project `path` field: the subfolders of projectsDir + a "type a path…" escape
+  // (for folders elsewhere, or when no projectsDir is set). So you don't type the path from memory.
+  const TYPE_PATH = '✎ type a path…';
+  const projectDirs = () => { const d = machine.projectsDir; if (!d) return []; try { return readdirSync(resolvePath(d), { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name).sort(); } catch { return []; } };
+  const editPath = () => { editing = true; buf = String(form.path || ''); caret = buf.length; }; // fall back to typing
+  const openFolderPick = () => {
+    const dirs = projectDirs();
+    if (!dirs.length) return editPath(); // no projectsDir / no folders -> just type the path
+    panelField = { key: 'path', pick: 'folder', label: 'pick a folder' };
+    panel = makeFilterPanel([...dirs, TYPE_PATH], { paint, single: true, title: 'pick a folder' });
+    panel.open(dirs.includes(form.path) ? form.path : null);
+  };
 
   return new Promise((resolve) => {
     const w = (x) => stdout.write(x);
@@ -2882,7 +2965,7 @@ async function configForm(flags, opts = {}) {
       else if (editing) parts = ['type', '←→ move', '⌥← word', '⏎ commit', 'esc cancel'];
       else if (mapEdit) parts = ['↑↓ row', '⏎ edit', 'd remove', 'esc done'];
       else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', '→ fields', 'esc quit'];
-      else { const fld = s.fields[fi]; const eh = fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'list' || fld.kind === 'map' ? '⏎ rows' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew || s.fixed ? [] : ['d delete']), '← list', 'esc quit'].filter(Boolean); }
+      else { const fld = s.fields[fi]; const eh = (fld.key === 'path' && s.key === 'projects') ? '⏎ pick folder' : fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'list' || fld.kind === 'map' ? '⏎ rows' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew || s.fixed ? [] : ['d delete']), '← list', 'esc quit'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
       out += '\x1b[K' + footerBar(footerText(parts), C);
       // ---- modal overlay (roomy, perfectly-centered box; captures all keys until a choice runs) ----
@@ -2916,7 +2999,10 @@ async function configForm(flags, opts = {}) {
       if (modal) { const ch = modal.choices.find((c) => c.keys.includes(k)); if (ch && ch.run()) return true; repaint(); return false; } // modal captures all keys
       if (panel) {
         const r = panel.key(k);
-        if (r === 'apply') { if (panelField.kind === 'choice') { const v = [...panel.selected][0]; if (v != null) form[panelField.key] = v; } else form[panelField.key] = [...panel.selected]; panel = null; dirty = true; }
+        if (r === 'apply') {
+          if (panelField.pick === 'folder') { const v = [...panel.selected][0]; panel = null; if (v === TYPE_PATH) editPath(); else if (v != null) { form.path = v; dirty = true; maybeDetect(); } } // folder picked -> set path + auto-detect
+          else { if (panelField.kind === 'choice') { const v = [...panel.selected][0]; if (v != null) form[panelField.key] = v; } else form[panelField.key] = [...panel.selected]; panel = null; dirty = true; }
+        }
         else if (r === 'cancel') panel = null;
         repaint(); return false;
       }
@@ -2928,7 +3014,7 @@ async function configForm(flags, opts = {}) {
           else if (editTarget === 'listval') { mapEdit.rows[mapEdit.ri] = buf; editing = false; editTarget = null; } // list row = a single string
           else if (editTarget === 'newkey') { newKey = buf; buf = ''; caret = 0; editTarget = 'newval'; } // key entered -> now the value (stay editing)
           else if (editTarget === 'newval') { if (mapEdit.list) { if (buf.trim()) { mapEdit.rows.push(buf); mapEdit.ri = mapEdit.rows.length - 1; } } else if (newKey.trim()) { mapEdit.rows.push([newKey.trim(), buf]); mapEdit.ri = mapEdit.rows.length - 1; } editing = false; editTarget = null; }
-          else { form[secOf().fields[fi].key] = buf; editing = false; dirty = true; }
+          else { const fk = secOf().fields[fi].key; form[fk] = buf; editing = false; dirty = true; if (fk === 'path') maybeDetect(); } // committing a new project's path auto-fills the blanks
         }
         else if (k === '\x1b') { editing = false; editTarget = null; }                                       // bare esc cancels the edit
         else if (k === '\x1b[D') caret = Math.max(0, caret - 1);                                             // ← left
@@ -2976,7 +3062,8 @@ async function configForm(flags, opts = {}) {
       if (k === 'k' || k === '\x1b[A') fi = Math.max(0, fi - 1);
       else if (k === 'j' || k === '\x1b[B') fi = Math.min(fields.length - 1, fi + 1);
       else if (k === '\r' || k === '\n') {
-        if (fld.kind === 'text' || fld.kind === 'name') { editing = true; buf = String(form[fld.key] || ''); caret = buf.length; }
+        if (fld.key === 'path' && secOf().key === 'projects') openFolderPick(); // pick a folder (or type)
+        else if (fld.kind === 'text' || fld.kind === 'name') { editing = true; buf = String(form[fld.key] || ''); caret = buf.length; }
         else if (fld.kind === 'choice' || fld.kind === 'multiselect') openPanel(fld);
         else if (fld.kind === 'map') { mapEdit = { field: fld, rows: toRows(form[fld.key]), ri: 0, list: false }; }
         else if (fld.kind === 'list') { mapEdit = { field: fld, rows: [...(Array.isArray(form[fld.key]) ? form[fld.key] : [])], ri: 0, list: true }; }
