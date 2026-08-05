@@ -7,6 +7,6 @@ must {Delete 'vpn'}
 sleep 1
 send "y"
 must {removed 'vpn'}
-send "q"
+send "\033"
 want_exit 0
 config_hasnt {"vpn"}

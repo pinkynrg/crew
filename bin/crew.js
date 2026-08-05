@@ -465,7 +465,7 @@ function graphFooter({ mode, total, sel, vis, shown, hasRef, showRef, warn = '',
   parts.push('f filter');
   if (hasRef) parts.push(`r refs ${showRef ? 'on' : 'off'}`);
   if (mode === 'select') parts.push('enter run');
-  parts.push(mode === 'select' ? 'q cancel' : 'q quit');
+  parts.push(mode === 'select' ? 'esc cancel' : 'esc quit');
   return footerText(parts);
 }
 
@@ -522,7 +522,7 @@ function makeFilterPanel(items, { paint, title = 'Show nodes', single = false } 
     },
     close() { active = false; },
     key(k) {
-      if (k === '\x1b' || k === 'q') return 'cancel';
+      if (k === '\x1b') return 'cancel';
       if (k === 'j' || k === '\x1b[B') { cursor = Math.min(items.length - 1, cursor + 1); return 'change'; }
       if (k === 'k' || k === '\x1b[A') { cursor = Math.max(0, cursor - 1); return 'change'; }
       if (single) { if (k === '\r' || k === '\n' || k === ' ') { selected = new Set([items[cursor]]); return 'apply'; } return null; }
@@ -1232,7 +1232,7 @@ export function menu({ title, items, label, multi = false, start = 0, preselecte
       } else if (key.name === 'return' || key.name === 'enter') {
         cleanup();
         resolve(multi ? order : items[idx]);
-      } else if (key.name === 'escape' || key.name === 'q' || (key.ctrl && key.name === 'c')) {
+      } else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) {
         cleanup();
         resolve(null);
       }
@@ -1506,7 +1506,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       if (live.size === 0) {
         // If processes exited on their OWN (crash / boot failure) and the user hasn't asked to
         // quit, hold the interactive viewer open so the error stays on screen — they read it, then
-        // press q/Esc to leave. Otherwise (piped, or a user-requested stop) settle immediately.
+        // press Esc to leave. Otherwise (piped, or a user-requested stop) settle immediately.
         if (interactive && !stopRequested) {
           allStopped = true;
           viewerRepaint();
@@ -1649,13 +1649,13 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       const footerText = () => {
         if (copyMsg) return copyMsg;
         if (searching) return c.dim('search: ') + query + c.cyan('▌') + c.dim('   (Enter apply · Esc clear)');
-        if (allStopped) return c.red('■ stopped') + c.dim(' — scroll to review · [/] search · [q/esc] exit');
+        if (allStopped) return c.red('■ stopped') + c.dim(' — scroll to review · [/] search · [esc] exit');
         const pos = scroll > 0 ? c.yellow(`  ↑${scroll}`) : '';
         // Count goes RED when anything is hidden, so a suppressed project/guard is always obvious.
         const nShown = `${shown.size}/${names.length}`;
         const count = shown.size < names.length ? c.red(nShown) : c.dim(nShown);
         const q = query ? c.cyan(`  /${query}`) : '';
-        return c.dim('crew: [f] filter (') + count + c.dim(`)  [/] search  [w] ${wrap ? 'cut' : 'wrap'}  [c] copy  [q/esc] stop`) + q + pos;
+        return c.dim('crew: [f] filter (') + count + c.dim(`)  [/] search  [w] ${wrap ? 'cut' : 'wrap'}  [c] copy  [esc] stop`) + q + pos;
       };
       // Full repaint: body rows painted by absolute position (so scroll is exact), footer on the
       // last row. One batched write to minimize flicker; cursor hidden.
@@ -1812,9 +1812,9 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
           else if (btn === 65) (scrollBy(-3), (mouse = true));
         }
         if (mouse) return;
-        // Quit on q, Ctrl-C, or a bare ESC. (Arrow/PgUp keys are longer sequences like `\x1b[A`,
+        // Quit on Ctrl-C or a bare ESC. (Arrow/PgUp keys are longer sequences like `\x1b[A`,
         // so `s === '\x1b'` matches only a lone Escape.) In search mode ESC clears instead (above).
-        if (s === '\x03' || s === 'q' || s === '\x1b') return requestStop();
+        if (s === '\x03' || s === '\x1b') return requestStop();
         if (s === '/') {
           searching = true;
           return paint();
@@ -2352,7 +2352,7 @@ export function collectGraphEdges(cfg) {
 // localhost URLs match no id, so they drop out.
 // Interactive graph picker for `crew start` (and workspace / claude): navigate the dependency graph and
 // toggle which projects run. ↑↓ = layer, ←→ = neighbour in the layer, space = toggle, a = all/none,
-// enter = confirm, q/esc = cancel. Selected nodes render in their own colour and read `[local]`; the rest
+// enter = confirm, esc = cancel. Selected nodes render in their own colour and read `[local]`; the rest
 // are grayed and read `[<base env>]` (where they stay remote). Returns the picked names, null if cancelled,
 // or undefined if it can't run (non-TTY) so the caller falls back to the flat menu().
 async function graphSelect(flags, cfg, opts = {}) {
@@ -2428,7 +2428,7 @@ async function graphSelect(flags, cfg, opts = {}) {
       return null;
     };
     // Handle ONE key. Returns true once the selector has resolved (so onData stops feeding the rest of a
-    // coalesced chunk — e.g. Enter then 'q' arriving as one read must apply the filter AND still quit).
+    // coalesced chunk — e.g. Enter then esc arriving as one read must apply the filter AND still act).
     const handleKey = (key) => {
       const m = key.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/); // SGR mouse: btn;col;row + M(press)/m(release)
       if (m) {
@@ -2446,11 +2446,11 @@ async function graphSelect(flags, cfg, opts = {}) {
         const r = panel.key(key);
         if (r === 'change') previewShown([...panel.selected]);                           // graph updates on every toggle (no persist yet)
         else if (r === 'apply') { if (panel.selected.size) saveGraphShown(flags, [...shown]); else restoreSnap(); panel.close(); } // Enter: keep + persist (nothing left -> revert)
-        else if (r === 'cancel') { restoreSnap(); panel.close(); }                       // esc/q: back to the pre-open graph
+        else if (r === 'cancel') { restoreSnap(); panel.close(); }                       // esc: back to the pre-open graph
         repaint();
         return false;
       }
-      if (key === '\x03' || key === 'q' || key === '\x1b') { cleanup(); resolve(null); return true; }
+      if (key === '\x03' || key === '\x1b') { cleanup(); resolve(null); return true; }
       if (key === '\r' || key === '\n') { cleanup(); resolve([...active]); return true; }
       if (key === 'r' && hasRef) { showRef = !showRef; saveGraphRefs(flags, showRef); layout = draw(); repaint(); return false; }
       if (key === 'f') { snap = { shown: new Set(shown), active: new Set(active), cursor }; panel.open([...shown]); repaint(); return false; }
@@ -2475,7 +2475,7 @@ async function graphSelect(flags, cfg, opts = {}) {
 
 // Show a (possibly tall) block in an ALTERNATE-SCREEN pager — like the log viewer, so it vanishes on
 // exit instead of scrolling into the terminal history. Vertical scroll only. 'r' resolves 'refs',
-// 'q' resolves 'quit'. If `meta.filter` is given ({nodes, shown, paint, render(shownSet)->text,
+// esc resolves 'quit'. If `meta.filter` is given ({nodes, shown, paint, render(shownSet)->text,
 // onApply(list)}), 'f' overlays a node-filter panel IN PLACE (graph stays visible) and re-renders on
 // apply — otherwise 'f' resolves 'filter'. Non-TTY: plain print (so `| less`, redirects, CI work).
 function pagerView(text, meta = {}) {
@@ -2518,17 +2518,17 @@ function pagerView(text, meta = {}) {
     };
     const filterRender = (set) => { shown = new Set(set); shownCount = shown.size; lines = filter.render(shown).split('\n'); };
     // Handle ONE key; returns true once the pager has resolved, so onData stops feeding the rest of a
-    // coalesced chunk (e.g. Enter then 'q' arriving as one read must apply the filter AND still quit).
+    // coalesced chunk (e.g. Enter then esc arriving as one read must apply the filter AND still act).
     const handleKey = (key) => {
       const R = body();
       if (panel && panel.active) { // filter panel owns keys while open: space previews live, Enter confirms, esc/q revert
         const r = panel.key(key);
         if (r === 'change') filterRender(panel.selected);                    // graph re-renders on every toggle (no persist yet)
         else if (r === 'apply') { if (shown.size) filter.onApply([...shown]); else filterRender(snap); panel.close(); } // Enter: persist (nothing left -> revert)
-        else if (r === 'cancel') { filterRender(snap); panel.close(); }      // esc/q: back to the pre-open graph
+        else if (r === 'cancel') { filterRender(snap); panel.close(); }      // esc: back to the pre-open graph
         paint(); return false;
       }
-      if (key === 'q' || key === '\x03') { cleanup(); resolve('quit'); return true; }
+      if (key === '\x1b' || key === '\x03') { cleanup(); resolve('quit'); return true; }
       if (key === 'f') { if (panel) { snap = new Set(shown); panel.open([...shown]); paint(); return false; } cleanup(); resolve('filter'); return true; }
       if (key === 'r') { cleanup(); resolve('refs'); return true; }
       if (key === 'j' || key === '\x1b[B') top += 1;
@@ -3084,8 +3084,8 @@ async function configForm(flags, opts = {}) {
       else if (panel) parts = panelField.kind === 'choice' ? ['↑↓ pick', '⏎ apply', 'esc cancel'] : ['space toggle', 'a all', '⏎ apply', 'esc cancel'];
       else if (editing) parts = ['type', '←→ move', '⌥← word', '⏎ commit', 'esc cancel'];
       else if (mapEdit) parts = ['↑↓ row', '⏎ edit', 'd remove', 'esc done'];
-      else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', '→ fields', 'q quit'];
-      else { const fld = s.fields[fi]; const eh = fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew ? [] : ['d delete']), '← list', 'q quit'].filter(Boolean); }
+      else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', '→ fields', 'esc quit'];
+      else { const fld = s.fields[fi]; const eh = fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew ? [] : ['d delete']), '← list', 'esc quit'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
       out += '\x1b[K' + footerBar(footerText(parts), C);
       w(out);
@@ -3134,11 +3134,11 @@ async function configForm(flags, opts = {}) {
         else if (k === 'j' || k === '\x1b[B') F.ri = Math.min(n, F.ri + 1);                                  // n = the "+ add" row
         else if (k === '\r' || k === '\n') { if (F.ri === n) { editing = true; buf = ''; caret = 0; editTarget = 'newkey'; newKey = ''; } else { editing = true; buf = String(F.rows[F.ri][1]); caret = buf.length; editTarget = 'val'; } }
         else if (k === 'd') { if (F.ri < n) { F.rows.splice(F.ri, 1); F.ri = Math.min(F.ri, F.rows.length); } }
-        else if (k === '\x1b' || k === 'q' || k === '\x03') { form[F.field.key] = toObj(F.rows, F.field.multiVal); mapEdit = null; } // commit rows back to the form field
+        else if (k === '\x1b' || k === '\x03') { form[F.field.key] = toObj(F.rows, F.field.multiVal); mapEdit = null; } // esc commits rows back to the form field
         else return false;
         repaint(); return false;
       }
-      if (k === '\x03' || k === 'q') { cleanup(); resolve(); return true; }
+      if (k === '\x03' || k === '\x1b') { cleanup(); resolve(); return true; } // esc/Ctrl-C quit (sub-modes above consume esc first)
       if (focus === 'left') {
         if (k === 'k' || k === '\x1b[A') { li = Math.max(0, li - 1); loadForm(); }
         else if (k === 'j' || k === '\x1b[B') { li = Math.min(sel.length - 1, li + 1); loadForm(); }
@@ -3159,7 +3159,7 @@ async function configForm(flags, opts = {}) {
       }
       else if (k === 's') doSave();
       else if (k === 'd') { if (!form.isNew) pendingDel = form.orig; }
-      else if (k === 'h' || k === '\x1b[D' || k === '\x1b' || k === '\t') focus = 'left';
+      else if (k === 'h' || k === '\x1b[D' || k === '\t') focus = 'left';       // back to the list (esc quits the whole form)
       else return false;
       repaint(); return false;
     };
@@ -3578,7 +3578,7 @@ export function help() {
     ['start', '[args]', 'Pick projects, run their start task (local wiring)'],
     ['workspace', '', 'Pick projects, open as one VSCode window (alias: code)'],
     ['claude', '[session]', 'Pick projects, launch Claude Code (names the chat history, else auto)'],
-    ['graph', '[list]', 'Draw the dependency graph in a scroll/filter pager (f=filter nodes, q=quit; list = adjacency text)'],
+    ['graph', '[list]', 'Draw the dependency graph in a scroll/filter pager (f=filter nodes, esc=quit; list = adjacency text)'],
     ['resolve', '<env> [proj…]', 'Show the env each project resolves to for a selection (dry-run)'],
   ];
   const CONFIG = [

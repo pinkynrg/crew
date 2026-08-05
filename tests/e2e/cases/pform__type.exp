@@ -16,6 +16,6 @@ send "\r"
 sleep 1
 send "s"
 must {saved}
-send "q"
+send "\033"
 want_exit 0
 config_has {"type": "fullstack"}

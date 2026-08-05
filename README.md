@@ -299,7 +299,7 @@ colored edges, dependency arrows solid, reference arrows dashed) — a zero-depe
 renderer (`bin/graph.js`), no external tool needed:
 
 On a TTY it opens in an alternate-screen pager (scroll `↑↓`/`jk`, page `space`/`b`, `g`/`G`;
-`f` filters which nodes to show via a multiselect; `q` quits and leaves nothing in scrollback).
+`f` filters which nodes to show via a multiselect; `esc` quits and leaves nothing in scrollback).
 Piped or redirected, it prints the diagram plainly.
 
 ```sh
