@@ -198,8 +198,12 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   save; the project's `save` writes both stores (moving overrides on a rename, deleting them with the
   project), so there's no separate Overrides section. Renaming a guard migrates its key AND every
   `project.guards` link; deleting a guard unlinks it everywhere (warns if in use). A `readonly` field with a
-  `.hint` shows it as a status message on `⏎`. `↑↓` move, `tab`/`←→` switch pane, `esc` quits (only `s` writes; field edits
-  and the multiselect overlay are discarded on `esc`). Same raw-mode primitives as the graph views
+  `.hint` shows it as a status message on `⏎`. `↑↓` move, `tab`/`←→` switch pane, `s` writes. A `dirty` flag
+  is set on any field/map/pick mutation and cleared on save (or when navigating loads a fresh item); `esc`
+  quits, but if the current form is `dirty` it opens the **`modal`** — a reusable centered-box prompt
+  (`{title, lines, choices:[{keys, label, run()->doneBool}]}`) that captures every key until a choice runs:
+  here `s` save & exit / `d` discard & exit / `esc` cancel. The delete confirm uses the same `modal`
+  (`y`/`esc`). `Ctrl-C` force-quits regardless. Same raw-mode primitives as the graph views
   (`splitKeys`, alt screen, absolute cursor) and the SAME footer: every raw-mode view renders its hint line
   through the shared `footerText` (` · `-joined parts) + `footerBar` (one full-width reverse-video bar) —
   `graphFooter` also returns `footerText(parts)`, so the graph pager, selector and config editor bars are

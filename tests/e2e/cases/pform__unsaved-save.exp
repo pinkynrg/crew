@@ -1,0 +1,20 @@
+source tests/e2e/lib.exp
+crun config
+must {config editor}
+sleep 1
+send "l"
+sleep 1
+send "j"
+send "j"
+send "j"
+sleep 1
+send "\r"
+send "Z"
+send "\r"
+sleep 1
+send "\033"
+must {Unsaved changes}
+sleep 1
+send "s"
+want_exit 0
+config_has {"make {task}Z"}
