@@ -1,10 +1,10 @@
 name: Publish to npm
 
-# On every push to main: run checks, then publish to the public npm registry.
+# On every push to main: run checks + tests, refresh the coverage badge, then publish to npm.
 # Version handling is automatic:
 #   - if package.json's version is NOT yet on npm -> publish it as-is (tag it);
 #   - if it IS already on npm -> auto-bump the patch version, commit + tag, publish.
-# The bump commit is pushed with GITHUB_TOKEN and marked [skip ci], so it does not
+# Commits pushed by CI (coverage badge, version bump) are marked [skip ci] so they don't
 # retrigger this workflow. Auth is npm Trusted Publishing (OIDC) — no NPM_TOKEN secret;
 # the package's Trusted Publisher on npmjs.com must point at this repo + publish.yml, and
 # the publish job needs `id-token: write` plus npm >= 11.5.1 (installed below).
@@ -28,14 +28,16 @@ jobs:
       - run: npm ci
       - name: Syntax check
         run: node --check bin/crew.js
-      - name: Smoke test
-        run: node bin/crew.js --version
+      - name: Install expect (the E2E suite drives crew in a real PTY)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq expect
+      - name: Test (graph snapshots + expect E2E)
+        run: npm test
 
   publish:
     needs: test
     runs-on: ubuntu-latest
     permissions:
-      contents: write # push the auto-bump commit + tag
+      contents: write # push the coverage-badge + auto-bump commits + tag
       id-token: write # npm provenance
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +48,30 @@ jobs:
       - name: Upgrade npm (OIDC trusted publishing needs >= 11.5.1; npm 11 supports node 20)
         run: npm install -g npm@11
       - run: npm ci
+      - name: Install expect
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq expect
+      - name: Refresh coverage badge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm run -s test:cov > cov.txt 2>&1 || { cat cov.txt; exit 1; }
+          PCT=$(grep -m1 'All files' cov.txt | awk -F'|' '{gsub(/ /,"",$2); print $2}')
+          PCT=${PCT%.*}
+          if   [ "$PCT" -ge 90 ]; then C=brightgreen
+          elif [ "$PCT" -ge 80 ]; then C=green
+          elif [ "$PCT" -ge 70 ]; then C=yellowgreen
+          elif [ "$PCT" -ge 60 ]; then C=yellow
+          elif [ "$PCT" -ge 50 ]; then C=orange
+          else C=red; fi
+          sed -i -E "s#coverage-[0-9]+%25-[a-z]+#coverage-${PCT}%25-${C}#" README.md
+          rm -f cov.txt
+          if git diff --quiet README.md; then
+            echo "coverage badge unchanged (${PCT}%)"
+          else
+            git add README.md
+            git commit -m "ci: coverage badge ${PCT}% [skip ci]"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
       - name: Resolve version (publish as-is, or auto-bump patch)
         run: |
           git config user.name "github-actions[bot]"
