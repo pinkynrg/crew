@@ -1,21 +1,27 @@
 source tests/e2e/lib.exp
 crun config
-must {api}
+must {config editor}
+sleep 1
+send "k"
 sleep 1
 send "l"
 sleep 1
 send "j"
+sleep 1
+send "\r"
+must {add item}
+sleep 1
 send "j"
 sleep 1
 send "\r"
-must {↑↓ pick}
-sleep 1
-send "j"
-sleep 1
+send "watch"
 send "\r"
+sleep 1
+send "\033"
 sleep 1
 send "s"
 must {saved}
 send "\033"
 want_exit 0
-config_has {"type": "fullstack"}
+config_has {"watch"}
+config_has {"jest.enable": false}

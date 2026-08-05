@@ -67,7 +67,7 @@ selection, so tabs 2 and 3 open the same set you started.
 ## Quick start
 
 ```sh
-crew edit         # two-pane visual editor: add/change/delete projects, guards & overrides
+crew config         # two-pane visual editor: add/change/delete projects, guards & overrides
 crew install      # pick projects, install them (waits, reports pass/fail)
 crew start env=qa # pick projects to run locally; env = what the rest point at (remembers your pick)
 crew workspace    # open the remembered set as one VSCode window
@@ -141,7 +141,7 @@ run-less (skipped for that task, kept for `workspace`/`claude`).
 
 `defaultBranch` (optional) records the branch new work is cut from — repos differ
 (`main`/`master`/`develop`/`trunk`). It's pure metadata: `crew list` shows it as a `branch`
-line; set it in `crew edit` (a project's `branch` field). crew runs no git with it.
+line; set it in `crew config` (a project's `branch` field). crew runs no git with it.
 
 ### Placeholders & args (strict)
 
@@ -227,7 +227,7 @@ Each `overrides["<project>"]` table has two kinds of entry:
   `REACT_APP_BEEPLUGINURL` at your local `bee-loader` (exact host **and** path, which the
   host-only URL swap can't do), but leave it remote when the loader isn't running.
 
-Manage them in the visual editor — `crew edit`, then scroll the left column to the **Overrides**
+Manage them in the visual editor — `crew config`, then scroll the left column to the **Overrides**
 section (bare vars and `whenLocal` as `peer.VAR` rows are both editable there).
 
 - Overrides win over the base env file **and** the localhost URL swap; `whenLocal` wins over bare.
@@ -363,9 +363,8 @@ last pick); the selection is remembered globally. `install` is single-project: n
 Config:
 
 ```
-crew edit                              two-pane visual editor: projects, guards & overrides (add/change/delete)
-crew dir [path]                        show/set the projects dir (relative paths resolve here)
-crew config [path|edit]                print merged config / its path / open in $EDITOR
+crew config                            two-pane visual editor for everything (projects, guards, overrides, settings)
+crew config path                       print the config file path (for scripts / `cat "$(crew config path)"`)
 crew check                             validate config + local.json; list errors/warnings (alias: validate)
 crew pull <url>                        fetch config.json from a URL, install it (backs up current)
 ```
@@ -441,11 +440,11 @@ Guards run before `crew start`.
 
 ### Managing guards
 
-Everything is the **two-pane visual editor** — run `crew edit` and scroll the left column to the
+Everything is the **two-pane visual editor** — run `crew config` and scroll the left column to the
 **Guards** section: it stacks projects, guards and overrides, each with a green `+ New …` row; the
 right column is the highlighted item's form. Create with a `+ New` row, edit fields then `s` to save,
 `d` to delete (with confirm). Renaming a guard carries its project links along; on a project, `guards`
-is a checklist you toggle. `crew edit` is the only config command now — the old `crew add`/`remove`/
+is a checklist you toggle. `crew config` is the only config command now — the old `crew add`/`remove`/
 `guards …`/`overrides …` verbs and the sequential wizard were all folded into it.
 
 ## The hidden workspace file
@@ -472,7 +471,8 @@ spamming terminals) in every folder:
 { "workspaceSettings": { "jest.enable": false } }
 ```
 
-crew injects nothing by default.
+crew injects nothing by default. Edit it (and every other top-level key) in `crew config` → the
+**Settings** section — `crew config` is the single place to change anything.
 
 ## Claude sessions (stable history)
 
@@ -511,12 +511,13 @@ written back. A v1 project's single `start` block becomes `tasks.start`.
 ## Projects directory (shareable config)
 
 A project's `path` can be **relative** — it resolves against a machine-local
-**projects directory**. Set it once per machine:
+**projects directory**. Set it once per machine in `crew config` → the **Settings** section
+(the `projectsDir` field).
 
-```sh
-crew dir ~/Projects     # set it
-crew dir                # show it
-```
+Editing it warns if the directory doesn't contain your projects' folders (`⚠ N/M project
+folder(s) not found …`) — a wrong dir orphans every relative-path project. It's warn-only:
+nothing in your config is changed, and nothing is ever bulk-deleted; the fix is correcting
+the dir (or the project paths).
 
 The projects dir is stored in **`local.json`** (next to the config — `~/.config/crew/local.json`),
 **never** in `config.json`. That keeps `config.json` fully shareable. Project paths are
@@ -533,20 +534,20 @@ then short and portable:
 
 `~…`/absolute paths are still honoured as-is (escape hatch for a repo living outside the
 projects dir). A relative path with no projects dir set is a clear error pointing you at
-`crew dir`.
+`crew config` → Settings.
 
 ### Sharing a config with your team
 
 Because `config.json` never contains machine-specific data, it's directly committable:
 
-1. Keep `projects`/`guards` on relative paths (`crew dir` + `crew edit` do this).
+1. Keep `projects`/`guards` on relative paths (`crew config` → Settings sets the projects dir).
 2. Commit `config.json` (in a repo, or `git init` inside `~/.config/crew`). **Gitignore
    `local.json`** (and `workspaces/`, `sessions/`, `tmp/`) — those are machine-local/generated,
    and `local.json` may hold `overrides` secrets (dev API keys), so it must never be committed.
 3. A teammate installs it — clone/symlink to `~/.config/crew/config.json`, or fetch it
    straight from the repo with `crew pull <raw-url>` (backs up any current config; a private
-   repo needs a token/PAT in the URL). Then `crew dir <their-path>` once and everything
-   resolves; no absolute paths are ever shared.
+   repo needs a token/PAT in the URL). Then set their projects dir in `crew config` → Settings
+   once and everything resolves; no absolute paths are ever shared.
 
 `--config <path>` works too: `local.json` is always read from **beside** the config file,
 so an isolated config keeps its own machine settings.
