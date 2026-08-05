@@ -1,0 +1,3 @@
+{ "version": 2,
+  "guards": { "vpn": { "comment": "vpn is up", "command": "true", "message": "connect the vpn" } },
+  "projects": { "api": { "path": "api", "type": "backend", "guards": ["vpn"] } } }

@@ -373,7 +373,7 @@ Config:
 crew add                               wizard: create a new project
 crew edit [name]                       wizard: modify an existing project
 crew remove <name>                     delete a project (confirm) (alias: rm)
-crew guards [project]                  list/manage guards (add/remove/link/unlink)
+crew guards [project|edit]             list/manage guards; `edit` = two-pane visual editor
 crew overrides [set|remove]            list/set/remove per-project env overrides (local.json)
 crew dir [path]                        show/set the projects dir (relative paths resolve here)
 crew config [path|edit]                print merged config / its path / open in $EDITOR
@@ -456,11 +456,17 @@ All wizard/select-driven — no hand-editing:
 
 ```
 crew guards [project]    list guards (all, or just a project's), with which projects use each
+crew guards edit         two-pane visual editor: pick a guard on the left, edit its fields on the right
 crew guards add          wizard: name + comment + command + failure message, then attach to projects
 crew guards remove       pick a guard to delete (also detaches it from every project)
 crew guards link         pick a guard, then toggle which projects use it (multi-select)
 crew guards unlink       pick a guard, then pick linked projects to detach
 ```
+
+`crew guards edit` is the fastest way to eyeball and tweak the whole registry: the left column
+lists every guard plus a green `+ New guard` row, the right column is the highlighted guard's
+form. Create with the `+ New` row, edit fields then `s` to save, `d` to delete (with confirm).
+Renaming a guard carries its project links along.
 
 You can also attach guards from the project side in `crew edit <project>` (the guards
 multi-select). Both sides write the same `project.guards` list.
