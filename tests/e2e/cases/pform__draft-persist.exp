@@ -1,0 +1,31 @@
+# Edit project A's field, navigate to another item and back — the unsaved edit must persist
+# (held in the in-memory drafts), not roll back. Then save-all on exit writes it.
+source tests/e2e/lib.exp
+crun config
+must {config editor}
+sleep 1
+send "l"
+sleep 1
+# runner is field #4 (index 3): name path type runner
+send "jjj"
+sleep 1
+send "\r"
+send "Z"
+send "\r"
+sleep 1
+# back to the list, move to 'web', then back up to 'api'
+send "h"
+sleep 1
+send "j"
+sleep 1
+send "k"
+sleep 1
+# re-enter api — the unsaved "make {task}Z" must still be there
+send "l"
+sleep 1
+must {make .task.Z}
+send "\033"
+must {Unsaved changes}
+send "s"
+want_exit 0
+config_has {"make {task}Z"}
