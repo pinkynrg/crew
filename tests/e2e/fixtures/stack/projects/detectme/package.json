@@ -1,0 +1,2 @@
+{ "name": "detectme", "dependencies": { "react": "^18.0.0" },
+  "scripts": { "dev:qa": "env-cmd -f ./.envs/qa.env vite --port 5200" } }

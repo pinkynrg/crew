@@ -1,0 +1,5 @@
+source tests/e2e/lib.exp
+crun graph
+must {web}
+must {worker}
+quit_and_exit "q" 0

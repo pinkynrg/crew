@@ -1,0 +1,4 @@
+source tests/e2e/lib.exp
+crun config path
+must {config\.json}
+want_exit 0

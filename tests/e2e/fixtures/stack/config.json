@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "workspaceName": "crew",
+  "projects": {
+    "web": {
+      "path": "web",
+      "type": "frontend",
+      "env": ".envs/{env}.env",
+      "local": "http://localhost:3000",
+      "match": { "qa": "qa-web.demo.dev", "pro": "web.demo.dev" }
+    },
+    "api": {
+      "path": "api",
+      "type": "backend",
+      "env": ".envs/{env}.env",
+      "local": "http://localhost:4000",
+      "match": { "qa": "qa-api.demo.dev", "pro": "api.demo.dev" }
+    },
+    "worker": {
+      "path": "worker",
+      "type": "backend",
+      "env": ".envs/{env}.env",
+      "local": "http://localhost:4100",
+      "match": { "qa": "qa-worker.demo.dev", "pro": "worker.demo.dev" }
+    }
+  }
+}

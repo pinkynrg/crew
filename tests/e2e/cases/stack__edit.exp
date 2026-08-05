@@ -1,0 +1,21 @@
+source tests/e2e/lib.exp
+crun edit web
+must {Path}
+send "\r"
+must {Type}
+send "\r"
+must {Runner}
+send "\r"
+must {Task name}
+send "\r"
+must {Env file}
+send "\r"
+must {Local URL}
+send "\r"
+must {Match hosts}
+send "\r"
+must {Default branch}
+send "\r"
+must {Updated}
+want_exit 0
+config_has {"web"}

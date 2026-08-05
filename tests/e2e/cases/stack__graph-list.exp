@@ -1,0 +1,7 @@
+source tests/e2e/lib.exp
+crun graph list
+must {web}
+must {api}
+must {worker}
+must {no crew-project edges}
+want_exit 0

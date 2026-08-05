@@ -1,0 +1,29 @@
+source tests/e2e/lib.exp
+crun add
+must {Project name}
+send "newsvc\r"
+must {Path}
+send "web\r"
+must {Type}
+send "\r"
+must {Runner}
+send "npm run {task}\r"
+must {Task name}
+send "start\r"
+must {Command for}
+send "npm run dev\r"
+must {Task name}
+send "\r"
+must {Env file}
+send ".envs/{env}.env\r"
+must {Local URL}
+send "http://localhost:9000\r"
+must {Match hosts}
+send "pro=newsvc.demo.dev\r"
+must {Default branch}
+send "main\r"
+must {Saved project}
+want_exit 0
+config_has {"newsvc"}
+config_has {"npm run dev"}
+config_has {"newsvc.demo.dev"}

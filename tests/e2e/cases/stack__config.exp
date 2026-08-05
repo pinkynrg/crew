@@ -1,0 +1,5 @@
+source tests/e2e/lib.exp
+crun config
+must {projects}
+must {web}
+want_exit 0

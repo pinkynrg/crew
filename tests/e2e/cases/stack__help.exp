@@ -1,0 +1,5 @@
+source tests/e2e/lib.exp
+crun help
+must {USAGE}
+must {graph}
+want_exit 0

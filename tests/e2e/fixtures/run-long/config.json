@@ -1,0 +1,2 @@
+{ "version": 2, "longRunning": ["start"],
+  "projects": { "c": { "path": "c", "type": "backend", "tasks": { "start": "sh loop.sh" } } } }
