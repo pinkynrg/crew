@@ -175,12 +175,16 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   confirm. Field KINDS: `text` (a real inline line-editor with a block caret — `←/→` move, Option/Ctrl+arrow
   word-jump, Home/End or Ctrl-A/E, Ctrl-W/U/K, forward-delete, mid-string insert; pre-fills current value),
   `name` (the item key, rename-aware, same editor),
-  `choice` (`⏎` opens a SINGLE-select `makeFilterPanel` popup — radio `(•)`, `↑↓`+`⏎`, e.g. project `type`),
-  `multiselect` (`⏎` opens the same panel in MULTI mode — checkboxes `[x]`, e.g. a project's guard links),
-  `map` (`⏎` opens an inline **row editor** popup — `key → value` rows + a green `+ add`; `⏎` on a row edits
-  its value via the same line-editor, `+ add` chains key→value, `d` removes; e.g. project `tasks` (task→cmd)
-  and `match` (`multiVal` groups duplicate keys into host-arrays); the form carries these as objects,
-  serialized on `save`), `readonly` (display only). `save` starts from the existing object so unmanaged/future
+  `choice` (SINGLE-select — radio `(•)`, `↑↓`+`⏎`, e.g. project `type`),
+  `multiselect` (MULTI — checkboxes `[x]`, `space`/`a` toggle, e.g. a project's guard links),
+  `map` (a **row editor** — `key → value` rows + a green `+ add`; `⏎` on a row edits its value via the same
+  line-editor, `+ add` chains key→value, `d` removes; e.g. project `tasks` (task→cmd) and `match` (`multiVal`
+  groups duplicate keys into host-arrays); the form carries these as objects, serialized on `save`),
+  `readonly` (display only). Editing any of choice/multiselect/map **TAKES OVER the whole right pane**
+  (full width + height, left column stays for context) rather than a cramped popup — so long task commands /
+  match hosts have room, and `text`/`map` cells horizontally scroll to keep the caret in view (`editCell`).
+  choice/multiselect reuse `makeFilterPanel`'s state/keys via `bareRows(h, w)` (unboxed, full-width); the
+  graph views still use its boxed `.rows()` overlay. `save` starts from the existing object so unmanaged/future
   keys survive. Each section owns `load/save/del`, so adding Overrides is just another
   descriptor. Renaming a guard migrates its key AND every `project.guards` link; deleting a guard unlinks it
   everywhere (warns if in use). `↑↓` move, `tab`/`←→` switch pane, `q` quits (only `s` writes; field edits

@@ -531,6 +531,21 @@ function makeFilterPanel(items, { paint, title = 'Show nodes', single = false } 
       if (k === 'a') { selected = items.every((n) => selected.has(n)) ? new Set() : new Set(items); return 'change'; }
       return null;
     },
+    // Unboxed, full-WIDTH list lines (no border) for rendering INSIDE a pane rather than as an overlay —
+    // used by the config editor so a pick fills the right column like the map editor. Same cursor/scroll/marks.
+    bareRows(maxH, width) {
+      const vis = Math.max(1, Math.min(items.length, maxH));
+      if (cursor < scroll) scroll = cursor; else if (cursor >= scroll + vis) scroll = cursor - vis + 1;
+      scroll = Math.max(0, Math.min(scroll, Math.max(0, items.length - vis)));
+      const padW = (str) => str + ' '.repeat(Math.max(0, width - disp(str)));
+      const out = [];
+      for (let i = 0; i < vis; i++) {
+        const idx = scroll + i, n = items[idx], cur = idx === cursor;
+        const mark = single ? (selected.has(n) ? '(•)' : '( )') : (selected.has(n) ? '[x]' : '[ ]');
+        out.push(cur ? '\x1b[7m' + padW(` ▸ ${mark} ${n}`) + '\x1b[27m' : padW(` ${' '} ${mark} ${colOf(n)(n)}`));
+      }
+      return out;
+    },
     // Boxed panel as an array of full rows, capped to `maxH` (scrolls the item list to keep the cursor in view).
     rows(maxH) {
       const chrome = 4;                                                     // title border + separator + hint + bottom border
@@ -3013,23 +3028,52 @@ async function configForm(flags, opts = {}) {
         if (on && focus === 'left') cell = rev(cell); else if (row.kind === 'new') cell = `\x1b[32m${cell}\x1b[39m`;
         L.push(cell);
       }
-      // ---- right column ----
+      // A value being edited, windowed to `avail` cols so a long value scrolls horizontally to keep the caret in view.
+      const editCell = (avail) => { const w2 = Math.max(4, avail); const start = caret >= w2 ? caret - w2 + 1 : 0; const seg = buf.slice(start, start + w2); const cp = caret - start; return seg.slice(0, cp) + '\x1b[7m' + (seg[cp] || ' ') + '\x1b[27m' + seg.slice(cp + 1); };
+      // ---- right column ---- (a `map` field editor TAKES OVER the whole right pane — full width/height —
+      // rather than a cramped popup, so long task commands / match hosts have room; left column stays for context)
       const Rn = [];
-      Rn.push(form.isNew ? `\x1b[1mNew ${s.noun}\x1b[22m` : `\x1b[1m${s.noun[0].toUpperCase() + s.noun.slice(1)}\x1b[22m \x1b[90m·\x1b[39m ${form.name || form.orig}`);
-      Rn.push('');
-      s.fields.forEach((fld, i) => {
-        const on = focus === 'right' && i === fi;
-        let val;
-        if (editing && on && (fld.kind === 'text' || fld.kind === 'name')) val = buf.slice(0, caret) + '\x1b[7m' + (buf[caret] || ' ') + '\x1b[27m' + buf.slice(caret + 1); // block caret at its position
-        else if (fld.kind === 'multiselect') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : '\x1b[90m(none)\x1b[39m'; }
-        else if (fld.kind === 'map') { const o = form[fld.key] || {}, ks = Object.keys(o); val = ks.length ? (fld.multiVal ? serializeMatch(o) : ks.join(', ')) : '\x1b[90m(none)\x1b[39m'; }
-        else if (fld.kind === 'readonly') val = String(form[fld.key]) ? String(form[fld.key]) : '\x1b[90m(none)\x1b[39m';
-        else val = String(form[fld.key]) ? String(form[fld.key]) : `\x1b[90m(${fld.req ? 'required' : 'optional'})\x1b[39m`;
-        const lab = padP(fld.label, 8);
-        Rn.push(`  ${on && !editing ? rev(' ' + lab + ' ') : '\x1b[90m ' + lab + ' \x1b[39m'} ${clipP(val, RW - 12)}`);
-      });
-      const info = s.info ? s.info(form) : '';
-      if (info) { Rn.push(''); Rn.push('  ' + info); }
+      if (mapEdit) {
+        const F = mapEdit, fld = F.field;
+        Rn.push(`\x1b[1m${fld.label}\x1b[22m \x1b[90m· ${s.noun} ${form.name || form.orig}\x1b[39m`);
+        Rn.push('');
+        const kW = Math.min(24, Math.max(3, (fld.kLabel || 'key').length, ...F.rows.map(([k]) => [...String(k)].length)));
+        const valAvail = Math.max(8, RW - kW - 6);
+        F.rows.forEach(([k, v], i) => {
+          const on = F.ri === i;
+          const kc = padP(clipP(String(k), kW), kW);
+          const vc = (editing && editTarget === 'val' && on) ? editCell(valAvail) : clipP(String(v), valAvail);
+          const line = ` ${on && !editing ? '▸' : ' '} ${kc}  ${vc}`;
+          Rn.push(on && !editing ? rev(padP(line, RW)) : line);
+        });
+        if (editing && (editTarget === 'newkey' || editTarget === 'newval')) {
+          const kc = editTarget === 'newkey' ? editCell(kW) : padP(clipP(newKey, kW), kW);
+          const vc = editTarget === 'newval' ? editCell(valAvail) : '';
+          Rn.push(`   ${kc}  ${vc}`);
+        } else {
+          const addOn = F.ri === F.rows.length;
+          Rn.push(addOn ? rev(padP(`  ▸ + add ${fld.kLabel || 'row'}`, RW)) : `    \x1b[32m+ add ${fld.kLabel || 'row'}\x1b[39m`);
+        }
+      } else if (panel) {
+        Rn.push(`\x1b[1m${panelField.label}\x1b[22m \x1b[90m· ${s.noun} ${form.name || form.orig}\x1b[39m`);
+        Rn.push('');
+        for (const ln of panel.bareRows(body - 2, RW)) Rn.push(ln);
+      } else {
+        Rn.push(form.isNew ? `\x1b[1mNew ${s.noun}\x1b[22m` : `\x1b[1m${s.noun[0].toUpperCase() + s.noun.slice(1)}\x1b[22m \x1b[90m·\x1b[39m ${form.name || form.orig}`);
+        Rn.push('');
+        s.fields.forEach((fld, i) => {
+          const on = focus === 'right' && i === fi;
+          let val;
+          if (editing && on && (fld.kind === 'text' || fld.kind === 'name')) val = editCell(RW - 12); // block caret, scrolls if long
+          else if (fld.kind === 'multiselect') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : '\x1b[90m(none)\x1b[39m'; }
+          else if (fld.kind === 'map') { const o = form[fld.key] || {}, ks = Object.keys(o); val = ks.length ? (fld.multiVal ? serializeMatch(o) : ks.join(', ')) : '\x1b[90m(none)\x1b[39m'; }
+          else val = String(form[fld.key]) ? String(form[fld.key]) : `\x1b[90m(${fld.req ? 'required' : 'optional'})\x1b[39m`;
+          const lab = padP(fld.label, 8);
+          Rn.push(`  ${on && !editing ? rev(' ' + lab + ' ') : '\x1b[90m ' + lab + ' \x1b[39m'} ${(editing && on && (fld.kind === 'text' || fld.kind === 'name')) ? val : clipP(val, RW - 12)}`);
+        });
+        const info = s.info ? s.info(form) : '';
+        if (info) { Rn.push(''); Rn.push('  ' + info); }
+      }
       // ---- compose ----
       let out = '\x1b[H\x1b[2J';
       out += '\x1b[K ' + '\x1b[1mcrew\x1b[22m' + '\x1b[90m  ·  config editor\x1b[39m' + '\r\n';
@@ -3044,37 +3088,6 @@ async function configForm(flags, opts = {}) {
       else { const fld = s.fields[fi]; const eh = fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew ? [] : ['d delete']), '← list', 'q quit'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
       out += '\x1b[K' + footerBar(footerText(parts), C);
-      // ---- multiselect overlay (paints over the right columns; graph filter panel reused) ----
-      if (panel) { const pr = panel.rows(body); const col = Math.max(1, C - panel.width + 1); for (let i = 0; i < pr.length && i < body; i++) out += `\x1b[${i + 2};${col}H` + pr[i]; out += '\x1b[0m'; }
-      // ---- map-editor popup overlay (key → value rows + a green "+ add" row; cells use the inline editor) ----
-      if (mapEdit) {
-        const F = mapEdit, fld = F.field, H2 = '─';
-        const dw = (x) => [...String(x).replace(/\x1b\[[0-9;]*m/g, '')].length;
-        const caretCell = () => buf.slice(0, caret) + '\x1b[7m' + (buf[caret] || ' ') + '\x1b[27m' + buf.slice(caret + 1);
-        const kW = Math.max(dw(fld.kLabel || 'key'), 3, ...F.rows.map(([k]) => dw(k)));
-        const vW = 22, addTxt = `+ add ${fld.kLabel || 'row'}`;
-        const innerW = Math.max(dw(fld.label) + 4, kW + 2 + vW + 2, addTxt.length + 3);
-        const rowsTxt = [];
-        F.rows.forEach(([k, v], i) => {
-          const on = F.ri === i;
-          const vc = (editing && editTarget === 'val' && on) ? caretCell() : clipP(String(v), vW);
-          rowsTxt.push({ text: ` ${padP(String(k), kW)}  ${vc}`, on: on && !editing });
-        });
-        if (editing && (editTarget === 'newkey' || editTarget === 'newval')) {
-          const kc = editTarget === 'newkey' ? caretCell() : padP(newKey, kW);
-          const vc = editTarget === 'newval' ? caretCell() : '';
-          rowsTxt.push({ text: ` ${kc}  ${vc}`, on: false });
-        } else rowsTxt.push({ text: ` \x1b[32m${addTxt}\x1b[39m`, on: F.ri === F.rows.length });
-        const t = `${H2} ${fld.label} `;
-        const box = ['┌' + t + H2.repeat(Math.max(0, innerW - dw(t))) + '┐'];
-        for (const r of rowsTxt) { const b2 = r.text + ' '.repeat(Math.max(0, innerW - dw(r.text))); box.push('│' + (r.on ? '\x1b[7m' + b2 + '\x1b[27m' : b2) + '│'); }
-        box.push('├' + H2.repeat(innerW) + '┤');
-        const hint = editing ? ' type · ↵ ok · esc' : ' ↑↓ · ↵ · d · esc';
-        box.push('│' + hint + ' '.repeat(Math.max(0, innerW - dw(hint))) + '│', '└' + H2.repeat(innerW) + '┘');
-        const col = Math.max(1, C - (innerW + 2) + 1);
-        for (let i = 0; i < box.length && i < body; i++) out += `\x1b[${i + 2};${col}H` + box[i];
-        out += '\x1b[0m';
-      }
       w(out);
     };
 
