@@ -119,10 +119,34 @@
   #config .cfg-graph figcaption { margin:0 0 .8rem; font-size:.78rem; letter-spacing:.14em; text-transform:uppercase; font-family:ui-monospace,Menlo,monospace; color:var(--accent); }
   #config .cfg-graph pre { display:inline-block; text-align:left; margin:0; padding:0; background:none; border:none; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:13px; line-height:1.15; overflow-x:auto; }
 
+  /* grid children must be allowed to shrink below their content, or a wide code block forces the
+     whole column wider than the viewport and the page scrolls sideways. */
+  #top .top-grid > *, #config .config-grid > * { min-width:0; }
+
   @media (max-width:840px){
     #top .top-grid { grid-template-columns:1fr; }
     #config .config-grid { grid-template-columns:1fr; }
     .nav nav a.hidephone { display:none; }
+  }
+
+  /* phones */
+  @media (max-width:560px){
+    .nav .wrap { gap:.7rem; height:54px; }
+    .nav .brand { font-size:1.2rem; }
+    .nav nav { gap:.75rem; font-size:.85rem; }
+    .nav .ghbtn { padding:.3rem .6rem; }
+    #themeToggle { width:32px; height:28px; font-size:.9rem; }
+    section { padding:2.4rem 0; }
+    #top .pitch-col h1 { font-size:1.5rem; }
+    #top .tail { min-height:0; margin-bottom:1.2rem; }   /* don't reserve 3 lines on a phone — it's just a gap */
+    .cmd { max-width:none; font-size:.86rem; padding:.65rem .8rem; }
+    .cmd button { padding:.24rem .5rem; }
+    #config .term pre { font-size:11px; padding:.85rem .9rem; line-height:1.45; }
+    #config .cfg-graph pre { font-size:12px; }
+    ol.steps li { padding:1rem 1.05rem; gap:.85rem; }
+    ol.steps li::before { width:30px; height:30px; }
+    footer .wrap { gap:.8rem 1.4rem; }
+    footer nav { margin-left:0; width:100%; gap:1.2rem; }
   }
 </style>
 </head>
@@ -272,8 +296,8 @@
       <li>
         <div>
           <span class="t">Register your projects, or write the config file manually</span>
-          <pre class="step-cmd"><span class="p">$</span> crew add</pre>
-          <p>A short wizard for each (its path, start command, and the host(s) it's served under), or write the <code>config.json</code> yourself, as shown above.</p>
+          <pre class="step-cmd"><span class="p">$</span> crew config</pre>
+          <p>A two-pane visual editor: pick a folder and crew prefills each project (path, start command, type), or write the <code>config.json</code> yourself, as shown above.</p>
         </div>
       </li>
       <li>
