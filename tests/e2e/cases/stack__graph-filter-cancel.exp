@@ -10,5 +10,5 @@ must {2/3}
 sleep 1
 send "\033"
 must {3/3 shown}
-send "q"
+send "\033"
 want_exit 0

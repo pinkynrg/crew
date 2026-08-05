@@ -4,5 +4,5 @@ must {config editor}
 must {PROJECTS}
 must {api}
 must {backend}
-send "q"
+send "\033"
 want_exit 0

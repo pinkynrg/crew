@@ -21,6 +21,6 @@ send "\033"
 sleep 1
 send "s"
 must {saved}
-send "q"
+send "\033"
 want_exit 0
 config_has {"build": "make build"}

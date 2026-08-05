@@ -4,5 +4,5 @@ must {enter run}
 send "\r"
 must {tick}
 sleep 1
-send "q"
+send "\033"
 want_done

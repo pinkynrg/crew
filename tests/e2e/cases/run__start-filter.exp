@@ -12,5 +12,5 @@ sleep 1
 send "\r"
 sleep 1
 must {1/2 sel}
-send "q"
+send "\033"
 want_done

@@ -10,5 +10,5 @@ sleep 1
 send "\r"
 sleep 1
 must {2/3}
-send "q"
+send "\033"
 want_exit 0

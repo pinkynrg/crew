@@ -121,7 +121,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   graph as a laid-out ASCII diagram (boxes, per-source colored double-line dep edges, thin single
   reference edges, `╦╤` box-connect T-junctions) — our own zero-dep layered-DAG renderer, no external
   tool. On a TTY it's shown in an alternate-screen pager (`pagerView`: `↑↓` scroll — shown only when the
-  graph overflows — `f` opens the node filter, `r` toggles reference edges, `q` quits leaving no
+  graph overflows — `f` opens the node filter, `r` toggles reference edges, `esc` quits leaving no
   scrollback); piped/redirected → plain print. `crew graph list` prints the adjacency text instead.
   Both graph UIs — the pager AND the start/workspace/claude selector (`graphSelect`) — share one footer
   builder `graphFooter({mode, total, sel, vis, shown, hasRef, showRef, warn, scroll})` (order: state → move
@@ -133,11 +133,11 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   UIs share one ref filter (`e => showRef || !e.ref`) and one node-visibility filter: `f` overlays a
   right-anchored multiselect panel (`makeFilterPanel`) ON the graph's rightmost columns — the graph stays
   drawn (no screen clear, unlike a full-screen `menu()`) and updates LIVE: `space`/`a` toggle a node and
-  redraw the graph immediately (a snapshot is taken on open), `↵` confirms + persists, `esc`/`q` revert to
+  redraw the graph immediately (a snapshot is taken on open), `↵` confirms + persists, `esc` reverts to
   the pre-open state. In the selector, hidden nodes are also dropped from the run set. `r` toggles refs.
   Both UIs process input one key at a time via a `handleKey` fed from `splitKeys` — one stdin chunk can
-  bundle several keys (e.g. Enter+`q` as `"\rq"`), so a panel-closing key mid-chunk must not swallow the
-  rest (Enter applies the filter AND the trailing `q` still quits). `splitKeys` keeps CSI/SS3 sequences
+  bundle several keys (e.g. Enter then esc as `"\r\x1b"`), so a mode-closing key mid-chunk must not swallow
+  the rest (Enter applies/commits AND the trailing esc still acts). `splitKeys` keeps CSI/SS3 sequences
   whole and treats a lone `\x1b` as its own key — it merges `ESC`+char ONLY for `Alt-b`/`Alt-f` (word-jump),
   so a coalesced "Esc then s" (`"\x1bs"`) parses as `[esc, s]`, not a bogus `Alt-s` (which would be dropped).
   Both prefs are machine-local (`local.json`) and shared across the two UIs: `graphRefs` (show-refs) +
@@ -187,7 +187,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   graph views still use its boxed `.rows()` overlay. `save` starts from the existing object so unmanaged/future
   keys survive. Each section owns `load/save/del`, so adding Overrides is just another
   descriptor. Renaming a guard migrates its key AND every `project.guards` link; deleting a guard unlinks it
-  everywhere (warns if in use). `↑↓` move, `tab`/`←→` switch pane, `q` quits (only `s` writes; field edits
+  everywhere (warns if in use). `↑↓` move, `tab`/`←→` switch pane, `esc` quits (only `s` writes; field edits
   and the multiselect overlay are discarded on `esc`). Same raw-mode primitives as the graph views
   (`splitKeys`, alt screen, absolute cursor) and the SAME footer: every raw-mode view renders its hint line
   through the shared `footerText` (` · `-joined parts) + `footerBar` (one full-width reverse-video bar) —
@@ -218,7 +218,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `splitRows`/`repaint` explode into hundreds of thousands of rows (which previously wedged the viewer). `f` opens the `menu` multiselect (preselected =
   `shown`); applying repaints from history, so **select none = blank screen** and re-showing a
   project brings its recent lines back. Footer pinned to row R via a DECSTBM scroll region
-  (`\x1b[1;R-1r`). `Ctrl-C`/`q` -> `requestStop` (shared graceful-stop; raw mode swallows
+  (`\x1b[1;R-1r`). `Ctrl-C`/`esc` -> `requestStop` (shared graceful-stop; raw mode swallows
   SIGINT). `menu()` pauses stdin + drops raw mode on close, so `openFilter` re-asserts
   `setRawMode(true)`+`resume()` after or keys go dead. `detachKeys` (called in `settle`) resets
   the region + leaves the alternate screen. No-op when piped/CI (`viewer` stays null).
@@ -237,7 +237,7 @@ No unit-test framework. Two suites, both run by `npm test`:
   overrides, and the runner: `crew start` (picker → run-to-completion AND streamed viewer + teardown),
   `workspace`/`claude` (via `code`/`claude` stubs on `PATH`), env wiring + guards. Interactive tips:
   `spawn`-in-a-proc needs `global spawn_id`; the graph `pager`/picker/viewer are raw-mode alt-screen so
-  quit them (`q`/Ctrl-C) or they hang; `longRunning: []` makes `crew start` run-to-completion (auto-exit
+  quit them (`esc`/Ctrl-C) or they hang; `longRunning: []` makes `crew start` run-to-completion (auto-exit
   0); `crew start` REQUIRES `env=<name>` (errors before the picker without it — pass `env=x`).
   Coverage: `npm run test:cov` (c8 over `NODE_V8_COVERAGE`);
   it's black-box so it works per-language (Go `-cover`+`GOCOVERDIR`, Python coverage.py) — same tests.

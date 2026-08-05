@@ -11,5 +11,5 @@ must {space toggle}
 sleep 1
 send "\033"
 sleep 1
-send "q"
+send "\033"
 want_exit 0

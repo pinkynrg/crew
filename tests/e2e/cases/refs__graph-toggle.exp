@@ -5,5 +5,5 @@ sleep 1
 send "r"
 sleep 1
 must {r refs off}
-send "q"
+send "\033"
 want_exit 0
