@@ -120,10 +120,15 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   connected. `crew graph` (`collectGraphEdges` → `renderAsciiGraph` in `bin/graph.js`) draws the
   graph as a laid-out ASCII diagram (boxes, per-source colored double-line dep edges, thin single
   reference edges, `╦╤` box-connect T-junctions) — our own zero-dep layered-DAG renderer, no external
-  tool. On a TTY it's shown in an alternate-screen pager (`pagerView`: scroll, `f` opens a `menu()`
-  node filter, `r` toggles reference edges on/off — the footer shows `refs on`/`off`, offered only when
-  the graph has any ref edges — `q` quits leaving no scrollback); piped/redirected → plain print. `crew graph list`
-  prints the adjacency text instead.
+  tool. On a TTY it's shown in an alternate-screen pager (`pagerView`: `↑↓` scroll — shown only when the
+  graph overflows — `f` opens a `menu()` node filter, `r` toggles reference edges, `q` quits leaving no
+  scrollback); piped/redirected → plain print. `crew graph list` prints the adjacency text instead.
+  Both graph UIs — the pager AND the start/workspace/claude selector (`graphSelect`) — share one footer
+  builder `graphFooter({mode, shown, total, hasRef, showRef, warn, scroll})` (order: state → move → `f`/`r`
+  toggles → action → exit; the `shown/total` count turns RED when not all nodes are shown/selected) and
+  one ref filter (`e => showRef || !e.ref`). `r` toggles refs in both. Both prefs are machine-local
+  (`local.json`): `graphRefs` (shared show-refs) + `graphShown` (the pager's node filter) — see
+  `loadGraphRefs`/`saveGraphRefs`/`loadGraphShown`/`saveGraphShown`, mirroring `loadLogWrap`.
 - Reference edges (`isReferenceEdge`): a URL from a **non-frontend into a `type: frontend`** project
   is a **reference** (link-back / allowed-origin / redirect base — a backend embedding the app's
   public URL), NOT a dependency. It's still shown by `crew graph` (marked `⇢ … (ref)`) but excluded

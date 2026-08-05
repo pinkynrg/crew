@@ -1,7 +1,7 @@
 source tests/e2e/lib.exp
 set env(PATH) "$env(TMP)/bin:$env(PATH)"
 crun workspace
-must {all/none}
+must {enter run}
 send "\r"
 must {STUB-CODE}
 want_exit 0

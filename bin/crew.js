@@ -431,6 +431,38 @@ export function saveLogWrap(flags, wrap) {
     /* read-only fs — preference just won't persist */
   }
 }
+// Graph-view prefs (machine-local), shared by every graph UI (crew graph pager + the start/workspace/
+// claude selector). `graphRefs` = show reference edges (default on). `graphShown` = the crew-graph node
+// filter (null = all). Persisted so a toggle/filter sticks across runs.
+export function loadGraphRefs(flags) {
+  const r = loadMachine(flags).graphRefs;
+  return typeof r === 'boolean' ? r : true;
+}
+export function saveGraphRefs(flags, on) {
+  try { writeMachine(flags, { ...loadMachine(flags), graphRefs: on }); } catch { /* read-only fs */ }
+}
+export function loadGraphShown(flags) {
+  const s = loadMachine(flags).graphShown;
+  return Array.isArray(s) ? s : null;
+}
+export function saveGraphShown(flags, names) {
+  try { writeMachine(flags, { ...loadMachine(flags), graphShown: names }); } catch { /* read-only fs */ }
+}
+// Shared footer bar for the graph views. mode: 'select' (interactive picker) | 'pager' (read-only graph).
+// Order: state -> how to move -> what to toggle (f/r together) -> action -> exit. Count turns RED when
+// not all nodes are shown/selected. `scroll` (pager, only when the graph overflows) and `warn` (select,
+// e.g. "not connected") are optional. Returns the inner bar text; the caller adds the reverse-video + pad.
+function graphFooter({ mode, shown, total, hasRef, showRef, warn = '', scroll = '' }) {
+  const count = shown < total ? `\x1b[31m${shown}/${total}\x1b[39m` : `${shown}/${total}`; // red fg (kept inside the reverse bar via 39m, not a full reset)
+  const parts = [count + (warn ? ` ${warn}` : '')];
+  if (mode === 'select') parts.push('↑↓←→ move', 'space pick', 'a all');
+  else if (scroll) parts.push(scroll);
+  parts.push('f filter');
+  if (hasRef) parts.push(`r refs ${showRef ? 'on' : 'off'}`);
+  if (mode === 'select') parts.push('enter run');
+  parts.push(mode === 'select' ? 'q cancel' : 'q quit');
+  return ` ${parts.join(' · ')} `;
+}
 
 export const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 
@@ -2229,6 +2261,8 @@ async function graphSelect(flags, cfg, opts = {}) {
   const { nodes, real, ref } = collectGraphEdges(cfg);
   if (!nodes.length) return undefined;
   const edges = [...real.map(([f, t]) => ({ from: f, to: t })), ...ref.map(([f, t]) => ({ from: f, to: t, ref: true }))];
+  let showRef = loadGraphRefs(flags);                 // persisted, shared with `crew graph`
+  const hasRef = ref.length > 0;
   const paint = projectColors(cfg);
   const prefix = (n) => { const f = paint.get(n); if (!f) return ''; const s = f('\x01'); const i = s.indexOf('\x01'); return i > 0 ? s.slice(0, i) : ''; };
   const GRAY = '\x1b[90m', selEnv = opts.selEnv;
@@ -2242,7 +2276,7 @@ async function graphSelect(flags, cfg, opts = {}) {
   // would jump. sublabelWidth = the widest env label; the renderer pads every [env] field to it (spaces
   // OUTSIDE the tight brackets), so CW is identical for any active set -> geometry never moves on toggle.
   const envW = selEnv == null ? 0 : Math.max('local'.length, (selEnv || '').length, ...[...remoteEnv.values()].map((v) => (v || '').length));
-  const draw = () => renderAsciiGraph(nodes, edges, {
+  const draw = () => renderAsciiGraph(nodes, edges.filter((e) => showRef || !e.ref), {
     colorOf: (n) => (active.has(n) ? prefix(n) : GRAY),                                          // running set keeps per-source colours; the rest grayed
     sublabel: selEnv != null ? (n) => (active.has(n) ? 'local' : (remoteEnv.get(n) || selEnv)) : undefined, // selected run local; the rest show their resolved remote env
     sublabelWidth: envW,                                                                        // fixed [env] field width -> box width stays put when the sublabel changes
@@ -2264,7 +2298,7 @@ async function graphSelect(flags, cfg, opts = {}) {
       let out = '\x1b[H';
       for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + (li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
       const split = cpw(connectivityStatus(cfg, depEdges, [...active], false)) > 0; // non-verbose returns islands text only when disconnected
-      const bar = ` ${active.size}/${nodes.length} local${split ? '  ⚠ not connected' : ''}   ↑↓ layer · ←→ node · click/space toggle · a all/none · enter run · q cancel `;
+      const bar = graphFooter({ mode: 'select', shown: active.size, total: nodes.length, hasRef, showRef, warn: split ? '⚠ not connected' : '' });
       out += '\x1b[K\x1b[7m' + bar + ' '.repeat(Math.max(0, cols - cpw(bar))) + '\x1b[0m'; // one full-width reverse-video footer
       w(out);
     };
@@ -2290,6 +2324,7 @@ async function graphSelect(flags, cfg, opts = {}) {
       }
       if (k === '\x03' || k === 'q' || k === '\x1b') { cleanup(); return resolve(null); }
       if (k === '\r' || k === '\n') { cleanup(); return resolve([...active]); }
+      if (k === 'r' && hasRef) { showRef = !showRef; saveGraphRefs(flags, showRef); layout = draw(); repaint(); return; }
       if (k === ' ') { active.has(cursor) ? active.delete(cursor) : active.add(cursor); }
       else if (k === 'a') { active = active.size === nodes.length ? new Set() : new Set(nodes); }
       else if (k === '\x1b[C' || k === 'l') moveH(1);
@@ -2310,7 +2345,7 @@ async function graphSelect(flags, cfg, opts = {}) {
 // Show a (possibly tall) block in an ALTERNATE-SCREEN pager — like the log viewer, so it vanishes on
 // exit instead of scrolling into the terminal history. Vertical scroll only. 'f' resolves 'filter'
 // (caller opens a node picker); 'q' resolves 'quit'. Non-TTY: plain print (so `| less`, redirects, CI work).
-function pagerView(text, title = 'crew graph', footerExtra = '') {
+function pagerView(text, meta = {}) {
   const stdout = process.stdout, stdin = process.stdin;
   if (!stdout.isTTY || !stdin.isTTY) { console.log(text); return Promise.resolve('quit'); }
   return new Promise((resolve) => {
@@ -2328,8 +2363,8 @@ function pagerView(text, title = 'crew graph', footerExtra = '') {
       if (lines.length <= R) { vpad = (R - lines.length) >> 1; top = 0; } else top = Math.max(0, Math.min(maxTop(), top)); // centre vertically when it fits
       let out = '\x1b[H';
       for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + (li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
-      const pos = lines.length > R ? `${top + 1}-${Math.min(top + R, lines.length)}/${lines.length}` : `${lines.length} lines`;
-      const bar = ` ${title}  ·  ${pos}  ·  ↑↓ jk · space b · g G · f filter${footerExtra} · q quit `;
+      const scroll = lines.length > R ? `↑↓ scroll ${top + 1}-${Math.min(top + R, lines.length)}/${lines.length}` : ''; // position only when it overflows
+      const bar = graphFooter({ mode: 'pager', shown: meta.shown, total: meta.total, hasRef: meta.hasRef, showRef: meta.showRef, scroll });
       out += '\x1b[K\x1b[7m' + bar + ' '.repeat(Math.max(0, cols - cpw(bar))) + '\x1b[0m'; // full-width footer bar
       w(out);
     };
@@ -2349,8 +2384,6 @@ function pagerView(text, title = 'crew graph', footerExtra = '') {
       else if (k === 'k' || k === '\x1b[A') top -= 1;
       else if (k === ' ' || k === '\x1b[6~') top += R;
       else if (k === 'b' || k === '\x1b[5~') top -= R;
-      else if (k === 'g') top = 0;
-      else if (k === 'G') top = maxTop();
       paint();
     };
     if (stdin.setRawMode) stdin.setRawMode(true);
@@ -2370,17 +2403,18 @@ export async function cmdGraph(flags, rest) {
     const paint = projectColors(cfg);
     const clr = (n) => { const g = paint.get(n); if (!g) return ''; const t = g('\u0001'); const m = t.indexOf('\u0001'); return m > 0 ? t.slice(0, m) : ''; };
     const draw = (shown, showRef) => renderAsciiGraph(allNodes.filter((n) => shown.has(n)), allEdges.filter((e) => shown.has(e.from) && shown.has(e.to) && (showRef || !e.ref)), { colorOf: clr });
-    let shown = new Set(allNodes);
-    let showRef = true;
+    let showRef = loadGraphRefs(flags);                 // persisted, shared with the selector
+    const savedShown = loadGraphShown(flags);           // persisted node filter (null = all)
+    let shown = new Set((savedShown || allNodes).filter((n) => allNodes.includes(n)));
+    if (!shown.size) shown = new Set(allNodes);
     const hasRef = ref.length > 0;                      // only offer the toggle when there ARE reference edges
     if (!process.stdout.isTTY || !process.stdin.isTTY) return void console.log(draw(shown, showRef));
     for (;;) {                                          // page the graph; 'f' filters nodes, 'r' toggles reference edges, then re-draws
-      const title = `crew graph  ${shown.size}/${allNodes.length} nodes${hasRef ? (showRef ? '  · refs on' : '  · refs off') : ''}`;
-      const reason = await pagerView(draw(shown, showRef), title, hasRef ? ' · r refs' : '');
-      if (reason === 'refs') { showRef = !showRef; continue; }
+      const reason = await pagerView(draw(shown, showRef), { mode: 'pager', shown: shown.size, total: allNodes.length, hasRef, showRef });
+      if (reason === 'refs') { showRef = !showRef; saveGraphRefs(flags, showRef); continue; }
       if (reason !== 'filter') break;
       const picked = await menu({ title: 'Show which nodes?', items: allNodes, multi: true, preselected: allNodes.filter((n) => shown.has(n)), label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)), erase: true });
-      if (picked && picked.length) shown = new Set(picked);
+      if (picked && picked.length) { shown = new Set(picked); saveGraphShown(flags, picked); }
     }
     return;
   }
