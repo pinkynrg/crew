@@ -1,0 +1,21 @@
+source tests/e2e/lib.exp
+crun edit
+must {config editor}
+sleep 1
+send "n"
+must {New project}
+sleep 1
+send "\r"
+send "worker"
+send "\r"
+sleep 1
+send "j"
+send "\r"
+send "worker"
+send "\r"
+sleep 1
+send "s"
+must {saved}
+send "q"
+want_exit 0
+config_has {"worker"}

@@ -1,0 +1,15 @@
+source tests/e2e/lib.exp
+crun edit
+must {api}
+sleep 1
+send "l"
+sleep 1
+send "jjjjjjj"
+sleep 1
+send "\r"
+must {space toggle}
+sleep 1
+send "\033"
+sleep 1
+send "q"
+want_exit 0
