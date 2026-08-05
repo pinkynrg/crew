@@ -1,6 +1,6 @@
 source tests/e2e/lib.exp
 crun start env=x
-must {all/none}
+must {enter run}
 send "\r"
 must {A-started}
 must {B-started}

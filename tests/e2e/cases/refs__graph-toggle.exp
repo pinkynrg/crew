@@ -1,10 +1,9 @@
 source tests/e2e/lib.exp
 crun graph
-must {refs on}
-must {r refs}
+must {r refs on}
 sleep 1
 send "r"
 sleep 1
-must {refs off}
+must {r refs off}
 send "q"
 want_exit 0

@@ -1,6 +1,6 @@
 source tests/e2e/lib.exp
 crun start env=qa
-must {all/none}
+must {enter run}
 send "\r"
 must {web-up}
 must {api-up}
