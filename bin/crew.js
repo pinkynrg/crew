@@ -588,7 +588,7 @@ export const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 // ---------------------------------------------------------------------------
 // Config-validation key sets (used by `crew check`).
 // ---------------------------------------------------------------------------
-export const TOP_KEYS = new Set(['version', 'workspaceName', 'longRunning', 'workspaceSettings', 'internalDomains', 'projects', 'guards']);
+export const TOP_KEYS = new Set(['version', 'workspaceName', 'longRunning', 'workspaceSettings', 'projects', 'guards']);
 export const PROJECT_KEYS = new Set(['path', 'type', 'runner', 'env', 'local', 'match', 'tasks', 'guards', 'defaultBranch']);
 export const GUARD_KEYS = new Set(['comment', 'command', 'message']);
 export const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -2241,7 +2241,6 @@ export function collectGraphEdges(cfg) {
 }
 
 // edge P→T when a URL in P's envs has a host equal to one of T's match hosts (tokenMatchLen).
-// Optional config `internalDomains: [..]` only affects the cosmetic "other hosts" list.
 // localhost URLs match no id, so they drop out.
 // Interactive graph picker for `crew start` (and workspace / claude): navigate the dependency graph and
 // toggle which projects run. ↑↓ = layer, ←→ = neighbour in the layer, space = toggle, a = all/none,
@@ -2467,13 +2466,11 @@ export async function cmdGraph(flags, rest) {
   }
   const paint = projectColors(cfg);
   const projects = Object.entries(cfg.projects || {});
-  const domains = Array.isArray(cfg.internalDomains) ? cfg.internalDomains : [];
 
   const meta = {};
   for (const [name, project] of projects) {
     meta[name] = { files: projectEnvFiles(project), ...projectIdentity(project) };
   }
-  const inDomain = (host) => domains.some((d) => host === d || host.endsWith('.' + d) || host.endsWith(d));
 
   console.log(c.bold('Dependency graph') + c.dim('  — edges auto-discovered from .envs, no wiring'));
   console.log(
@@ -2488,8 +2485,7 @@ export async function cmdGraph(flags, rest) {
         '  3. For each URL, compare its host to every `match` string — exact match only, so',
         '     api.example.com never collides with rge-api.example.com.',
         '  4. A URL in P whose host equals one of T\'s match hosts → edge P → T.',
-        '  5. URLs matching no project are dropped as 3rd-party (or listed as "other internal"',
-        '     when you set `internalDomains`).',
+        '  5. URLs matching no project are dropped as 3rd-party.',
       ].join('\n')
     )
   );
@@ -2511,7 +2507,6 @@ export async function cmdGraph(flags, rest) {
     }
     const edges = new Set();
     const refs = new Set(); // non-frontend -> frontend: shown but marked, not a real dep edge
-    const other = new Set();
     for (const { host, path } of seen.values()) {
       // Pick the project whose matching token is longest (most specific), so a gateway host
       // split by path resolves to the deeper path, not a shorter prefix.
@@ -2527,7 +2522,6 @@ export async function cmdGraph(flags, rest) {
         }
       }
       if (best && best !== name) { edges.add(best); if (isReferenceEdge(cfg, name, best)) refs.add(best); }
-      else if (!best && domains.length && inDomain(host)) other.add(host); // only when configured
     }
 
     const head = c.bold(paint.get(name) ? paint.get(name)(name) : name);
@@ -2546,7 +2540,6 @@ export async function cmdGraph(flags, rest) {
     } else {
       console.log(`  ${c.dim('→ (no crew-project edges)')}`);
     }
-    if (other.size) console.log(`  ${c.dim('· other internal: ' + [...other].sort().join(', '))}`);
   }
   if (warned)
     console.log(
@@ -2720,7 +2713,6 @@ async function configForm(flags, opts = {}) {
   const loadSettings = () => ({
     workspaceName: cfg.workspaceName || '',
     longRunning: [...(Array.isArray(cfg.longRunning) ? cfg.longRunning : [])],
-    internalDomains: [...(Array.isArray(cfg.internalDomains) ? cfg.internalDomains : [])],
     workspaceSettings: mapStringify(cfg.workspaceSettings),
     projectsDir: machine.projectsDir || '',
     isNew: false, orig: 'config',
@@ -2731,7 +2723,6 @@ async function configForm(flags, opts = {}) {
     fields: [
       { key: 'workspaceName', label: 'workspaceName', kind: 'text' },
       { key: 'longRunning', label: 'longRunning', kind: 'list' },
-      { key: 'internalDomains', label: 'internalDomains', kind: 'list' },
       { key: 'workspaceSettings', label: 'wsSettings', kind: 'map', json: true, kLabel: 'setting', vLabel: 'value' },
       { key: 'projectsDir', label: 'projectsDir', kind: 'text' },
     ],
@@ -2740,7 +2731,6 @@ async function configForm(flags, opts = {}) {
     save: (f) => {
       setOrDel(cfg, 'workspaceName', String(f.workspaceName).trim());
       setOrDel(cfg, 'longRunning', f.longRunning, Array.isArray(f.longRunning) && f.longRunning.length > 0);
-      setOrDel(cfg, 'internalDomains', f.internalDomains, Array.isArray(f.internalDomains) && f.internalDomains.length > 0);
       setOrDel(cfg, 'workspaceSettings', jsonParseVals(f.workspaceSettings), f.workspaceSettings && Object.keys(f.workspaceSettings).length > 0);
       writeUserConfig(path, cfg);
       const pd = String(f.projectsDir).trim();
@@ -2821,7 +2811,7 @@ async function configForm(flags, opts = {}) {
         const F = mapEdit, fld = F.field;
         Rn.push(`\x1b[1m${fld.label}\x1b[22m \x1b[90m· ${s.noun} ${form.name || form.orig}\x1b[39m`);
         Rn.push('');
-        if (F.list) { // single-column list (longRunning, internalDomains)
+        if (F.list) { // single-column list (e.g. longRunning)
           F.rows.forEach((v, i) => {
             const on = F.ri === i;
             const vc = (editing && editTarget === 'listval' && on) ? editCell(RW - 6) : clipP(String(v), RW - 6);
@@ -3031,7 +3021,6 @@ export function cmdCheck(flags) {
   if (cfg.workspaceName != null && typeof cfg.workspaceName !== 'string') E(`workspaceName must be a string`);
   if (cfg.longRunning != null && !isStrArr(cfg.longRunning)) E(`longRunning must be an array of strings`);
   if (cfg.workspaceSettings != null && !isObj(cfg.workspaceSettings)) E(`workspaceSettings must be an object`);
-  if (cfg.internalDomains != null && !isStrArr(cfg.internalDomains)) E(`internalDomains must be an array of strings`);
   if (cfg.guards != null && !isObj(cfg.guards)) E(`guards must be an object`);
   const guards = isObj(cfg.guards) ? cfg.guards : {};
 
