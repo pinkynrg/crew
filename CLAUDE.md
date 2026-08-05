@@ -121,7 +121,8 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   graph as a laid-out ASCII diagram (boxes, per-source colored double-line dep edges, thin single
   reference edges, `╦╤` box-connect T-junctions) — our own zero-dep layered-DAG renderer, no external
   tool. On a TTY it's shown in an alternate-screen pager (`pagerView`: scroll, `f` opens a `menu()`
-  node filter, `q` quits leaving no scrollback); piped/redirected → plain print. `crew graph list`
+  node filter, `r` toggles reference edges on/off — the footer shows `refs on`/`off`, offered only when
+  the graph has any ref edges — `q` quits leaving no scrollback); piped/redirected → plain print. `crew graph list`
   prints the adjacency text instead.
 - Reference edges (`isReferenceEdge`): a URL from a **non-frontend into a `type: frontend`** project
   is a **reference** (link-back / allowed-origin / redirect base — a backend embedding the app's
