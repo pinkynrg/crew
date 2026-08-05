@@ -4,17 +4,29 @@ must {config editor}
 sleep 1
 send "l"
 sleep 1
-send "jjjjjjjjjjj"
+send "jjjjjjjjjj"
 sleep 1
 send "\r"
-must {worker.QUEUE}
+must {Environment Overrides}
 sleep 1
-send "j"
+# append a new override: DB_URL = localhost:5432, only when 'worker' is local
+send "jj"
 sleep 1
 send "\r"
-send "db.DB_URL"
+send "DB_URL"
+send "\r"
+sleep 1
+send "l"
 send "\r"
 send "localhost:5432"
+send "\r"
+sleep 1
+# to the when-local column, open the peer picker, choose 'worker'
+send "l"
+send "\r"
+must {when local}
+sleep 1
+send "j"
 send "\r"
 sleep 1
 send "\033"
