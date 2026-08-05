@@ -172,7 +172,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   column is the highlighted item's form. The three actions fall out of
   position + key — CREATE = a `+ New` row (blank form), UPDATE = edit fields then `s` save, DELETE = `d` +
   confirm. **Settings** is a `fixed` section (one synthetic `config` item, NO `+ New`/`d` — you only edit
-  values): the top-level config keys (`workspaceName`/`longRunning`/`internalDomains`/`workspaceSettings`) +
+  values): the top-level config keys (`workspaceName`/`longRunning`/`workspaceSettings`) +
   machine-local `projectsDir`, so `crew config` covers EVERY key (and editing `projectsDir` shows a live
   `⚠ N/M project folders not found` warning via `missingProjectFolders`, never auto-deleting anything).
   Field KINDS: `text` (a real inline line-editor with a block caret — `←/→` move, Option/Ctrl+arrow
@@ -184,7 +184,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   line-editor, `+ add` chains key→value, `d` removes; e.g. project `tasks` (task→cmd) and `match` (`multiVal`
   groups duplicate keys into host-arrays); the form carries these as objects, serialized on `save`; a `json`
   map (`workspaceSettings`) parses each value so `false`/`3` keep their type), `list` (the same row editor
-  minus the key column — one value per row, e.g. `longRunning`/`internalDomains`, carried as a string array),
+  minus the key column — one value per row, e.g. `longRunning`, carried as a string array),
   `readonly` (display only). Editing any of choice/multiselect/map **TAKES OVER the whole right pane**
   (full width + height, left column stays for context) rather than a cramped popup — so long task commands /
   match hosts have room, and `text`/`map` cells horizontally scroll to keep the caret in view (`editCell`).

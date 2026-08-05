@@ -1,3 +1,4 @@
-{ "version": 2, "workspaceName": "crewws", "longRunning": ["start"], "internalDomains": ["ex.com"],
-  "workspaceSettings": { "jest.enable": false },
-  "projects": { "api": { "path": "api", "type": "backend" } } }
+{ "version": 2, "workspaceName": "sws", "longRunning": ["start"], "workspaceSettings": { "jest.enable": false },
+  "projects": {
+    "api": { "path": "api", "type": "backend" },
+    "ghost": { "path": "ghost", "type": "backend" } } }
