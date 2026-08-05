@@ -1,0 +1,26 @@
+source tests/e2e/lib.exp
+crun edit
+must {api}
+sleep 1
+send "l"
+sleep 1
+send "jjjjjjjjj"
+sleep 1
+send "\r"
+must {add task}
+sleep 1
+send "j"
+sleep 1
+send "\r"
+send "build"
+send "\r"
+send "make build"
+send "\r"
+sleep 1
+send "\033"
+sleep 1
+send "s"
+must {saved}
+send "q"
+want_exit 0
+config_has {"build": "make build"}
