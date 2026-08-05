@@ -1,0 +1,1 @@
+{ "name": "webby", "dependencies": { "react": "^18" }, "scripts": { "dev": "vite --port 5173" } }

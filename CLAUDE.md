@@ -199,7 +199,15 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `envOverride` = per-project bare `VAR:val` (`map`), `whenLocal` = the 2-level `peer→{VAR:val}` flattened to
   `peer.VAR`→val rows (split on the LAST dot — env var names have no dots) and round-tripped to nested on
   save; the project's `save` writes both stores (moving overrides on a rename, deleting them with the
-  project), so there's no separate Overrides section. Renaming a guard migrates its key AND every
+  project), so there's no separate Overrides section. **Semi-auto add**: `⏎` on a project's `path` field opens
+  a **folder picker** (`openFolderPick` — the subfolders of `projectsDir` via `projectDirs()`, single-select,
+  plus a `✎ type a path…` escape that drops to the inline editor). Picking a folder (or committing a typed
+  path) for a NEW project runs `detectProject(abs)` and prefills only the still-EMPTY fields — `name`
+  (basename), `type`/`runner`/`env`/`local`/`tasks.start` — from package.json / lockfiles / manifests /
+  `.envs` / dev scripts. `match` (the deployed host) is deliberately NOT derived — the guess was too weak,
+  so it's always filled by hand. Path-driven,
+  not a separate "auto" mode: works with no `projectsDir` (type an absolute/`~` path via the escape) and for
+  folders outside it; non-destructive (blanks only). Renaming a guard migrates its key AND every
   `project.guards` link; deleting a guard unlinks it everywhere (warns if in use). A `readonly` field with a
   `.hint` shows it as a status message on `⏎`. `↑↓` move, `tab`/`←→` switch pane, `s` writes. A `dirty` flag
   is set on any field/map/pick mutation and cleared on save (or when navigating loads a fresh item); `esc`
