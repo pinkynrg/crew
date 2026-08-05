@@ -117,7 +117,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   deployed host(s) — exact strings, each optionally narrowed by a **path** (`host` or
   `host/path/prefix`; `tokenMatchLen`, no globs, no collisions: `api.getbee.io` never matches
   `rge-api.getbee.io`). Partial/free-form keys OK (label only the envs a project has — the loader
-  has just `qa`/`pro`). `projectIdentity` flattens the values into identity `tokens` (edges +
+  has just `qa`/`pro`). Edited in `crew config` as an INLINE `match` field (one `env = host` line per env),
+  with the env keys DERIVED from the project's env files (see the `match` field-kind below) — you fill hosts,
+  you don't invent env labels. `projectIdentity` flattens the values into identity `tokens` (edges +
   wiring) and builds `envOf` (host → env label — the basis for env derivation). A host-only token
   swaps just the origin in wiring (path preserved); a **host+path** token matches only URLs on
   that host under that path AND replaces the WHOLE URL with the peer's full `local` — so two
@@ -187,13 +189,17 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `choice` (SINGLE-select — radio `(•)`, `↑↓`+`⏎`, e.g. project `type`),
   `multiselect` (MULTI — checkboxes `[x]`, `space`/`a` toggle, e.g. a project's guard links),
   `map` (a **row editor** — `key → value` rows + a green `+ add`; `⏎` on a row edits its value via the same
-  line-editor, `+ add` chains key→value, `d` removes; e.g. project `tasks` (task→cmd) and `match` (`multiVal`
-  groups duplicate keys into host-arrays); the form carries these as objects, serialized on `save`; a `json`
+  line-editor, `+ add` chains key→value, `d` removes; e.g. project `tasks` (task→cmd); the form carries these
+  as objects, serialized on `save`; a `json`
   map (`workspaceSettings`) parses each value so `false`/`3` keep their type), `list` (the same row editor
   minus the key column — one value per row, e.g. `longRunning`, carried as a string array),
-  `overrides` (a project's Environment Overrides — an INLINE 3-column row editor `VAR / value / when <peer>
-  local`, rendered in the form (NOT a full-pane takeover) and edited in place via the `ovEdit` mode; see the
-  Overrides config bullet), `readonly` (display only). Editing any of choice/multiselect/map **TAKES OVER the whole right pane**
+  `overrides` + `match` (two INLINE row editors — rendered in the form, NOT a full-pane takeover, and edited
+  in place via the shared `ovEdit` mode; `⏎` enters row-edit, `↑↓` rows). `overrides` = a project's Environment
+  Overrides, 3 columns `VAR / value / when <peer> local` (`←→` between columns, `+ add`, `d` removes; the
+  when-column opens a single-select peer picker). `match` = env-labeled hosts, 2 columns `env = host` with
+  **FIXED keys** — the env labels are DERIVED from the project's env files (`matchLabels` = `projectEnvFiles`
+  unioned with any stored labels), so rows can't be added/removed, only each host value filled (blank = no
+  match; space-separate for several hosts → array via `matchCommit`). `readonly` (display only). Editing any of choice/multiselect/map **TAKES OVER the whole right pane**
   (full width + height, left column stays for context) rather than a cramped popup — so long task commands /
   match hosts have room, and `text`/`map` cells horizontally scroll to keep the caret in view (`editCell`).
   choice/multiselect reuse `makeFilterPanel`'s state/keys via `bareRows(h, w)` (unboxed, full-width); the

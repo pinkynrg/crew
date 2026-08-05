@@ -2687,10 +2687,13 @@ async function configForm(flags, opts = {}) {
   const persist = () => writeUserConfig(path, pruneConfig(cfg)); // every editor write also strips unknown keys
   const paint = projectColors(cfg);
 
-  const serializeMatch = (m) => (m && typeof m === 'object' && !Array.isArray(m))
-    ? Object.entries(m).flatMap(([e, v]) => (Array.isArray(v) ? v : [v]).map((h) => `${e}=${h}`)).join(' ') : '';
   const toRows = (obj) => Object.entries(obj || {}).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, String(x)]) : [[k, String(v)]]));
   const toObj = (rows, multi) => { const o = {}; for (const [k, v] of rows) { const kk = String(k).trim(); if (!kk) continue; if (multi) o[kk] = o[kk] == null ? String(v) : [].concat(o[kk], String(v)); else o[kk] = String(v); } return o; };
+  // match is an env-labeled host map with FIXED keys: env labels derived from the project's env files
+  // (the `env` template), unioned with any labels already stored so existing data stays editable.
+  const matchLabels = (f) => { let envs = []; try { envs = projectEnvFiles({ path: f.path, env: f.env }).map((x) => x.env); } catch { /* path unresolved */ } return [...new Set([...envs, ...Object.keys(f.match || {})])].sort(); };
+  const matchValToStr = (v) => (Array.isArray(v) ? v.join(' ') : v == null ? '' : String(v)); // one env's host(s) -> a space-separated string for the value editor
+  const matchCommit = (rows) => { const o = {}; for (const [k, v] of rows) { const toks = String(v).trim().split(/\s+/).filter(Boolean); if (!toks.length) continue; o[k] = toks.length === 1 ? toks[0] : toks; } return o; }; // blank = drop; several hosts = array
   // Environment overrides ↔ editor rows. Storage (local.json) per project: bare `VAR:val` keys +
   // a reserved `whenLocal: {peer:{VAR:val}}` map. The editor flattens BOTH into one flat list of
   // rows `{var, value, peer}` (peer='' = unconditional/bare), and rebuilds the storage shape on save.
@@ -2729,11 +2732,15 @@ async function configForm(flags, opts = {}) {
       { key: 'type', label: 'type', kind: 'choice', options: PROJECT_TYPES },
       { key: 'runner', label: 'runner', kind: 'text' },
       { key: 'env', label: 'env', kind: 'text' },
-      { key: 'local', label: 'local', kind: 'text' },
-      { key: 'match', label: 'match', kind: 'map', multiVal: true, kLabel: 'env', vLabel: 'host' },
-      { key: 'guards', label: 'guards', kind: 'multiselect', options: () => Object.keys(cfg.guards) },
       { key: 'defaultBranch', label: 'branch', kind: 'text' },
       { key: 'tasks', label: 'tasks', kind: 'map', kLabel: 'task', vLabel: 'command' },
+      { key: 'guards', label: 'guards', kind: 'multiselect', options: () => Object.keys(cfg.guards) },
+      { key: 'local', label: 'local', kind: 'text' },
+      // match: env-labeled hosts, rendered INLINE (one line per env, like Environment Overrides). Keys are
+      // DERIVED from the project's env files (the `env` template) — you can't add/remove rows, only fill each
+      // env's host value (blank = no match). Space-separate to give one env several hosts. Union with any
+      // labels already stored so existing data stays editable.
+      { key: 'match', label: 'match', kind: 'match' },
       // machine-local env overrides (local.json) — its own titled block at the end (see save/del below)
       { key: 'overrides', label: 'overrides', kind: 'overrides', groupTitle: 'Environment Overrides  · machine-local (local.json)' },
     ],
@@ -2971,27 +2978,37 @@ async function configForm(flags, opts = {}) {
         const vW = Math.max(8, RW - labW - 6);
         s.fields.forEach((fld, i) => {
           const on = focus === 'right' && i === fi;
-          // Environment Overrides: an INLINE list — one line per override (VAR = value, when peer local),
-          // navigable/editable in place (⏎ on the field enters row-edit; ↑↓ rows, ←→ cols, ⏎ edits a cell).
-          if (fld.kind === 'overrides') {
-            const editingRows = !!ovEdit; // in-place row editor active for this field
-            const rows = editingRows ? ovEdit.rows : (form[fld.key] || []);
+          // INLINE row lists (overrides + match) — one line per row, rendered in the form (NOT a full-pane
+          // page) and edited in place: ⏎ enters row-edit; ↑↓ rows; ←→ cols (overrides); ⏎ edits a cell.
+          if (fld.kind === 'overrides' || fld.kind === 'match') {
+            const isMatch = fld.kind === 'match';
+            const editingRows = !!ovEdit && ovEdit.field.key === fld.key;
+            const rows = editingRows ? ovEdit.rows
+              : isMatch ? matchLabels(form).map((env) => ({ env, host: matchValToStr((form.match || {})[env]) }))
+                        : (form[fld.key] || []);
             Rn.push('');
+            const title = isMatch ? 'match  \x1b[90m· env-labeled hosts (keys from env files)\x1b[39m' : fld.groupTitle;
             const titleFocused = on && !editingRows && !editing;
-            Rn.push(titleFocused ? rev(`  ${fld.groupTitle}  ⏎ edit `) : `  \x1b[90m${fld.groupTitle}\x1b[39m`);
-            const varW = Math.min(20, Math.max(3, ...rows.map((r) => [...String(r.var || '(VAR)')].length)));
-            if (!rows.length && !editingRows) Rn.push('    \x1b[90m(none)\x1b[39m');
+            Rn.push(titleFocused ? rev(`  ${title.replace(/\x1b\[[0-9;]*m/g, '')}  ⏎ edit `) : `  \x1b[90m${title}\x1b[39m`);
+            const keyW = Math.min(20, Math.max(3, ...rows.map((r) => [...String((isMatch ? r.env : r.var) || '(VAR)')].length)));
+            if (!rows.length) Rn.push(isMatch ? '    \x1b[90m(no env files found — set env / create them)\x1b[39m' : '    \x1b[90m(none)\x1b[39m');
             rows.forEach((row, ri) => {
               const rowOn = editingRows && ovEdit.ri === ri, ci = editingRows ? ovEdit.ci : -1;
-              const varP = padP(clipP(row.var || '(VAR)', varW), varW);
-              const c0 = editing && rowOn && editTarget === 'ovVar' ? padP(editCell(varW), varW) : (rowOn && !editing && ci === 0 ? rev(` ${varP} `) : ` ${varP} `);
-              const valDisp = editing && rowOn && editTarget === 'ovVal' ? editCell(Math.max(8, vW - varW - 8)) : clipP(row.value || '(value)', Math.max(8, vW - varW - 20));
-              const c1 = (rowOn && !editing && ci === 1) ? rev(` ${valDisp} `) : ` ${valDisp} `;
-              const wp = row.peer ? `when ${row.peer} local` : 'always';
-              const c2 = (rowOn && !editing && ci === 2) ? rev(` ${wp} `) : (row.peer ? ` \x1b[36m${wp}\x1b[39m` : ` \x1b[90m${wp}\x1b[39m`);
-              Rn.push(`  ${rowOn && !editing ? '▸' : ' '}${c0}\x1b[90m=\x1b[39m${c1}${c2}`);
+              const k0 = isMatch ? (row.env || '') : (row.var || '(VAR)');
+              const kP = padP(clipP(k0, keyW), keyW);
+              // col 0 = key (VAR editable for overrides; env is FIXED for match — shown cyan, not focusable)
+              const c0 = (!isMatch && editing && rowOn && editTarget === 'ovVar') ? padP(editCell(keyW), keyW)
+                : (!isMatch && rowOn && !editing && ci === 0) ? rev(` ${kP} `)
+                : isMatch ? ` \x1b[36m${kP}\x1b[39m ` : ` ${kP} `;
+              // col 1 = value/host
+              const v1 = isMatch ? (row.host || '(host)') : (row.value || '(value)');
+              const vDisp = (editing && rowOn && (editTarget === 'ovVal' || editTarget === 'meHost')) ? editCell(Math.max(8, vW - keyW - 8)) : clipP(v1, Math.max(8, vW - keyW - 20));
+              const c1 = (rowOn && !editing && ci === 1) ? rev(` ${vDisp} `) : ` ${vDisp} `;
+              let line = `  ${rowOn && !editing ? '▸' : ' '}${c0}\x1b[90m=\x1b[39m${c1}`;
+              if (!isMatch) { const wp = row.peer ? `when ${row.peer} local` : 'always'; line += (rowOn && !editing && ci === 2) ? rev(` ${wp} `) : (row.peer ? ` \x1b[36m${wp}\x1b[39m` : ` \x1b[90m${wp}\x1b[39m`); }
+              Rn.push(line);
             });
-            if (editingRows) { const addOn = ovEdit.ri === rows.length; Rn.push(`  ${addOn && !editing ? rev(' ▸ + add override ') : ' \x1b[32m+ add override\x1b[39m'}`); }
+            if (editingRows && !isMatch) { const addOn = ovEdit.ri === rows.length; Rn.push(`  ${addOn && !editing ? rev(' ▸ + add override ') : ' \x1b[32m+ add override\x1b[39m'}`); }
             return;
           }
           if (fld.groupTitle) { Rn.push(''); Rn.push(`  \x1b[90m${fld.groupTitle}\x1b[39m`); } // a titled block separator before this field
@@ -2999,7 +3016,7 @@ async function configForm(flags, opts = {}) {
           let val;
           if (editText) val = editCell(vW); // block caret, scrolls if long
           else if (fld.kind === 'multiselect' || fld.kind === 'list') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : '\x1b[90m(none)\x1b[39m'; }
-          else if (fld.kind === 'map') { const o = form[fld.key] || {}, ks = Object.keys(o); val = ks.length ? (fld.multiVal ? serializeMatch(o) : Object.entries(o).map(([k, v]) => `${k}=${v}`).join('  ')) : '\x1b[90m(none)\x1b[39m'; }
+          else if (fld.kind === 'map') { const o = form[fld.key] || {}, ks = Object.keys(o); val = ks.length ? Object.entries(o).map(([k, v]) => `${k}=${v}`).join('  ') : '\x1b[90m(none)\x1b[39m'; }
           else val = String(form[fld.key]) ? String(form[fld.key]) : `\x1b[90m(${fld.req ? 'required' : 'optional'})\x1b[39m`;
           const lab = padP(fld.label, labW);
           Rn.push(`  ${on && !editing ? rev(' ' + lab + ' ') : '\x1b[90m ' + lab + ' \x1b[39m'} ${editText ? val : clipP(val, vW)}`);
@@ -3019,7 +3036,7 @@ async function configForm(flags, opts = {}) {
       else if (panel) parts = (panelField.kind === 'choice' || panelField.single) ? ['↑↓ pick', '⏎ apply', 'esc cancel'] : ['space toggle', 'a all', '⏎ apply', 'esc cancel'];
       else if (editing) parts = ['type', '←→ move', '⌥← word', '⏎ commit', 'esc cancel'];
       else if (mapEdit) parts = ['↑↓ row', '⏎ edit', 'd remove', 'esc done'];
-      else if (ovEdit) parts = ['↑↓ row', '←→ col', '⏎ edit', 'd remove', 'esc done'];
+      else if (ovEdit) parts = ovEdit.field.kind === 'match' ? ['↑↓ row', '⏎ edit host', 'esc done'] : ['↑↓ row', '←→ col', '⏎ edit', 'd remove', 'esc done'];
       else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', '→ fields', 'esc quit'];
       else { const fld = s.fields[fi]; const eh = (fld.key === 'path' && s.key === 'projects') ? '⏎ pick folder' : fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'list' || fld.kind === 'map' ? '⏎ rows' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew || s.fixed ? [] : ['d delete']), '← list', 'esc quit'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
@@ -3073,6 +3090,7 @@ async function configForm(flags, opts = {}) {
           else if (editTarget === 'newval') { if (mapEdit.list) { if (buf.trim()) { mapEdit.rows.push(buf); mapEdit.ri = mapEdit.rows.length - 1; } } else if (newKey.trim()) { mapEdit.rows.push([newKey.trim(), buf]); mapEdit.ri = mapEdit.rows.length - 1; } editing = false; editTarget = null; }
           else if (editTarget === 'ovVar') { ovEdit.rows[ovEdit.ri].var = buf.trim(); editing = false; editTarget = null; dirty = true; } // override VAR cell
           else if (editTarget === 'ovVal') { ovEdit.rows[ovEdit.ri].value = buf; editing = false; editTarget = null; dirty = true; } // override value cell
+          else if (editTarget === 'meHost') { ovEdit.rows[ovEdit.ri].host = buf; editing = false; editTarget = null; dirty = true; } // match host cell
           else { const fk = secOf().fields[fi].key; form[fk] = buf; editing = false; dirty = true; if (fk === 'path') maybeDetect(); } // committing a new project's path auto-fills the blanks
         }
         else if (k === '\x1b') { editing = false; editTarget = null; }                                       // bare esc cancels the edit
@@ -3105,14 +3123,15 @@ async function configForm(flags, opts = {}) {
         else return false;
         repaint(); return false;
       }
-      if (ovEdit) { // Environment Overrides row/column navigation (cell edits handled by the `editing` branch above)
-        const F = ovEdit, n = F.rows.length;
+      if (ovEdit) { // inline row editor (overrides + match) — cell edits handled by the `editing` branch above
+        const F = ovEdit, isMatch = F.field.kind === 'match', n = F.rows.length, maxRi = isMatch ? n - 1 : n; // match has no "+ add" row
         if (k === 'k' || k === '\x1b[A') F.ri = Math.max(0, F.ri - 1);
-        else if (k === 'j' || k === '\x1b[B') F.ri = Math.min(n, F.ri + 1);                                  // n = the "+ add" row
-        else if (k === 'h' || k === '\x1b[D') { if (F.ri < n) F.ci = Math.max(0, F.ci - 1); }
-        else if (k === 'l' || k === '\x1b[C') { if (F.ri < n) F.ci = Math.min(2, F.ci + 1); }
+        else if (k === 'j' || k === '\x1b[B') F.ri = Math.min(Math.max(0, maxRi), F.ri + 1);
+        else if (!isMatch && (k === 'h' || k === '\x1b[D')) { if (F.ri < n) F.ci = Math.max(0, F.ci - 1); } // match: env is fixed, host-only — no column nav
+        else if (!isMatch && (k === 'l' || k === '\x1b[C')) { if (F.ri < n) F.ci = Math.min(2, F.ci + 1); }
         else if (k === '\r' || k === '\n') {
-          if (F.ri === n) { F.rows.push({ var: '', value: '', peer: '' }); F.ri = F.rows.length - 1; F.ci = 0; editing = true; editTarget = 'ovVar'; buf = ''; caret = 0; } // + add -> type the VAR
+          if (isMatch) { if (F.ri < n) { editing = true; editTarget = 'meHost'; buf = String(F.rows[F.ri].host || ''); caret = buf.length; } } // match: ⏎ edits the host
+          else if (F.ri === n) { F.rows.push({ var: '', value: '', peer: '' }); F.ri = F.rows.length - 1; F.ci = 0; editing = true; editTarget = 'ovVar'; buf = ''; caret = 0; } // + add -> type the VAR
           else if (F.ci === 0) { editing = true; editTarget = 'ovVar'; buf = String(F.rows[F.ri].var || ''); caret = buf.length; }
           else if (F.ci === 1) { editing = true; editTarget = 'ovVal'; buf = String(F.rows[F.ri].value || ''); caret = buf.length; }
           else { // when-local peer -> single-select picker (projects minus self, plus "always")
@@ -3122,8 +3141,12 @@ async function configForm(flags, opts = {}) {
             panel.open(F.rows[F.ri].peer || OV_NONE);
           }
         }
-        else if (k === 'd') { if (F.ri < n) { F.rows.splice(F.ri, 1); F.ri = Math.min(F.ri, F.rows.length); F.ci = 0; } }
-        else if (k === '\x1b' || k === '\x03') { form.overrides = F.rows.filter((r) => String(r.var || '').trim()); ovEdit = null; dirty = true; } // esc commits rows (dropping blank VARs) back to the form
+        else if (!isMatch && k === 'd') { if (F.ri < n) { F.rows.splice(F.ri, 1); F.ri = Math.min(F.ri, F.rows.length); F.ci = 0; } } // match: keys can't be removed
+        else if (k === '\x1b' || k === '\x03') { // commit rows back to the form
+          if (isMatch) form.match = matchCommit(F.rows.map((r) => [r.env, r.host]));
+          else form.overrides = F.rows.filter((r) => String(r.var || '').trim());
+          ovEdit = null; dirty = true;
+        }
         else return false;
         repaint(); return false;
       }
@@ -3147,6 +3170,7 @@ async function configForm(flags, opts = {}) {
         else if (fld.kind === 'text' || fld.kind === 'name') { editing = true; buf = String(form[fld.key] || ''); caret = buf.length; }
         else if (fld.kind === 'choice' || fld.kind === 'multiselect') openPanel(fld);
         else if (fld.kind === 'map') { mapEdit = { field: fld, rows: toRows(form[fld.key]), ri: 0, list: false }; }
+        else if (fld.kind === 'match') { ovEdit = { field: fld, rows: matchLabels(form).map((env) => ({ env, host: matchValToStr((form.match || {})[env]) })), ri: 0, ci: 1 }; } // inline env→host editor (fixed keys)
         else if (fld.kind === 'list') { mapEdit = { field: fld, rows: [...(Array.isArray(form[fld.key]) ? form[fld.key] : [])], ri: 0, list: true }; }
         else if (fld.kind === 'overrides') { ovEdit = { field: fld, rows: (form[fld.key] || []).map((r) => ({ ...r })), ri: 0, ci: 0 }; } // full-pane env-overrides editor
         else if (fld.kind === 'readonly' && fld.hint) msg = fld.hint;
