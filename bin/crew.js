@@ -2888,7 +2888,7 @@ async function configForm(flags, opts = {}) {
         const row = d[leftTop + r];
         if (!row || row.kind === 'space') { L.push(''); continue; }
         if (row.kind === 'header') { L.push(`\x1b[90m${sections[row.si].title}\x1b[39m  \x1b[90m${sections[row.si].names().length}\x1b[39m`); continue; }
-        const label = row.kind === 'new' ? sections[row.si].newLabel : row.name;
+        const label = row.kind === 'new' ? sections[row.si].newLabel : (isCur(row) && form.name ? form.name : row.name); // current item shows its live (possibly-edited) name
         const on = isCur(row);
         let cell = padP((on ? '▸ ' : '  ') + clipP(label, LW - 2), LW);
         if (on && focus === 'left') cell = rev(cell); else if (row.kind === 'new') cell = `\x1b[32m${cell}\x1b[39m`;
@@ -2989,7 +2989,7 @@ async function configForm(flags, opts = {}) {
     };
 
     const openPanel = (fld) => { const items = optionsOf(fld); if (!items.length) { msg = `no ${fld.label} defined yet`; return; } panelField = fld; const single = fld.kind === 'choice'; panel = makeFilterPanel(items, { paint, title: fld.label, single }); panel.open(single ? form[fld.key] : (Array.isArray(form[fld.key]) ? form[fld.key] : [])); };
-    const openItem = () => { const cur = sel[li]; form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); focus = 'right'; fi = 0; };
+    const openItem = () => { focus = 'right'; fi = 0; }; // form already synced to sel[li] by loadForm — don't reload here (a col1→col2→col1→col2 round-trip would discard unsaved edits, e.g. a rename)
     const quit = () => { cleanup(); resolve(); return true; };
     const openDelete = (name) => { const used = secOf().key === 'guards' ? usersOf(name) : []; modal = { title: 'Delete', lines: [`Delete '${name}'?`, ...(used.length ? [`\x1b[90mused by ${used.length} project(s)\x1b[39m`] : [])], choices: [{ keys: ['y', 'Y'], label: 'y delete', run: () => { doDelete(name); modal = null; return false; } }, { keys: ['\x1b', 'n', 'N'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
     const openUnsaved = () => { modal = { title: 'Unsaved changes', lines: [`Save changes to '${form.name || form.orig || secOf().noun}' before leaving?`], choices: [{ keys: ['s', 'S'], label: 's save & exit', run: () => (doSave() ? ((modal = null), false) : quit()) }, { keys: ['d', 'D'], label: 'd discard & exit', run: quit }, { keys: ['\x1b'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
