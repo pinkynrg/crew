@@ -222,11 +222,16 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   not a separate "auto" mode: works with no `projectsDir` (type an absolute/`~` path via the escape) and for
   folders outside it; non-destructive (blanks only). Renaming a guard migrates its key AND every
   `project.guards` link; deleting a guard unlinks it everywhere (warns if in use). A `readonly` field with a
-  `.hint` shows it as a status message on `⏎`. `↑↓` move, `tab`/`←→` switch pane, `s` writes. A `dirty` flag
-  is set on any field/map/pick mutation and cleared on save (or when navigating loads a fresh item); `esc`
-  quits, but if the current form is `dirty` it opens the **`modal`** — a reusable centered-box prompt
+  `.hint` shows it as a status message on `⏎`. `↑↓` move, `tab`/`←→` switch pane, `s` writes (that item, to
+  disk). A `dirty` flag is set on any field/map/pick mutation. **Edits are a whole-session working copy**: a
+  `drafts` Map (keyed by section+item, a NEW item uses a sentinel slot) holds every edited-but-unsaved form —
+  `stashDraft` parks the current form before any navigation and `loadForm` returns the SAME draft ref if one
+  exists, so edits to ANY item survive leaving and returning (nothing rolls back until you save or discard).
+  Nothing is written to disk until `s` (that item) or **save all** on exit. `esc` `stashDraft`s then, if
+  `drafts.size`, opens the **`modal`** — a reusable centered-box prompt
   (`{title, lines, choices:[{keys, label, run()->doneBool}]}`) that captures every key until a choice runs:
-  here `s` save & exit / `d` discard & exit / `esc` cancel. The delete confirm uses the same `modal`
+  here `s` **save all** & exit (`saveAll` validates each draft, jumping to the first offender) / `d` **discard
+  all** & exit (`discardAll`) / `esc` cancel. The delete confirm uses the same `modal`
   (`y`/`esc`). `Ctrl-C` force-quits regardless. Same raw-mode primitives as the graph views
   (`splitKeys`, alt screen, absolute cursor). Its `repaint` composes from `\x1b[H` + a per-row `\x1b[K` (every
   row is rewritten each frame), NEVER a full-screen `\x1b[2J` — `2J` pushes the erased lines into scrollback on

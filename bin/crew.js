@@ -2854,7 +2854,14 @@ async function configForm(flags, opts = {}) {
   let modal = null;
 
   const secOf = () => sections[sel[li].si];
-  const loadForm = () => { const cur = sel[li]; form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); dirty = false; };
+  // In-memory edit drafts: a whole-session working copy so edits to ANY item survive navigating away and
+  // back — nothing rolls back until you save (→ disk) or discard on exit. Keyed by section + item name
+  // (a NEW item uses the section's sentinel slot). loadForm returns the SAME draft ref, so further edits
+  // keep accumulating in it. `stashDraft` parks the current form before we move off it.
+  const drafts = new Map();
+  const draftKey = (cur) => `${cur.si}:${cur.name == null ? '\x00new' : cur.name}`;
+  const stashDraft = () => { if (dirty) drafts.set(draftKey(sel[li]), form); };
+  const loadForm = () => { const cur = sel[li], key = draftKey(cur); if (drafts.has(key)) { form = drafts.get(key); dirty = true; } else { form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); dirty = false; } };
   const reselect = (si, name) => { sel = selectable(); let i = sel.findIndex((n) => n.si === si && n.name === name); if (i < 0) i = sel.findIndex((n) => n.si === si); if (i < 0) i = 0; li = Math.max(0, Math.min(i, sel.length - 1)); loadForm(); };
   const startAt = (key) => { const i = sel.findIndex((n) => sections[n.si].key === key); li = i >= 0 ? i : 0; };
   startAt(opts.section || 'projects');
@@ -2865,10 +2872,24 @@ async function configForm(flags, opts = {}) {
     const err = s.save(form);
     if (err) { msg = `\x1b[31m${err}\x1b[39m`; return err; }
     const name = String(form.name).trim();
+    drafts.delete(draftKey(sel[li])); // written to disk — no longer a pending draft
     reselect(si, name); dirty = false; msg = `\x1b[32msaved '${name}'\x1b[39m`;
     return null;
   };
-  const doDelete = (name) => { const s = secOf(), si = sel[li].si; s.del(name); reselect(si, null); focus = 'left'; msg = `removed '${name}'`; };
+  const doDelete = (name) => { const s = secOf(), si = sel[li].si; drafts.delete(draftKey(sel[li])); s.del(name); reselect(si, null); focus = 'left'; msg = `removed '${name}'`; };
+  // Save/discard EVERY pending draft (used by the on-exit prompt). saveAll runs each section's validating
+  // save; on the first error it jumps to the offending item and stops so the user can fix it.
+  const saveAll = () => {
+    stashDraft();
+    for (const [key, f] of [...drafts]) {
+      const si = Number(key.slice(0, key.indexOf(':')));
+      const err = sections[si].save(f);
+      if (err) { const nm = f.isNew ? null : (String(f.name).trim() || f.orig); drafts.delete(key); reselect(si, nm); if (nm == null) { form = f; dirty = true; } focus = 'right'; msg = `\x1b[31m${err}\x1b[39m`; return err; }
+      drafts.delete(key);
+    }
+    return null;
+  };
+  const discardAll = () => { drafts.clear(); dirty = false; };
   // When a NEW project's `path` points at a real folder, prefill the still-empty fields from folder signals
   // (detectProject). Non-destructive: only blanks are filled, so it never clobbers what you typed.
   const maybeDetect = () => {
@@ -3065,7 +3086,7 @@ async function configForm(flags, opts = {}) {
     const openItem = () => { focus = 'right'; fi = 0; }; // form already synced to sel[li] by loadForm — don't reload here (a col1→col2→col1→col2 round-trip would discard unsaved edits, e.g. a rename)
     const quit = () => { cleanup(); resolve(); return true; };
     const openDelete = (name) => { const used = secOf().key === 'guards' ? usersOf(name) : []; modal = { title: 'Delete', lines: [`Delete '${name}'?`, ...(used.length ? [`\x1b[90mused by ${used.length} project(s)\x1b[39m`] : [])], choices: [{ keys: ['y', 'Y'], label: 'y delete', run: () => { doDelete(name); modal = null; return false; } }, { keys: ['\x1b', 'n', 'N'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
-    const openUnsaved = () => { modal = { title: 'Unsaved changes', lines: [`Save changes to '${form.name || form.orig || secOf().noun}' before leaving?`], choices: [{ keys: ['s', 'S'], label: 's save & exit', run: () => (doSave() ? ((modal = null), false) : quit()) }, { keys: ['d', 'D'], label: 'd discard & exit', run: quit }, { keys: ['\x1b'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
+    const openUnsaved = () => { const n = drafts.size; modal = { title: 'Unsaved changes', lines: [`${n} unsaved change${n === 1 ? '' : 's'} — save all before leaving?`], choices: [{ keys: ['s', 'S'], label: 's save all & exit', run: () => (saveAll() ? ((modal = null), false) : quit()) }, { keys: ['d', 'D'], label: 'd discard all & exit', run: () => { discardAll(); return quit(); } }, { keys: ['\x1b'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
 
     const handleKey = (k) => {
       msg = '';
@@ -3151,12 +3172,12 @@ async function configForm(flags, opts = {}) {
         repaint(); return false;
       }
       if (k === '\x03') return quit();                                          // Ctrl-C force-quits (even with unsaved edits)
-      if (k === '\x1b') { if (dirty) { openUnsaved(); repaint(); return false; } return quit(); } // esc: prompt if the current form has unsaved edits
+      if (k === '\x1b') { stashDraft(); if (drafts.size) { openUnsaved(); repaint(); return false; } return quit(); } // esc: prompt if ANY item has unsaved edits
       if (focus === 'left') {
-        if (k === 'k' || k === '\x1b[A') { li = Math.max(0, li - 1); loadForm(); }
-        else if (k === 'j' || k === '\x1b[B') { li = Math.min(sel.length - 1, li + 1); loadForm(); }
+        if (k === 'k' || k === '\x1b[A') { stashDraft(); li = Math.max(0, li - 1); loadForm(); }
+        else if (k === 'j' || k === '\x1b[B') { stashDraft(); li = Math.min(sel.length - 1, li + 1); loadForm(); }
         else if (k === '\r' || k === '\n' || k === 'l' || k === '\x1b[C' || k === '\t') openItem();
-        else if (k === 'n') { const si = sel[li].si; if (!sections[si].fixed) { const at = sel.findIndex((x) => x.si === si && x.name == null); li = at >= 0 ? at : li; form = sections[si].blank(); focus = 'right'; fi = 0; } } // fixed sections (Settings) have no create
+        else if (k === 'n') { const si = sel[li].si; if (!sections[si].fixed) { stashDraft(); const at = sel.findIndex((x) => x.si === si && x.name == null); li = at >= 0 ? at : li; loadForm(); focus = 'right'; fi = 0; } } // fixed sections (Settings) have no create
         else if (k === 'd') { if (sel[li].name != null && !secOf().fixed) openDelete(sel[li].name); } // ...and no delete
         else return false;
         repaint(); return false;
