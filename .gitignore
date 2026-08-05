@@ -6,3 +6,4 @@ node_modules/
 demo/workspaces/
 demo/sessions/
 coverage/
+demo/.scratch-config.json

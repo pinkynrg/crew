@@ -118,6 +118,12 @@
   #config .cfg-graph { margin:1.9rem 0 0; text-align:center; }
   #config .cfg-graph figcaption { margin:0 0 .8rem; font-size:.78rem; letter-spacing:.14em; text-transform:uppercase; font-family:ui-monospace,Menlo,monospace; color:var(--accent); }
   #config .cfg-graph pre { display:inline-block; text-align:left; margin:0; padding:0; background:none; border:none; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:13px; line-height:1.15; overflow-x:auto; }
+  /* the crew config walkthrough GIF (full-width, above the file/graph grid) */
+  #config .cfg-intro { max-width:72ch; }
+  #config .cfg-cast { margin:1.7rem 0 2.6rem; }
+  #config .cfg-cast .term { max-width:880px; margin:0; }   /* left-aligned */
+  #config .cfg-cast .cast { aspect-ratio:25 / 18; }   /* matches the 1000x720 recording */
+  #config .cfg-cast figcaption { text-align:left; margin-top:.8rem; font-family:ui-monospace,Menlo,monospace; font-size:.78rem; letter-spacing:.05em; color:var(--muted); }
 
   /* grid children must be allowed to shrink below their content, or a wide code block forces the
      whole column wider than the viewport and the page scrolls sideways. */
@@ -204,12 +210,21 @@
 </section>
 
 <section id="config">
-  <div class="wrap config-grid">
-    <div class="config-copy">
-      <p class="kicker">the config file</p>
-      <h2>One file describes your stack.</h2>
-      <p class="intro">A single <code>config.json</code>: each project's folder, how to start it, and the host(s) it's served under per environment. crew reads it (plus your env files) to draw the dependency graph and wire the set you pick.</p>
-      <ul class="points">
+  <div class="wrap">
+    <p class="kicker">the config file</p>
+    <h2>You don't hand-write it.</h2>
+    <p class="intro cfg-intro"><code>crew config</code> is a visual editor: add a project by picking its folder and crew auto-detects its type, runner, env files, local URL and start command. You just confirm and fill the deployed hosts &mdash; out comes one readable <code>config.json</code>, committable, no secrets.</p>
+    <figure class="cfg-cast">
+      <div class="term">
+        <div class="bar"><i></i><i></i><i></i><span>crew config</span></div>
+        <img class="cast" src="media/crew-config.gif" alt="crew config: add a frontend and a backend by picking their folders (crew auto-fills type, runner, env, local URL and start command), fill the deployed hosts, and create a guard" loading="lazy" decoding="async">
+      </div>
+      <figcaption>add a frontend &amp; a backend from their folders (auto-filled), then a guard</figcaption>
+    </figure>
+    <div class="config-grid">
+      <div class="config-copy">
+        <p class="kicker" style="margin-top:.2rem">what it holds</p>
+        <ul class="points">
         <li><b>path</b> + <b>tasks.start</b>: where each repo lives and how to run it. Drop <b>{envfile}</b> in the command and crew injects the wired env file it materializes for the run.</li>
         <li><b>match</b>: the host(s) it's deployed under, per env. crew matches these against the URLs in your env files to <b>auto-discover who depends on whom</b>.</li>
         <li><b>local</b>: its local URL, so crew can rewrite a peer's env to point at your local copy instead of the deployed one.</li>
@@ -277,6 +292,7 @@
   }
 }</pre>
       </div>
+    </div>
     </div>
   </div>
 </section>
