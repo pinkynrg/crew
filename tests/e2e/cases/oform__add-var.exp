@@ -28,5 +28,5 @@ send "s"
 must {saved}
 send "\033"
 want_exit 0
-local_has {"DEBUG"}
-local_has {"QUEUE"}
+config_has {"DEBUG"}
+config_has {"QUEUE"}

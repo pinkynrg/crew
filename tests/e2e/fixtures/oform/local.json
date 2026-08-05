@@ -1,2 +1,1 @@
-{ "projectsDir": "__DIR__/projects",
-  "overrides": { "api": { "AWS_PROFILE": "pre_bee", "whenLocal": { "worker": { "QUEUE": "api-local" } } } } }
+{ "projectsDir": "__DIR__/projects" }

@@ -195,12 +195,12 @@ are reported as warnings (by `crew resolve`, and again at `crew start`) — neve
 mis-resolved. Cycles (a frontend↔backend reference loop) collapse into one entry cluster, so
 there's nothing extra to configure. Env names are free-form — crew has no baked-in vocabulary.
 
-**Env overrides (`local.json`).** URL swapping isn't always enough — sometimes a *value*
-must change when you run locally: a dev API key the local peer accepts, or a Temporal queue
-name so your local worker consumes `orchestra-local-ai` instead of the shared `orchestra-ai`.
+**Env overrides.** URL swapping isn't always enough — sometimes a *value*
+must change when you run locally: a Temporal queue name so your local worker consumes
+`orchestra-local-ai` instead of the shared `orchestra-ai`, say.
 `overrides` upsert extra `KEY=value` lines into a project's **wired** env file (the one crew
-builds for `{envfile}`). They live in **`local.json`** (machine-local, untracked) so secrets
-and personal values never touch the shared `config.json`:
+builds for `{envfile}`). They're a top-level table in **`config.json`** (committable — keep secrets
+out of them):
 
 ```json
 {
@@ -227,9 +227,10 @@ Each `overrides["<project>"]` table has two kinds of entry:
   `REACT_APP_BEEPLUGINURL` at your local `bee-loader` (exact host **and** path, which the
   host-only URL swap can't do), but leave it remote when the loader isn't running.
 
-Manage them in the visual editor — `crew config`, open a project, and edit the last two fields of its
-form: **`envOverride`** (bare `VAR=value` rows) and **`whenLocal`** (`peer.VAR=value` rows). They're
-machine-local (written to `local.json`); leaving them empty means no override.
+Manage them in the visual editor — `crew config`, open a project, and edit its **Environment Overrides**
+block: one row per override — `VAR = value`, with an optional *when `<peer>` is local* column (blank =
+always). Written to `config.json`; leaving the block empty means no override. (A legacy
+`local.json.overrides` auto-migrates up into `config.json` on first load.)
 
 - Overrides win over the base env file **and** the localhost URL swap; `whenLocal` wins over bare.
 - Upsert = replace an existing `VAR=` / `export VAR=` line in place, else append it.
@@ -543,8 +544,8 @@ Because `config.json` never contains machine-specific data, it's directly commit
 
 1. Keep `projects`/`guards` on relative paths (`crew config` → Settings sets the projects dir).
 2. Commit `config.json` (in a repo, or `git init` inside `~/.config/crew`). **Gitignore
-   `local.json`** (and `workspaces/`, `sessions/`, `tmp/`) — those are machine-local/generated,
-   and `local.json` may hold `overrides` secrets (dev API keys), so it must never be committed.
+   `local.json`** (and `workspaces/`, `sessions/`, `tmp/`) — those are machine-local/generated
+   (`local.json` holds your `projectsDir` + remembered picker state), so it must never be committed.
 3. A teammate installs it — clone/symlink to `~/.config/crew/config.json`, or fetch it
    straight from the repo with `crew pull <raw-url>` (backs up any current config; a private
    repo needs a token/PAT in the URL). Then set their projects dir in `crew config` → Settings

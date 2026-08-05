@@ -1,3 +1,5 @@
-{ "version": 2, "projects": {
+{ "version": 2,
+  "projects": {
     "api": { "path": "api", "type": "backend", "env": ".envs/{env}.env" },
-    "worker": { "path": "worker", "type": "backend" } } }
+    "worker": { "path": "worker", "type": "backend" } },
+  "overrides": { "api": { "AWS_PROFILE": "pre_bee", "whenLocal": { "worker": { "QUEUE": "api-local" } } } } }
