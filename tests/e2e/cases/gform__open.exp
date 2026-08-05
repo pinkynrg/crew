@@ -1,7 +1,10 @@
 source tests/e2e/lib.exp
-crun guards edit
+crun edit
 must {config editor}
-must {vpn}
+sleep 1
+send "j"
+send "j"
+sleep 1
 must {used by}
 must {api}
 send "\033"

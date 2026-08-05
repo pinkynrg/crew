@@ -1,6 +1,11 @@
 source tests/e2e/lib.exp
-crun overrides edit
-must {api}
+crun edit
+must {config editor}
+sleep 1
+send "j"
+send "j"
+send "j"
+send "j"
 sleep 1
 send "l"
 sleep 1

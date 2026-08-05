@@ -67,12 +67,11 @@ selection, so tabs 2 and 3 open the same set you started.
 ## Quick start
 
 ```sh
-crew add          # wizard: create a project (run once per project)
+crew edit         # two-pane visual editor: add/change/delete projects, guards & overrides
 crew install      # pick projects, install them (waits, reports pass/fail)
 crew start env=qa # pick projects to run locally; env = what the rest point at (remembers your pick)
 crew workspace    # open the remembered set as one VSCode window
 crew claude       # launch Claude Code over the remembered set
-crew edit         # two-pane visual editor (projects + guards); `crew edit <name>` = one-project wizard
 ```
 
 ## Concepts
@@ -142,8 +141,7 @@ run-less (skipped for that task, kept for `workspace`/`claude`).
 
 `defaultBranch` (optional) records the branch new work is cut from — repos differ
 (`main`/`master`/`develop`/`trunk`). It's pure metadata: `crew list` shows it as a `branch`
-line and `crew add`/`edit` prefills it from the repo (`origin/HEAD`, else current branch);
-crew runs no git with it.
+line; set it in `crew edit` (a project's `branch` field). crew runs no git with it.
 
 ### Placeholders & args (strict)
 
@@ -229,14 +227,8 @@ Each `overrides["<project>"]` table has two kinds of entry:
   `REACT_APP_BEEPLUGINURL` at your local `bee-loader` (exact host **and** path, which the
   host-only URL swap can't do), but leave it remote when the loader isn't running.
 
-Manage them without hand-editing:
-
-```
-crew overrides            list every override (grouped by project; whenLocal shown separately)
-crew overrides edit       two-pane visual editor (bare vars + whenLocal as `peer.VAR` rows, both editable)
-crew overrides set        pick a project, VAR, an optional "only when <peer> is local", value
-crew overrides remove     pick a project, then an entry to drop (or the whole project)
-```
+Manage them in the visual editor — `crew edit`, then scroll the left column to the **Overrides**
+section (bare vars and `whenLocal` as `peer.VAR` rows are both editable there).
 
 - Overrides win over the base env file **and** the localhost URL swap; `whenLocal` wins over bare.
 - Upsert = replace an existing `VAR=` / `export VAR=` line in place, else append it.
@@ -371,11 +363,7 @@ last pick); the selection is remembered globally. `install` is single-project: n
 Config:
 
 ```
-crew add                               wizard: create a new project
-crew edit [name]                       no name: two-pane visual editor; name: one-project wizard
-crew remove <name>                     delete a project (confirm) (alias: rm)
-crew guards [project|edit]             list/manage guards; `edit` = two-pane visual editor
-crew overrides [set|remove|edit]       per-project env overrides (local.json); `edit` = visual editor
+crew edit                              two-pane visual editor: projects, guards & overrides (add/change/delete)
 crew dir [path]                        show/set the projects dir (relative paths resolve here)
 crew config [path|edit]                print merged config / its path / open in $EDITOR
 crew check                             validate config + local.json; list errors/warnings (alias: validate)
@@ -453,25 +441,12 @@ Guards run before `crew start`.
 
 ### Managing guards
 
-All wizard/select-driven — no hand-editing:
-
-```
-crew guards [project]    list guards (all, or just a project's), with which projects use each
-crew guards edit         two-pane visual editor: pick a guard on the left, edit its fields on the right
-crew guards add          wizard: name + comment + command + failure message, then attach to projects
-crew guards remove       pick a guard to delete (also detaches it from every project)
-crew guards link         pick a guard, then toggle which projects use it (multi-select)
-crew guards unlink       pick a guard, then pick linked projects to detach
-```
-
-`crew guards edit` (and `crew edit` with no name) open the same **two-pane visual editor**: the
-left column stacks your projects and guards, each with a green `+ New …` row; the right column is
-the highlighted item's form. Create with a `+ New` row, edit fields then `s` to save, `d` to delete
-(with confirm). `crew guards edit` starts focused on the guards; `crew edit` starts on the projects.
-Renaming a guard carries its project links along; on a project, `guards` is a checklist you toggle.
-
-You can also attach guards from the project side in `crew edit <project>` (the guards
-multi-select). Both sides write the same `project.guards` list.
+Everything is the **two-pane visual editor** — run `crew edit` and scroll the left column to the
+**Guards** section: it stacks projects, guards and overrides, each with a green `+ New …` row; the
+right column is the highlighted item's form. Create with a `+ New` row, edit fields then `s` to save,
+`d` to delete (with confirm). Renaming a guard carries its project links along; on a project, `guards`
+is a checklist you toggle. `crew edit` is the only config command now — the old `crew add`/`remove`/
+`guards …`/`overrides …` verbs and the sequential wizard were all folded into it.
 
 ## The hidden workspace file
 
@@ -564,7 +539,7 @@ projects dir). A relative path with no projects dir set is a clear error pointin
 
 Because `config.json` never contains machine-specific data, it's directly committable:
 
-1. Keep `projects`/`guards` on relative paths (`crew dir` + `crew add`/`edit` do this).
+1. Keep `projects`/`guards` on relative paths (`crew dir` + `crew edit` do this).
 2. Commit `config.json` (in a repo, or `git init` inside `~/.config/crew`). **Gitignore
    `local.json`** (and `workspaces/`, `sessions/`, `tmp/`) — those are machine-local/generated,
    and `local.json` may hold `overrides` secrets (dev API keys), so it must never be committed.

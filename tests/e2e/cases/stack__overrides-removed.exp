@@ -1,4 +1,4 @@
 source tests/e2e/lib.exp
 crun overrides
-must {(?i)overrides}
-want_exit 0
+must {was removed}
+want_exit 1

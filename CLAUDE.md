@@ -82,10 +82,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   VAR=` line in place, else append; values quoted only when unsafe (non-string values skipped
   with a warning). Also the escape hatch for cross-env wiring (inject a key an env lacks) when
   env derivation + the URL swap don't cover a case. crew stays agnostic — a plain
-  per-project table. Managed via `crew overrides` (list/set/remove, select-driven; `set` prompts
-  an optional "only when <peer> is local"; writes `local.json`) or `crew overrides edit` (the two-pane
-  visual editor — bare vars and `whenLocal` (as flattened `peer.VAR` rows) both editable via the `map` field).
-  `crew check` validates both forms.
+  per-project table. Edited in the visual editor (`crew edit` → Overrides section): bare vars and
+  `whenLocal` (as flattened `peer.VAR` rows) both via the `map` field; writes `local.json`. `crew check`
+  validates both forms.
 - No groups, no `run` command. `start`/`workspace`/`claude` act on a **multiselect selection**
   (`selectMembers`, preselected with `lastSelection`); projects are never named on the CLI there
   (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
@@ -157,21 +156,18 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   their variants). No `env` (or a static path with no `{env}`) → the default `<dir>/.envs` scan (`envFilesFor`).
 - `defaultBranch` (optional, per project): the branch new work is cut from (repos differ —
   `main`/`master`/`develop`/`trunk`). Pure metadata crew records/displays (`crew list` shows a
-  `branch` line); crew runs no git with it. The `crew add`/`edit` wizard prefills it via
-  `detectDefaultBranch` (repo `origin/HEAD`, else current branch) — best-effort only, so
-  verify against the remote (`gh api repos/<owner>/<repo> --jq .default_branch`) since a local
-  `origin/HEAD` can be stale.
+  `branch` line); crew runs no git with it. Set it in `crew edit` (the `branch` field of a project).
 - Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip.
 - `guards`: top-level `guards: {name: {comment, command, message}}` registry; a project lists
   names in `project.guards` (many-to-many). `comment` is required and states what the check
   verifies — it's printed in faint gray beside each result when guards run. Before a run, the
   target's guards are deduped by name, run once each in parallel (pass = exit 0); any failure
   prints its message and aborts. Run before `crew start`. Managed via
-  the `crew guards` command (list/add/remove/link/unlink, all select-driven).
-- **Visual editor (`configForm`, TTY-only)**: the single two-pane raw-mode editor behind `crew edit` (no
-  name → focus Projects), `crew guards edit` (→ Guards) and `crew overrides edit` (→ Overrides). Left column
-  stacks the three SECTIONS (Projects + Guards + Overrides) as a name list, each ending in a
-  green `+ New …` row; the right column is the highlighted item's form. The three actions fall out of
+  the **visual editor** below (`crew edit` → Guards section: create/update/delete/link).
+- **Visual editor (`configForm`, TTY-only)**: `crew edit` is the SOLE config command — one two-pane raw-mode
+  editor for everything. Left column stacks the three SECTIONS (Projects + Guards + Overrides) as a name
+  list, each ending in a green `+ New …` row; scroll (`↑↓`) to reach a section. The right column is the
+  highlighted item's form. The three actions fall out of
   position + key — CREATE = a `+ New` row (blank form), UPDATE = edit fields then `s` save, DELETE = `d` +
   confirm. Field KINDS: `text` (a real inline line-editor with a block caret — `←/→` move, Option/Ctrl+arrow
   word-jump, Home/End or Ctrl-A/E, Ctrl-W/U/K, forward-delete, mid-string insert; pre-fills current value),
@@ -197,9 +193,12 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   (`splitKeys`, alt screen, absolute cursor) and the SAME footer: every raw-mode view renders its hint line
   through the shared `footerText` (` · `-joined parts) + `footerBar` (one full-width reverse-video bar) —
   `graphFooter` also returns `footerText(parts)`, so the graph pager, selector and config editor bars are
-  byte-for-byte the same treatment. Bare `crew guards` still lists; `crew edit <name>` + `crew add` keep the
-  sequential wizard (`collectProject`); the select-driven guard subcommands are unchanged. The v1 `checks`
-  key auto-migrates to `guards` on load.
+  byte-for-byte the same treatment. `crew edit` (no args) is the only entry. The whole old config surface —
+  `crew add`, `crew remove`, `crew guards` (+ `add/remove/link/unlink`), `crew overrides` (+ `set/remove`)
+  and the sequential wizard — was RETIRED into this editor; those verbs now error with a pointer to `crew
+  edit` (the `cmdGuards`/`cmdOverrides`/`guardList`/`overrideList`/`makePrompter`/`confirm`/`collectProject`/
+  `detectDefaultBranch` code was all deleted). The
+  v1 `checks` key auto-migrates to `guards` on load.
 - `workspaceSettings` (optional top-level object): written verbatim into the generated
   `.code-workspace` `settings` (e.g. `{"jest.enable": false}` to stop the Jest extension
   auto-running per folder). crew injects nothing by default.
@@ -237,9 +236,11 @@ No unit-test framework. Two suites, both run by `npm test`:
   default `node bin/crew.js`) — it imports NOTHING from the source, so a port to another language keeps
   the whole suite: `CREW=./crew-rs sh tests/e2e/run.sh`. Layout: `run.sh` copies `fixtures/<fx>/` to a
   tmp dir (sed `__DIR__`→tmp in `local.json`) and runs each `cases/<fx>__<scenario>.exp`; `lib.exp`
-  gives the helpers `crun`/`must`/`want_exit`/`want_done`/`config_has`. Covers check (+error/exit codes),
-  v1 migration (asserts the rewritten config), graph/resolve/list, add/edit/remove/dir/config/guards/
-  overrides, and the runner: `crew start` (picker → run-to-completion AND streamed viewer + teardown),
+  gives the helpers `crun`/`must`/`want_exit`/`want_done`/`config_has`/`local_has`. Covers check (+error/exit
+  codes), v1 migration (asserts the rewritten config), graph/resolve/list, dir/config, the visual editor
+  (`crew edit`, scrolling to the Projects/Guards/Overrides sections: create/update/delete/map-rows/pick
+  panels), the retired-command errors (`add`/`remove`/`guards`/`overrides`), and the runner: `crew start`
+  (picker → run-to-completion AND streamed viewer + teardown),
   `workspace`/`claude` (via `code`/`claude` stubs on `PATH`), env wiring + guards. Interactive tips:
   `spawn`-in-a-proc needs `global spawn_id`; the graph `pager`/picker/viewer are raw-mode alt-screen so
   quit them (`esc`/Ctrl-C) or they hang; `longRunning: []` makes `crew start` run-to-completion (auto-exit

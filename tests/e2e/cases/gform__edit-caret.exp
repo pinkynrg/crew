@@ -1,6 +1,9 @@
 source tests/e2e/lib.exp
-crun guards edit
-must {vpn}
+crun edit
+must {config editor}
+sleep 1
+send "j"
+send "j"
 sleep 1
 send "l"
 sleep 1
@@ -8,11 +11,8 @@ send "j"
 send "j"
 sleep 1
 send "\r"
-sleep 1
 send "\001"
-sleep 1
 send "X "
-sleep 1
 send "\r"
 sleep 1
 send "s"

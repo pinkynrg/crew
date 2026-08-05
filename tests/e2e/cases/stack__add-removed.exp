@@ -1,4 +1,4 @@
 source tests/e2e/lib.exp
-crun edit nope
-must {nope}
+crun add
+must {was removed}
 want_exit 1

@@ -1,6 +1,9 @@
 source tests/e2e/lib.exp
-crun guards edit
+crun edit
 must {config editor}
+sleep 1
+send "j"
+send "j"
 sleep 1
 send "n"
 must {New guard}

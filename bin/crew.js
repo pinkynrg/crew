@@ -5,9 +5,7 @@ import { join, resolve, isAbsolute, dirname } from 'node:path';
 import { spawnSync, spawn } from 'node:child_process';
 import { get as httpsGet } from 'node:https';
 import { get as httpGet } from 'node:http';
-import { createInterface } from 'node:readline/promises';
 import { emitKeypressEvents } from 'node:readline';
-import { stdin as input, stdout as output } from 'node:process';
 import { renderAsciiGraph } from './graph.js';
 
 // ==================== pkg ====================
@@ -1241,91 +1239,6 @@ export function menu({ title, items, label, multi = false, start = 0, preselecte
   });
 }
 
-// Unified prompter. On a TTY: text fields are inline-EDITABLE (the current value is
-// prefilled at the cursor — edit it, or clear it to unset), and enumerable choices use
-// the arrow menu. Over a pipe (scripts/tests): fall back to typed lines where a blank
-// keeps the prefilled default. `close()` only matters for the piped path.
-export function makePrompter() {
-  if (canInteractive()) {
-    const ask = (labelText, prefill = '') =>
-      new Promise((resolve) => {
-        const rl = createInterface({ input, output });
-        const p = rl.question(`${labelText}: `);
-        if (prefill) rl.write(prefill);
-        p.then((a) => {
-          rl.close();
-          resolve(a.trim());
-        });
-      });
-    const select = async (labelText, options, current) => {
-      const r = await menu({
-        title: labelText,
-        items: options,
-        label: (o, cur) => (cur ? c.bold(o) : o),
-        start: Math.max(0, options.indexOf(current)),
-      });
-      return r == null ? (current ?? options[0]) : r;
-    };
-    const multiselect = async (labelText, options, preselected = []) => {
-      const r = await menu({
-        title: labelText,
-        items: options,
-        label: (o, cur) => (cur ? c.bold(o) : o),
-        multi: true,
-        preselected,
-      });
-      return r == null ? preselected : r;
-    };
-    return { ask, select, multiselect, close: () => {} };
-  }
-
-  // Piped / non-interactive: one readline, line-queue (question() is unreliable here).
-  const rl = createInterface({ input, output });
-  const queue = [];
-  const waiters = [];
-  let closed = false;
-  rl.on('line', (line) => (waiters.length ? waiters.shift()(line) : queue.push(line)));
-  rl.on('close', () => {
-    closed = true;
-    while (waiters.length) waiters.shift()(null);
-  });
-  const readLine = () =>
-    queue.length
-      ? Promise.resolve(queue.shift())
-      : closed
-        ? Promise.resolve(null)
-        : new Promise((res) => waiters.push(res));
-  const ask = async (labelText, prefill = '') => {
-    output.write(`${labelText}${prefill ? ` [${prefill}]` : ''}: `);
-    const line = await readLine();
-    if (line == null) return prefill;
-    const a = line.trim();
-    return a === '' ? prefill : a;
-  };
-  const select = async (labelText, options, current) => {
-    output.write(`${labelText} (${options.join('/')})${current ? ` [${current}]` : ''}: `);
-    const line = await readLine();
-    const v = (line || '').trim();
-    return v || current || options[0];
-  };
-  const multiselect = async (labelText, options, preselected = []) => {
-    output.write(`${labelText} (space/comma separated)${preselected.length ? ` [${preselected.join(' ')}]` : ''}: `);
-    const line = await readLine();
-    const v = (line || '').trim();
-    return v ? v.split(/[\s,]+/).filter(Boolean) : preselected;
-  };
-  return { ask, select, multiselect, close: () => rl.close() };
-}
-
-export async function confirm(question) {
-  const { ask, close } = makePrompter();
-  try {
-    const a = await ask(`${question} (y/N)`, '');
-    return /^y/i.test(a);
-  } finally {
-    close();
-  }
-}
 
 // ==================== runner ====================
 // ---------------------------------------------------------------------------
@@ -2715,175 +2628,14 @@ export async function cmdPull(flags, url) {
   console.log(c.dim('  set your projects dir if needed: crew dir <path>'));
 }
 
-// Best-effort default branch (where new work is cut from): origin/HEAD if the repo knows it,
-// else the current branch. '' when git/repo unavailable. Used only to prefill the wizard.
-function detectDefaultBranch(dir) {
-  try {
-    const opts = { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
-    let r = spawnSync('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], opts);
-    let b = r.status === 0 ? r.stdout.trim() : '';
-    if (b.startsWith('origin/')) b = b.slice('origin/'.length);
-    if (!b) {
-      r = spawnSync('git', ['branch', '--show-current'], opts);
-      b = r.status === 0 ? r.stdout.trim() : '';
-    }
-    return b;
-  } catch {
-    return '';
-  }
+// crew edit — the ONE config command: a two-pane visual editor for projects, guards and overrides
+// (create/update/delete, all sections in the left column). The old add/remove/guards/overrides/config
+// verbs + the sequential wizard were all folded into it.
+export async function cmdEdit(flags) {
+  if (!canInteractive()) fail('crew edit needs an interactive terminal');
+  await configForm(flags, { section: 'projects' });
 }
 
-// Prompt for every project field, defaulting to `existing` (empty object when adding).
-// Text fields are inline-editable (prefilled with the current value — Enter keeps it, clear
-// to unset); type is a picked list. Any field the wizard doesn't manage is preserved.
-// `guardNames` are the guard names defined in the config (offered as a multi-select).
-async function collectProject(p, existing, guardNames = []) {
-  const path0 = await p.ask('Path', existing.path || '');
-  if (!path0) fail('a path is required');
-  const abs = resolveProjectPath(path0);
-  if (!pathExists(abs)) {
-    const keep = await p.ask(`Path does not exist (${abs}). Save anyway? (y/N)`, '');
-    if (!/^y/i.test(keep)) fail('aborted (path does not exist)');
-  }
-  const type = await p.select('Type', PROJECT_TYPES, existing.type || 'other');
-  const runner = await p.ask('Runner template, e.g. "npm run {task}" (empty = run-less)', existing.runner || '');
-
-  const tasks = { ...(existing.tasks || {}) };
-  const known = Object.keys(tasks);
-  if (known.length) console.log(c.dim(`current tasks: ${known.join(', ')}`));
-  console.log(c.dim('Task overrides — enter a task name to add/edit (empty to finish; clear its command to remove):'));
-  for (;;) {
-    const t = (await p.ask('  Task name', '')).trim();
-    if (!t) break;
-    const cmd = await p.ask(`  Command for '${t}'`, tasks[t] || '');
-    if (cmd) tasks[t] = cmd;
-    else delete tasks[t];
-  }
-
-  // Service-wiring fields (all optional; Enter to keep, clear to unset).
-  const env = (await p.ask('Env file for {envfile} wiring, e.g. .envs/{env} (empty = none)', existing.env || '')).trim();
-  const local = (await p.ask('Local URL, e.g. http://localhost:3000 (empty = none)', existing.local || '')).trim();
-  const matchDefault =
-    existing.match && typeof existing.match === 'object' && !Array.isArray(existing.match)
-      ? Object.entries(existing.match).flatMap(([e, v]) => (Array.isArray(v) ? v : [v]).map((h) => `${e}=${h}`)).join(' ')
-      : '';
-  const matchStr = (await p.ask('Match hosts per env, e.g. pro=api.example.com qa=qa-api.example.com (exact host or host/path; empty = none)', matchDefault)).trim();
-  const match = {};
-  if (matchStr)
-    for (const tok of matchStr.split(/\s+/)) {
-      const eq = tok.indexOf('=');
-      if (eq <= 0 || !tok.slice(eq + 1)) continue;
-      const env = tok.slice(0, eq), host = tok.slice(eq + 1);
-      if (match[env] == null) match[env] = host;
-      else match[env] = [].concat(match[env], host);
-    }
-
-  const detectedBranch = existing.defaultBranch || detectDefaultBranch(abs);
-  const defaultBranch = (await p.ask('Default branch — where new work starts (empty = none)', detectedBranch)).trim();
-
-  let guards = existing.guards || [];
-  if (guardNames.length) guards = await p.multiselect('Guards', guardNames, guards);
-
-  // Spread `existing` first so unmanaged/future fields survive; then set/unset the managed ones.
-  const project = { ...existing, path: path0, type };
-  const setOrDel = (k, v, keep) => (keep ? (project[k] = v) : delete project[k]);
-  setOrDel('runner', runner, !!runner);
-  setOrDel('env', env, !!env);
-  setOrDel('local', local, !!local);
-  setOrDel('match', match, Object.keys(match).length > 0);
-  setOrDel('defaultBranch', defaultBranch, !!defaultBranch);
-  setOrDel('tasks', tasks, Object.keys(tasks).length > 0);
-  setOrDel('guards', guards, guards && guards.length > 0);
-  return project;
-}
-
-// crew add — create a NEW project via wizard (errors if it exists).
-export async function cmdAdd(flags) {
-  const { cfg, path } = loadUserConfig(flags);
-  const p = makePrompter();
-  try {
-    const name = (await p.ask('Project name', '')).trim();
-    if (!name) fail('add: a project name is required');
-    if (cfg.projects[name]) fail(`'${name}' already exists. Use: crew edit ${name}`);
-    cfg.projects[name] = await collectProject(p, {}, Object.keys(cfg.guards || {}));
-    writeUserConfig(path, cfg);
-    console.log(`\nSaved project '${name}' to ${path}`);
-  } finally {
-    p.close();
-  }
-}
-
-// crew edit [name] — no name (interactive) opens the two-pane visual editor; a name runs the wizard.
-export async function cmdEdit(flags, name) {
-  if (!name && canInteractive()) return void (await configForm(flags, { section: 'projects' }));
-  const { cfg, path } = loadUserConfig(flags);
-  const projects = Object.keys(cfg.projects || {});
-  if (!projects.length) fail('edit: nothing to edit yet. Run: crew add');
-
-  const p = makePrompter();
-  try {
-    // No name given: pick from a list — arrow keys when interactive, else typed.
-    if (!name) {
-      if (canInteractive()) {
-        const picked = await menu({
-          title: 'Edit which project?',
-          items: projects,
-          label: (n, cur) => (cur ? c.bold(n) : n),
-        });
-        if (!picked) {
-          console.log('edit: cancelled');
-          return;
-        }
-        name = picked;
-      } else {
-        console.log('Projects: ' + projects.join(', '));
-        name = (await p.ask('Name to edit', '')).trim();
-      }
-    }
-    if (!name) fail('edit: a name is required');
-    if (!cfg.projects[name]) fail(`no such project '${name}'. Run: crew add`);
-
-    cfg.projects[name] = await collectProject(p, cfg.projects[name], Object.keys(cfg.guards || {}));
-    writeUserConfig(path, cfg);
-    console.log(`\nUpdated project '${name}' in ${path}`);
-  } finally {
-    p.close();
-  }
-}
-
-export async function cmdRemove(flags, name) {
-  if (!name) fail('remove: missing name. Usage: crew remove <name>');
-  const { cfg, path } = loadUserConfig(flags);
-  if (!cfg.projects[name])
-    fail(`no such project '${name}'.\n  projects: ${Object.keys(cfg.projects).join(', ') || '(none)'}`);
-
-  if (!(await confirm(`Delete project '${name}'?`))) return;
-  delete cfg.projects[name];
-  writeUserConfig(path, cfg);
-  console.log(`Removed project '${name}'`);
-}
-
-// crew guards [target]           -> list all guards (or a target's), with usage
-// crew guards add|remove|link|unlink -> wizard-driven management (selects, no hand-editing)
-// crew guards edit -> the two-pane visual editor (guardsForm); bare `crew guards` -> list
-const GUARD_ACTIONS = ['add', 'remove', 'link', 'unlink'];
-export async function cmdGuards(flags, sub, rest) {
-  if (sub === 'edit') return void (await configForm(flags, { section: 'guards' })); // two-pane visual editor (create/update/delete)
-  if (sub && GUARD_ACTIONS.includes(sub)) {
-    const { cfg, path } = loadUserConfig(flags);
-    const p = makePrompter();
-    try {
-      if (sub === 'add') return await guardAdd(flags, cfg, path, p);
-      const names = Object.keys(cfg.guards || {});
-      if (!names.length) fail('no guards defined yet. Add one: crew guards add');
-      if (sub === 'remove') return await guardRemove(flags, cfg, path, p);
-      return await guardLink(cfg, path, p, sub === 'link'); // link (toggle) / unlink
-    } finally {
-      p.close();
-    }
-  }
-  guardList(loadMerged(flags).cfg, sub); // sub (optional) = a target to scope the list to
-}
 
 // Two-pane raw-mode config editor. Left column stacks every SECTION (Projects, Guards) as a name list,
 // each ending in a green "+ New" row; the right column is the highlighted item's form. The three actions
@@ -3025,7 +2777,8 @@ async function configForm(flags, opts = {}) {
   const loadForm = () => { const cur = sel[li]; form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); };
   const reselect = (si, name) => { sel = selectable(); let i = sel.findIndex((n) => n.si === si && n.name === name); if (i < 0) i = sel.findIndex((n) => n.si === si); if (i < 0) i = 0; li = Math.max(0, Math.min(i, sel.length - 1)); loadForm(); };
   const startAt = (key) => { const i = sel.findIndex((n) => sections[n.si].key === key); li = i >= 0 ? i : 0; };
-  startAt(opts.section || 'projects'); loadForm();
+  startAt(opts.section || 'projects');
+  loadForm();
 
   const doSave = () => {
     const s = secOf(), si = sel[li].si;
@@ -3214,86 +2967,6 @@ async function configForm(flags, opts = {}) {
   });
 }
 
-function printGuard(reg, n) {
-  const g = reg[n] || {};
-  console.log(`  ${c.cyan(n)}`);
-  if (g.comment) console.log(`      ${c.dim('comment')}  ${faint(g.comment)}`);
-  console.log(`      ${c.dim('command')}  ${g.command || c.dim('(none)')}`);
-  if (g.message) console.log(`      ${c.dim('message')}  ${g.message}`);
-}
-function guardList(cfg, projectName) {
-  const reg = cfg.guards || {};
-  if (projectName) {
-    const members = membersFor(cfg, [projectName]);
-    const used = [...new Set(members.flatMap((m) => m.project.guards || []))];
-    console.log(c.bold(c.underline(`Guards for project '${projectName}'`)));
-    if (!used.length) return void console.log(c.dim('  (none)'));
-    for (const n of used) printGuard(reg, n);
-    return;
-  }
-  console.log(c.bold(c.underline('Guards')));
-  const names = Object.keys(reg);
-  if (!names.length) return void console.log(c.dim('  (none) — add one: crew guards add'));
-  const users = {};
-  for (const [pn, pr] of Object.entries(cfg.projects || {}))
-    for (const g of pr.guards || []) (users[g] = users[g] || []).push(pn);
-  for (const n of names) {
-    printGuard(reg, n);
-    console.log(`      ${c.dim('used by')}  ${(users[n] || []).join(', ') || c.dim('(no projects)')}`);
-  }
-}
-
-async function guardAdd(flags, cfg, path, p) {
-  const name = (await p.ask('Guard name', '')).trim();
-  if (!name) fail('guards: a name is required');
-  if (cfg.guards && cfg.guards[name]) fail(`guard '${name}' already exists`);
-  const comment = (await p.ask('What does this check verify? (shown dim at run start)', '')).trim();
-  if (!comment) fail('guards: a comment is required — it explains what the check verifies');
-  const command = (await p.ask('Check command (exit 0 = pass)', '')).trim();
-  if (!command) fail('guards: a command is required');
-  const message = (await p.ask('Failure message', '')).trim();
-  cfg.guards = cfg.guards || {};
-  cfg.guards[name] = message ? { comment, command, message } : { comment, command };
-  // Optionally attach to projects right away.
-  const projNames = Object.keys(cfg.projects || {});
-  if (projNames.length) {
-    const sel = await p.multiselect('Attach to projects', projNames, []);
-    for (const pn of sel) setProjectGuard(cfg.projects[pn], name, true);
-  }
-  writeUserConfig(path, cfg);
-  console.log(`\nSaved guard '${name}'`);
-}
-
-async function guardRemove(flags, cfg, path, p) {
-  const names = Object.keys(cfg.guards);
-  const name = await p.select('Remove which guard?', names, names[0]);
-  const yes = await p.ask(`Delete guard '${name}'? (y/N)`, '');
-  if (!/^y/i.test(yes)) return void console.log('cancelled');
-  delete cfg.guards[name];
-  for (const pr of Object.values(cfg.projects || {})) setProjectGuard(pr, name, false);
-  writeUserConfig(path, cfg);
-  console.log(`Removed guard '${name}'`);
-}
-
-async function guardLink(cfg, path, p, attach) {
-  const names = Object.keys(cfg.guards);
-  const gname = await p.select(attach ? 'Link which guard?' : 'Unlink which guard?', names, names[0]);
-  const projNames = Object.keys(cfg.projects || {});
-  if (!projNames.length) fail('no projects to link.');
-  const current = projNames.filter((pn) => (cfg.projects[pn].guards || []).includes(gname));
-  if (attach) {
-    // Toggle-multiselect over ALL projects (preselected = current) => sets membership.
-    const sel = await p.multiselect(`Projects using '${gname}'`, projNames, current);
-    for (const pn of projNames) setProjectGuard(cfg.projects[pn], gname, sel.includes(pn));
-  } else {
-    if (!current.length) return void console.log(`'${gname}' is not linked to any project.`);
-    const sel = await p.multiselect(`Remove '${gname}' from`, current, []);
-    for (const pn of sel) setProjectGuard(cfg.projects[pn], gname, false);
-  }
-  writeUserConfig(path, cfg);
-  console.log(`Updated '${gname}' links`);
-}
-
 // Add/remove a guard name on a project, keeping `guards` absent when empty.
 function setProjectGuard(project, name, on) {
   const set = new Set(project.guards || []);
@@ -3308,99 +2981,6 @@ function setProjectGuard(project, name, on) {
 // Env overrides — machine-local per-project env vars, stored in local.json (never committed).
 // Applied to a project's wired env when crew starts it (see overrideVarsFor/applyEnvOverrides).
 // ---------------------------------------------------------------------------
-const OVERRIDE_ACTIONS = ['set', 'add', 'remove', 'rm', 'unset'];
-export async function cmdOverrides(flags, sub, rest) {
-  if (sub === 'edit') return void (await configForm(flags, { section: 'overrides' })); // two-pane visual editor
-  if (sub && OVERRIDE_ACTIONS.includes(sub)) {
-    const { cfg } = loadMerged(flags);
-    const p = makePrompter();
-    try {
-      if (sub === 'set' || sub === 'add') return await overrideSet(flags, cfg, p);
-      return await overrideRemove(flags, p);
-    } finally {
-      p.close();
-    }
-  }
-  overrideList(flags, loadMerged(flags).cfg);
-}
-
-function overrideList(flags, cfg) {
-  const ovr = loadMachine(flags).overrides || {};
-  console.log(c.bold(c.underline('Env overrides')) + c.dim('  (machine-local — local.json)'));
-  const projects = Object.keys(ovr);
-  if (!projects.length) return void console.log(c.dim('  (none) — add one: crew overrides set'));
-  for (const proj of projects) {
-    const known = cfg.projects && cfg.projects[proj];
-    console.log(`  ${c.cyan(proj)}${known ? '' : c.yellow('  (unknown project)')}`);
-    const o = ovr[proj] && typeof ovr[proj] === 'object' ? ovr[proj] : {};
-    const bare = Object.keys(o).filter((k) => k !== OVERRIDE_WHEN_LOCAL);
-    const wl = o[OVERRIDE_WHEN_LOCAL] && typeof o[OVERRIDE_WHEN_LOCAL] === 'object' ? o[OVERRIDE_WHEN_LOCAL] : null;
-    if (!bare.length && !wl) console.log(`      ${c.dim('(empty)')}`);
-    for (const k of bare) console.log(`      ${k}=${o[k]}`);
-    if (wl)
-      for (const peer of Object.keys(wl)) {
-        console.log(`      ${faint(`when ${peer} is local:`)}`);
-        const pv = wl[peer] && typeof wl[peer] === 'object' ? wl[peer] : {};
-        for (const k of Object.keys(pv)) console.log(`        ${k}=${pv[k]}`);
-      }
-  }
-  console.log(faint('  bare vars apply whenever the project starts; whenLocal vars only when that peer co-runs'));
-}
-
-async function overrideSet(flags, cfg, p) {
-  const projNames = Object.keys(cfg.projects || {});
-  if (!projNames.length) fail('no projects defined — add one: crew add');
-  const proj = await p.select('Override which project?', projNames, projNames[0]);
-  const key = (await p.ask('Env var name', '')).trim();
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) fail(`invalid env var name '${key}'`);
-  const peer = (await p.ask('Only when which project runs locally? (empty = always)', '')).trim();
-  if (peer && !cfg.projects[peer]) fail(`unknown project '${peer}'`);
-  const machine = loadMachine(flags);
-  machine.overrides = machine.overrides || {};
-  const o = machine.overrides[proj] && typeof machine.overrides[proj] === 'object' ? machine.overrides[proj] : {};
-  let existing;
-  if (peer) {
-    o[OVERRIDE_WHEN_LOCAL] = o[OVERRIDE_WHEN_LOCAL] && typeof o[OVERRIDE_WHEN_LOCAL] === 'object' ? o[OVERRIDE_WHEN_LOCAL] : {};
-    o[OVERRIDE_WHEN_LOCAL][peer] = o[OVERRIDE_WHEN_LOCAL][peer] && typeof o[OVERRIDE_WHEN_LOCAL][peer] === 'object' ? o[OVERRIDE_WHEN_LOCAL][peer] : {};
-    existing = o[OVERRIDE_WHEN_LOCAL][peer][key] || '';
-  } else existing = o[key] || '';
-  const value = await p.ask(`Value for ${key}`, String(existing));
-  if (peer) o[OVERRIDE_WHEN_LOCAL][peer][key] = value;
-  else o[key] = value;
-  machine.overrides[proj] = o;
-  writeMachine(flags, machine);
-  console.log(`\nSet ${c.cyan(proj)}  ${peer ? faint(`(when ${peer} local) `) : ''}${key}=${value}`);
-}
-
-async function overrideRemove(flags, p) {
-  const machine = loadMachine(flags);
-  const ovr = machine.overrides || {};
-  const projects = Object.keys(ovr);
-  if (!projects.length) fail('no overrides defined yet. Add one: crew overrides set');
-  const proj = await p.select('Remove from which project?', projects, projects[0]);
-  const o = ovr[proj] && typeof ovr[proj] === 'object' ? ovr[proj] : {};
-  const entries = [];
-  for (const k of Object.keys(o)) if (k !== OVERRIDE_WHEN_LOCAL) entries.push({ label: k, kind: 'bare', k });
-  const wl = o[OVERRIDE_WHEN_LOCAL] && typeof o[OVERRIDE_WHEN_LOCAL] === 'object' ? o[OVERRIDE_WHEN_LOCAL] : null;
-  if (wl) for (const peer of Object.keys(wl)) for (const k of Object.keys(wl[peer] || {})) entries.push({ label: `whenLocal.${peer}.${k}`, kind: 'wl', peer, k });
-  const ALL = '(all — remove the whole project entry)';
-  const labels = entries.map((e) => e.label);
-  const choice = labels.length ? await p.select(`Remove which override from ${proj}?`, [...labels, ALL], labels[0]) : ALL;
-  if (choice === ALL) delete ovr[proj];
-  else {
-    const e = entries.find((x) => x.label === choice);
-    if (e.kind === 'bare') delete o[e.k];
-    else {
-      delete wl[e.peer][e.k];
-      if (!Object.keys(wl[e.peer]).length) delete wl[e.peer];
-      if (!Object.keys(wl).length) delete o[OVERRIDE_WHEN_LOCAL];
-    }
-    if (!Object.keys(o).length) delete ovr[proj];
-  }
-  machine.overrides = ovr;
-  writeMachine(flags, machine);
-  console.log(`\nRemoved ${choice === ALL ? `all overrides for ${proj}` : `${choice} from ${proj}`}`);
-}
 
 // ---------------------------------------------------------------------------
 // crew check — hand-rolled config validator (zero-dep, strict). Errors block (exit 1);
@@ -3624,11 +3204,7 @@ export function help() {
     ['resolve', '<env> [proj…]', 'Show the env each project resolves to for a selection (dry-run)'],
   ];
   const CONFIG = [
-    ['add', '', 'Wizard: create a new project'],
-    ['edit', '[name]', 'No name: two-pane visual editor; name: wizard for one project'],
-    ['remove', '<name>', 'Delete a project (alias rm)'],
-    ['guards', '[project|edit]', 'List/manage guards; `edit` = two-pane visual editor'],
-    ['overrides', '[set|remove|edit]', 'Per-project env overrides (local.json); `edit` = two-pane visual editor'],
+    ['edit', '', 'Two-pane visual editor: projects, guards & overrides (create/update/delete)'],
     ['dir', '[path]', 'Show/set the projects directory'],
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
     ['check', '', 'Validate the config; report errors + warnings (alias: validate)'],
@@ -3723,21 +3299,21 @@ async function main() {
       await cmdClaude(flags, rest);
       return;
     case 'add':
-      await cmdAdd(flags);
+      fail('crew add was removed — create projects visually: crew edit  (then the "+ New project" row)');
       return;
     case 'edit':
-      await cmdEdit(flags, rest[0]);
+      await cmdEdit(flags);
       return;
     case 'remove':
     case 'rm':
-      await cmdRemove(flags, rest[0]);
+      fail('crew remove was removed — delete visually: crew edit  (highlight the project, press d)');
       return;
     case 'guards':
-      await cmdGuards(flags, rest[0], rest.slice(1));
+      fail('crew guards was removed — view/edit guards in the visual editor: crew edit');
       return;
     case 'overrides':
     case 'override':
-      await cmdOverrides(flags, rest[0], rest.slice(1));
+      fail('crew overrides was removed — view/edit overrides in the visual editor: crew edit');
       return;
     case 'dir':
       cmdDir(flags, rest[0]);
