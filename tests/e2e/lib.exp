@@ -57,3 +57,14 @@ proc config_hasnt {needle} {
   set fh [open $env(CONFIG) r]; set txt [read $fh]; close $fh
   if {[string first $needle $txt] >= 0} { puts "\n!! config still has: $needle"; exit 5 }
 }
+# same, against the machine-local local.json (overrides / projectsDir live here)
+proc local_has {needle} {
+  global env
+  set fh [open "$env(TMP)/local.json" r]; set txt [read $fh]; close $fh
+  if {[string first $needle $txt] < 0} { puts "\n!! local.json missing: $needle"; exit 5 }
+}
+proc local_hasnt {needle} {
+  global env
+  set fh [open "$env(TMP)/local.json" r]; set txt [read $fh]; close $fh
+  if {[string first $needle $txt] >= 0} { puts "\n!! local.json still has: $needle"; exit 5 }
+}

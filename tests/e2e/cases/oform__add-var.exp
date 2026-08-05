@@ -1,0 +1,27 @@
+source tests/e2e/lib.exp
+crun overrides edit
+must {api}
+sleep 1
+send "l"
+sleep 1
+send "j"
+sleep 1
+send "\r"
+must {add VAR}
+sleep 1
+send "j"
+sleep 1
+send "\r"
+send "DEBUG"
+send "\r"
+send "1"
+send "\r"
+sleep 1
+send "\033"
+sleep 1
+send "s"
+must {saved}
+send "\033"
+want_exit 0
+local_has {"DEBUG"}
+local_has {"QUEUE"}

@@ -83,8 +83,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   with a warning). Also the escape hatch for cross-env wiring (inject a key an env lacks) when
   env derivation + the URL swap don't cover a case. crew stays agnostic — a plain
   per-project table. Managed via `crew overrides` (list/set/remove, select-driven; `set` prompts
-  an optional "only when <peer> is local"; writes `local.json`). `crew check` validates both
-  forms.
+  an optional "only when <peer> is local"; writes `local.json`) or `crew overrides edit` (the two-pane
+  visual editor — bare vars and `whenLocal` (as flattened `peer.VAR` rows) both editable via the `map` field).
+  `crew check` validates both forms.
 - No groups, no `run` command. `start`/`workspace`/`claude` act on a **multiselect selection**
   (`selectMembers`, preselected with `lastSelection`); projects are never named on the CLI there
   (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
@@ -168,8 +169,8 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   prints its message and aborts. Run before `crew start`. Managed via
   the `crew guards` command (list/add/remove/link/unlink, all select-driven).
 - **Visual editor (`configForm`, TTY-only)**: the single two-pane raw-mode editor behind `crew edit` (no
-  name → focus Projects) and `crew guards edit` (→ focus Guards). Left column stacks every SECTION
-  (currently Projects + Guards; Overrides is the next section to add) as a name list, each ending in a
+  name → focus Projects), `crew guards edit` (→ Guards) and `crew overrides edit` (→ Overrides). Left column
+  stacks the three SECTIONS (Projects + Guards + Overrides) as a name list, each ending in a
   green `+ New …` row; the right column is the highlighted item's form. The three actions fall out of
   position + key — CREATE = a `+ New` row (blank form), UPDATE = edit fields then `s` save, DELETE = `d` +
   confirm. Field KINDS: `text` (a real inline line-editor with a block caret — `←/→` move, Option/Ctrl+arrow
@@ -185,9 +186,13 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   match hosts have room, and `text`/`map` cells horizontally scroll to keep the caret in view (`editCell`).
   choice/multiselect reuse `makeFilterPanel`'s state/keys via `bareRows(h, w)` (unboxed, full-width); the
   graph views still use its boxed `.rows()` overlay. `save` starts from the existing object so unmanaged/future
-  keys survive. Each section owns `load/save/del`, so adding Overrides is just another
-  descriptor. Renaming a guard migrates its key AND every `project.guards` link; deleting a guard unlinks it
-  everywhere (warns if in use). `↑↓` move, `tab`/`←→` switch pane, `esc` quits (only `s` writes; field edits
+  keys survive. Each section owns `load/save/del` (Projects/Guards write the user config via
+  `writeUserConfig`; **Overrides write `local.json`** via `writeMachine` — its items are per-project bare
+  `VAR:val` maps edited with the `map` kind, and the 2-level `whenLocal` (peer→{VAR:val}) is flattened to
+  `peer.VAR`→val rows (split on the LAST dot — env var names have no dots) so it edits with the same row
+  editor and round-trips back to nested on save). Renaming a guard migrates its key AND every
+  `project.guards` link; deleting a guard unlinks it everywhere (warns if in use). A `readonly` field with a
+  `.hint` shows it as a status message on `⏎`. `↑↓` move, `tab`/`←→` switch pane, `esc` quits (only `s` writes; field edits
   and the multiselect overlay are discarded on `esc`). Same raw-mode primitives as the graph views
   (`splitKeys`, alt screen, absolute cursor) and the SAME footer: every raw-mode view renders its hint line
   through the shared `footerText` (` · `-joined parts) + `footerBar` (one full-width reverse-video bar) —

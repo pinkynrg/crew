@@ -1,0 +1,12 @@
+source tests/e2e/lib.exp
+crun overrides edit
+must {api}
+sleep 1
+send "d"
+must {Delete 'api'}
+sleep 1
+send "y"
+must {removed 'api'}
+send "\033"
+want_exit 0
+local_hasnt {"AWS_PROFILE"}

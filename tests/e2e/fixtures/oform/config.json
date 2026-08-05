@@ -1,0 +1,3 @@
+{ "version": 2, "projects": {
+    "api": { "path": "api", "type": "backend", "env": ".envs/{env}.env" },
+    "worker": { "path": "worker", "type": "backend" } } }

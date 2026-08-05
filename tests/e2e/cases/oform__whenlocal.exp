@@ -1,0 +1,28 @@
+source tests/e2e/lib.exp
+crun overrides edit
+must {api}
+sleep 1
+send "l"
+sleep 1
+send "j"
+send "j"
+sleep 1
+send "\r"
+must {worker.QUEUE}
+sleep 1
+send "j"
+sleep 1
+send "\r"
+send "db.DB_URL"
+send "\r"
+send "localhost:5432"
+send "\r"
+sleep 1
+send "\033"
+sleep 1
+send "s"
+must {saved}
+send "\033"
+want_exit 0
+local_has {"DB_URL": "localhost:5432"}
+local_has {"QUEUE"}
