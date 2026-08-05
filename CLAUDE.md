@@ -91,8 +91,8 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   (`selectMembers`, preselected with `lastSelection`); projects are never named on the CLI there
   (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
   `lastSelection` (global, machine-local) and reused across the three. `install` is the exception:
-  it acts on a **single** project — a name given on the CLI (`crew install <project>`, doesn't
-  touch `lastSelection`), else a single-select picker. A legacy `groups` key is dropped on load.
+  it acts on a **single** project chosen from a single-select picker (no CLI name; bare tokens ignored
+  with a warning; doesn't touch `lastSelection`). A legacy `groups` key is dropped on load.
 - Env derivation (replaces the old `envMap`): `{env}` is NOT a static per-project map — it's
   **derived from the chain** by `resolveEnvs(cfg, selection, selEnv)`. The **entry clusters**
   (source SCCs of the dependency graph — projects nothing else in the selection depends on) run
