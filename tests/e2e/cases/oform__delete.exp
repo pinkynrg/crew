@@ -8,7 +8,7 @@ send "j"
 send "j"
 sleep 1
 send "d"
-must {Delete 'api'}
+must {Clear overrides for 'api'}
 sleep 1
 send "y"
 must {removed 'api'}

@@ -2698,11 +2698,13 @@ async function configForm(flags, opts = {}) {
   const machine = loadMachine(flags);
   machine.overrides = machine.overrides && typeof machine.overrides === 'object' ? machine.overrides : {};
   const overrides = machine.overrides;
+  // Overrides list EVERY project (not just ones with an override) — pick a project, edit its vars/whenLocal
+  // right there (blank if none). No `project` field, no `+ New`, no picking: the row IS the project. Saving
+  // with everything cleared removes the entry; `d` clears it. `name` is carried for identity but not shown.
   const overridesSection = {
-    key: 'overrides', title: 'OVERRIDES', noun: 'override', newLabel: '+ New override',
-    names: () => Object.keys(overrides),
+    key: 'overrides', title: 'OVERRIDES', noun: 'override', noNew: true,
+    names: () => Object.keys(cfg.projects),
     fields: [
-      { key: 'name', label: 'project', kind: 'name', req: true },
       { key: 'vars', label: 'vars', kind: 'map', kLabel: 'VAR', vLabel: 'value' },
       { key: 'whenLocal', label: 'whenLocal', kind: 'map', kLabel: 'peer.VAR', vLabel: 'value' },
     ],
@@ -2711,21 +2713,23 @@ async function configForm(flags, opts = {}) {
       const vars = {}; for (const k of Object.keys(e)) if (k !== OVERRIDE_WHEN_LOCAL) vars[k] = String(e[k]);
       return { name: n, vars, whenLocal: flattenWL(e[OVERRIDE_WHEN_LOCAL]), isNew: false, orig: n };
     },
-    blank: () => ({ name: '', vars: {}, whenLocal: {}, isNew: true, orig: null }),
+    blank: () => ({ name: '', vars: {}, whenLocal: {}, isNew: false, orig: null }),
     save: (f) => {
-      const name = String(f.name).trim();
-      if (!name) return 'project is required';
-      const renaming = !f.isNew && name !== f.orig;
-      if ((f.isNew || renaming) && overrides[name]) return `overrides for '${name}' already exist`;
-      if (renaming) delete overrides[f.orig];
+      const name = f.name; // the project = the row (not an editable field)
       const entry = { ...f.vars };
       const wl = unflattenWL(f.whenLocal);
       if (Object.keys(wl).length) entry[OVERRIDE_WHEN_LOCAL] = wl;
-      overrides[name] = entry;
+      if (Object.keys(entry).length) overrides[name] = entry; else delete overrides[name]; // empty -> no entry
       writeMachine(flags, machine); return null;
     },
-    del: (n) => { delete overrides[n]; writeMachine(flags, machine); },
-    info: (f) => { const unknown = !f.isNew && !cfg.projects[f.orig] ? '\x1b[33munknown project\x1b[39m  ' : ''; return unknown + '\x1b[90mwhenLocal keys are `peer.VAR` — apply only when that peer co-runs\x1b[39m'; },
+    del: (n) => { delete overrides[n]; writeMachine(flags, machine); }, // `d` clears this project's override
+    info: (f) => {
+      const p = cfg.projects[f.name] || {};
+      const cmds = [p.runner, ...Object.values(p.tasks || {})].filter(Boolean).join(' ');
+      const wired = /\{envfile\}/.test(cmds) && p.env;
+      return wired ? '\x1b[90mvars are upserted into this project’s wired env when it starts (whenLocal = only while that peer co-runs)\x1b[39m'
+        : `\x1b[33mno {envfile} wiring — overrides won’t apply to ${f.name}\x1b[39m`;
+    },
   };
 
   // Top-level (global) config + machine-local projectsDir. A FIXED section: one synthetic item, no +New
@@ -2770,7 +2774,7 @@ async function configForm(flags, opts = {}) {
   const sections = [settingsSection, projectsSection, guardsSection, overridesSection];
   const optionsOf = (fld) => (typeof fld.options === 'function' ? fld.options() : fld.options || []);
   // FIXED sections contribute their single item but NO "+ New" row.
-  const selectable = () => { const out = []; sections.forEach((s, si) => { s.names().forEach((n) => out.push({ si, name: n })); if (!s.fixed) out.push({ si, name: null }); }); return out; };
+  const selectable = () => { const out = []; sections.forEach((s, si) => { s.names().forEach((n) => out.push({ si, name: n })); if (!s.fixed && !s.noNew) out.push({ si, name: null }); }); return out; };
   let sel = selectable();
   let li = 0, focus = 'left', fi = 0, editing = false, buf = '', caret = 0;
   let form = null, pendingDel = null, msg = '', panel = null, panelField = null, leftTop = 0;
@@ -2800,7 +2804,7 @@ async function configForm(flags, opts = {}) {
     const rev = (s) => `\x1b[7m${s}\x1b[27m`;
     const cleanup = () => { stdin.removeListener('data', onData); stdout.removeListener('resize', repaint); w('\x1b[?25h\x1b[?7h\x1b[?1049l'); if (stdin.setRawMode) stdin.setRawMode(wasRaw); stdin.pause(); };
 
-    const displayRows = () => { const d = []; sections.forEach((s, si) => { if (si) d.push({ kind: 'space' }); d.push({ kind: 'header', si }); s.names().forEach((n) => d.push({ kind: 'item', si, name: n })); if (!s.fixed) d.push({ kind: 'new', si }); }); return d; };
+    const displayRows = () => { const d = []; sections.forEach((s, si) => { if (si) d.push({ kind: 'space' }); d.push({ kind: 'header', si }); s.names().forEach((n) => d.push({ kind: 'item', si, name: n })); if (!s.fixed && !s.noNew) d.push({ kind: 'new', si }); }); return d; };
 
     const repaint = () => {
       const C = stdout.columns || 80, R = Math.max(10, stdout.rows || 24);
@@ -2890,7 +2894,7 @@ async function configForm(flags, opts = {}) {
       for (let r = 0; r < body; r++) out += '\x1b[K ' + padP(L[r] || '', LW) + ' \x1b[90m│\x1b[39m ' + (Rn[r] || '') + '\r\n';
       // ---- footer ----
       let parts;
-      if (pendingDel) parts = [`\x1b[31mDelete '${pendingDel}'?\x1b[39m`, ...(s.key === 'guards' && usersOf(pendingDel).length ? [`used by ${usersOf(pendingDel).length} project(s)`] : []), 'y delete', 'esc cancel'];
+      if (pendingDel) parts = [s.key === 'overrides' ? `\x1b[31mClear overrides for '${pendingDel}'?\x1b[39m` : `\x1b[31mDelete '${pendingDel}'?\x1b[39m`, ...(s.key === 'guards' && usersOf(pendingDel).length ? [`used by ${usersOf(pendingDel).length} project(s)`] : []), 'y delete', 'esc cancel'];
       else if (panel) parts = panelField.kind === 'choice' ? ['↑↓ pick', '⏎ apply', 'esc cancel'] : ['space toggle', 'a all', '⏎ apply', 'esc cancel'];
       else if (editing) parts = ['type', '←→ move', '⌥← word', '⏎ commit', 'esc cancel'];
       else if (mapEdit) parts = ['↑↓ row', '⏎ edit', 'd remove', 'esc done'];

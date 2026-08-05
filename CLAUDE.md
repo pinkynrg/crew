@@ -84,9 +84,10 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   VAR=` line in place, else append; values quoted only when unsafe (non-string values skipped
   with a warning). Also the escape hatch for cross-env wiring (inject a key an env lacks) when
   env derivation + the URL swap don't cover a case. crew stays agnostic — a plain
-  per-project table. Edited in the visual editor (`crew config` → Overrides section): bare vars and
-  `whenLocal` (as flattened `peer.VAR` rows) both via the `map` field; writes `local.json`. `crew check`
-  validates both forms.
+  per-project table. Edited in the visual editor (`crew config` → Overrides section), which lists EVERY
+  project (the row IS the project — no `+ New`, no project field; blank form = no override, clearing all
+  fields removes the entry, `d` clears it): bare vars and `whenLocal` (as flattened `peer.VAR` rows) both
+  via the `map` field; writes `local.json`. `crew check` validates both forms.
 - No groups, no `run` command. `start`/`workspace`/`claude` act on a **multiselect selection**
   (`selectMembers`, preselected with `lastSelection`); projects are never named on the CLI there
   (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
@@ -191,10 +192,12 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   choice/multiselect reuse `makeFilterPanel`'s state/keys via `bareRows(h, w)` (unboxed, full-width); the
   graph views still use its boxed `.rows()` overlay. `save` starts from the existing object so unmanaged/future
   keys survive. Each section owns `load/save/del` (Projects/Guards write the user config via
-  `writeUserConfig`; **Overrides write `local.json`** via `writeMachine` — its items are per-project bare
-  `VAR:val` maps edited with the `map` kind, and the 2-level `whenLocal` (peer→{VAR:val}) is flattened to
-  `peer.VAR`→val rows (split on the LAST dot — env var names have no dots) so it edits with the same row
-  editor and round-trips back to nested on save). Renaming a guard migrates its key AND every
+  `writeUserConfig`; **Overrides + `projectsDir` write `local.json`** via `writeMachine`). The **Overrides**
+  section is `noNew` (lists EVERY project — `names()` = `Object.keys(cfg.projects)` — with no `+ New` and no
+  editable project field; the row identifies the project, `save` writes/clears `overrides[row]`): per-project
+  bare `VAR:val` via the `map` kind, and the 2-level `whenLocal` (peer→{VAR:val}) flattened to `peer.VAR`→val
+  rows (split on the LAST dot — env var names have no dots) so it edits with the same row editor and
+  round-trips back to nested on save. Renaming a guard migrates its key AND every
   `project.guards` link; deleting a guard unlinks it everywhere (warns if in use). A `readonly` field with a
   `.hint` shows it as a status message on `⏎`. `↑↓` move, `tab`/`←→` switch pane, `esc` quits (only `s` writes; field edits
   and the multiselect overlay are discarded on `esc`). Same raw-mode primitives as the graph views

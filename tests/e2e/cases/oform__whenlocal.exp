@@ -10,7 +10,6 @@ sleep 1
 send "l"
 sleep 1
 send "j"
-send "j"
 sleep 1
 send "\r"
 must {worker.QUEUE}

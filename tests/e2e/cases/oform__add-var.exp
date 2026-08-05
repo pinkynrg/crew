@@ -9,8 +9,6 @@ send "j"
 sleep 1
 send "l"
 sleep 1
-send "j"
-sleep 1
 send "\r"
 must {add VAR}
 sleep 1

@@ -228,7 +228,8 @@ Each `overrides["<project>"]` table has two kinds of entry:
   host-only URL swap can't do), but leave it remote when the loader isn't running.
 
 Manage them in the visual editor — `crew config`, then scroll the left column to the **Overrides**
-section (bare vars and `whenLocal` as `peer.VAR` rows are both editable there).
+section. It lists **every project**; pick one and edit its `vars` and `whenLocal` (as `peer.VAR` rows)
+right there — a blank form means no override yet, and clearing everything (or `d`) removes the entry.
 
 - Overrides win over the base env file **and** the localhost URL swap; `whenLocal` wins over bare.
 - Upsert = replace an existing `VAR=` / `export VAR=` line in place, else append it.
