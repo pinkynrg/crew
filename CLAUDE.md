@@ -189,10 +189,13 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   (full width + height, left column stays for context) rather than a cramped popup — so long task commands /
   match hosts have room, and `text`/`map` cells horizontally scroll to keep the caret in view (`editCell`).
   choice/multiselect reuse `makeFilterPanel`'s state/keys via `bareRows(h, w)` (unboxed, full-width); the
-  graph views still use its boxed `.rows()` overlay. `save` starts from the existing object so unmanaged/future
-  keys survive. Each section owns `load/save/del`: Projects/Guards write the user config via
-  `writeUserConfig`; the Settings `projectsDir` field AND each project's `envOverride`/`whenLocal` fields
-  write `local.json` via `writeMachine`. Env **overrides live on the PROJECT form** (last two fields):
+  graph views still use its boxed `.rows()` overlay. Every editor write goes through `persist()` =
+  `writeUserConfig(path, pruneConfig(cfg))` — a WHOLE-FILE rewrite of the one in-memory `cfg` (loaded once at
+  open; last-writer-wins over external edits) that also **strips unknown keys** (`pruneConfig` whitelists
+  top-level to `TOP_KEYS`, per-project to `PROJECT_KEYS`, per-guard to `GUARD_KEYS`), so a save normalizes the
+  file. (The migration write-back in `loadUserConfig` does NOT prune — load never silently strips.) Each
+  section owns `load/save/del`: Projects/Guards write the user config; the Settings `projectsDir` field AND
+  each project's `envOverride`/`whenLocal` fields write `local.json` via `writeMachine`. Env **overrides live on the PROJECT form** (last two fields):
   `envOverride` = per-project bare `VAR:val` (`map`), `whenLocal` = the 2-level `peer→{VAR:val}` flattened to
   `peer.VAR`→val rows (split on the LAST dot — env var names have no dots) and round-tripped to nested on
   save; the project's `save` writes both stores (moving overrides on a rename, deleting them with the

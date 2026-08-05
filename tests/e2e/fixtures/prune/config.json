@@ -1,0 +1,2 @@
+{ "version": 2, "bogusTop": 1, "workspaceName": "p",
+  "projects": { "api": { "path": "api", "type": "backend", "bogusProj": "x" } } }
