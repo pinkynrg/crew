@@ -3327,20 +3327,20 @@ export function help() {
     return `  ${left}${' '.repeat(Math.max(2, COL - sig.length))}${desc}`;
   };
   const ACTIONS = [
-    ['help', '', 'Show this help (also: no args)'],
-    ['list', '', 'List projects (alias: ls)'],
-    ['install', '', 'Pick a project to install (waits, reports pass/fail)'],
-    ['start', '[args]', 'Pick projects, run their start task (local wiring)'],
-    ['workspace', '', 'Pick projects, open as one VSCode window (alias: code)'],
-    ['claude', '[session]', 'Pick projects, launch Claude Code (names the chat history, else auto)'],
-    ['graph', '[list]', 'Draw the dependency graph in a scroll/filter pager (f=filter nodes, esc=quit; list = adjacency text)'],
-    ['resolve', '<env> [proj…]', 'Show the env each project resolves to for a selection (dry-run)'],
+    ['help', '', 'Show this help'],
+    ['list', '', 'List projects'],
+    ['install', '', 'Pick a project, run its install task'],
+    ['start', '[args]', 'Pick projects, run their start task'],
+    ['workspace', '', 'Pick projects, open one VSCode window'],
+    ['claude', '[session]', 'Pick projects, launch Claude Code'],
+    ['graph', '[list]', 'Show the dependency graph (list = text)'],
+    ['resolve', '<env> [proj…]', "Show each project's resolved env (dry-run)"],
   ];
   const CONFIG = [
-    ['config', '[path]', 'Two-pane visual editor for everything (config path = print the file path)'],
-    ['check', '', 'Validate the config; report errors + warnings (alias: validate)'],
-    ['pull', '<url>', 'Load config.json from a URL (backs up current)'],
-    ['upgrade', '', 'Self-update crew to the latest npm release (alias: update)'],
+    ['config', '[path]', 'Visual config editor (path = print file path)'],
+    ['check', '', 'Validate the config'],
+    ['pull', '<url>', 'Load config.json from a URL'],
+    ['upgrade', '', 'Self-update to the latest release'],
   ];
   const FLAGS = [
     ['--config <path>', 'Use a specific config file'],
@@ -3413,7 +3413,6 @@ async function main() {
       help();
       return;
     case 'list':
-    case 'ls':
       cmdList(flags);
       return;
     case 'start':
@@ -3423,7 +3422,6 @@ async function main() {
       await cmdRun(flags, 'install', rest);
       return;
     case 'workspace':
-    case 'code':
       await cmdWorkspace(flags, rest);
       return;
     case 'claude':
@@ -3436,14 +3434,12 @@ async function main() {
       fail('crew edit is now `crew config` — the two-pane visual editor');
       return;
     case 'remove':
-    case 'rm':
       fail('crew remove was removed — delete visually: crew config  (highlight the project, press d)');
       return;
     case 'guards':
       fail('crew guards was removed — view/edit guards in: crew config');
       return;
     case 'overrides':
-    case 'override':
       fail('crew overrides was removed — view/edit overrides in: crew config');
       return;
     case 'dir':
@@ -3459,15 +3455,12 @@ async function main() {
       await cmdConfig(flags, rest[0]);
       return;
     case 'check':
-    case 'validate':
-    case 'doctor':
       cmdCheck(flags);
       return;
     case 'pull':
       await cmdPull(flags, rest[0]);
       return;
     case 'upgrade':
-    case 'update':
       cmdUpgrade();
       return;
     default:
