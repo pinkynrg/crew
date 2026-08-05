@@ -593,6 +593,14 @@ export const PROJECT_KEYS = new Set(['path', 'type', 'runner', 'env', 'local', '
 export const GUARD_KEYS = new Set(['comment', 'command', 'message']);
 export const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const isStrArr = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
+// Strip keys the schema doesn't know (top-level / per-project / per-guard) — the visual editor calls this
+// on every write so a save fully normalizes the file (unknown/typo/removed keys are dropped, not carried).
+export function pruneConfig(cfg) {
+  for (const k of Object.keys(cfg)) if (!TOP_KEYS.has(k)) delete cfg[k];
+  for (const p of Object.values(cfg.projects || {})) if (isObj(p)) for (const k of Object.keys(p)) if (!PROJECT_KEYS.has(k)) delete p[k];
+  for (const g of Object.values(cfg.guards || {})) if (isObj(g)) for (const k of Object.keys(g)) if (!GUARD_KEYS.has(k)) delete g[k];
+  return cfg;
+}
 
 // ==================== wiring ====================
 // Directed dependency edges among the given [name, project] entries: name -> Set(peer).
@@ -2607,6 +2615,7 @@ async function configForm(flags, opts = {}) {
   const { cfg, path } = loadUserConfig(flags);
   cfg.projects = cfg.projects || {};
   cfg.guards = cfg.guards || {};
+  const persist = () => writeUserConfig(path, pruneConfig(cfg)); // every editor write also strips unknown keys
   const paint = projectColors(cfg);
 
   const serializeMatch = (m) => (m && typeof m === 'object' && !Array.isArray(m))
@@ -2665,7 +2674,7 @@ async function configForm(flags, opts = {}) {
       setOrDel(proj, 'match', f.match, f.match && Object.keys(f.match).length > 0);
       setOrDel(proj, 'tasks', f.tasks, f.tasks && Object.keys(f.tasks).length > 0);
       setOrDel(proj, 'guards', f.guards, Array.isArray(f.guards) && f.guards.length > 0);
-      cfg.projects[name] = proj; writeUserConfig(path, cfg);
+      cfg.projects[name] = proj; persist();
       // machine-local env overrides -> local.json (moves with a rename; empty = no entry)
       if (renaming) delete overrides[f.orig];
       const entry = { ...f.envOverride };
@@ -2675,7 +2684,7 @@ async function configForm(flags, opts = {}) {
       writeMachine(flags, machine);
       return null;
     },
-    del: (n) => { delete cfg.projects[n]; writeUserConfig(path, cfg); if (overrides[n]) { delete overrides[n]; writeMachine(flags, machine); } },
+    del: (n) => { delete cfg.projects[n]; persist(); if (overrides[n]) { delete overrides[n]; writeMachine(flags, machine); } },
     info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveProjectPath(String(f.path).trim()); } catch { return `\x1b[90mpath\x1b[39m  ${String(f.path).trim()}  \x1b[90m(set a projects dir in Settings)\x1b[39m`; } return pathExists(abs) ? `\x1b[90mpath\x1b[39m  ${abs}  \x1b[90m· envOverride/whenLocal are machine-local (local.json)\x1b[39m` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
   };
 
@@ -2699,9 +2708,9 @@ async function configForm(flags, opts = {}) {
       if ((f.isNew || renaming) && cfg.guards[name]) return `guard '${name}' already exists`;
       if (renaming) { delete cfg.guards[f.orig]; for (const pr of Object.values(cfg.projects)) if ((pr.guards || []).includes(f.orig)) { setProjectGuard(pr, f.orig, false); setProjectGuard(pr, name, true); } }
       cfg.guards[name] = String(f.message).trim() ? { comment: String(f.comment).trim(), command: String(f.command).trim(), message: String(f.message).trim() } : { comment: String(f.comment).trim(), command: String(f.command).trim() };
-      writeUserConfig(path, cfg); return null;
+      persist(); return null;
     },
-    del: (n) => { delete cfg.guards[n]; for (const pr of Object.values(cfg.projects)) setProjectGuard(pr, n, false); writeUserConfig(path, cfg); },
+    del: (n) => { delete cfg.guards[n]; for (const pr of Object.values(cfg.projects)) setProjectGuard(pr, n, false); persist(); },
     info: (f) => f.isNew ? '' : `\x1b[90mused by\x1b[39m  ${usersOf(f.orig).join(', ') || '\x1b[90m(no projects)\x1b[39m'}`,
   };
 
@@ -2732,7 +2741,7 @@ async function configForm(flags, opts = {}) {
       setOrDel(cfg, 'workspaceName', String(f.workspaceName).trim());
       setOrDel(cfg, 'longRunning', f.longRunning, Array.isArray(f.longRunning) && f.longRunning.length > 0);
       setOrDel(cfg, 'workspaceSettings', jsonParseVals(f.workspaceSettings), f.workspaceSettings && Object.keys(f.workspaceSettings).length > 0);
-      writeUserConfig(path, cfg);
+      persist();
       const pd = String(f.projectsDir).trim();
       if (pd) machine.projectsDir = pd; else delete machine.projectsDir;
       writeMachine(flags, machine);
