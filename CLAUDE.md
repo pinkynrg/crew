@@ -69,7 +69,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   (projects/guards, relative paths) is directly committable; a legacy `projectsDir`
   in `config.json` auto-migrates to `local.json` on load. `local.json` reads from beside
   the resolved config (works with `--config`); gitignore it when committing. `local.json`
-  also holds `lastSelection` (the remembered picker selection) and `overrides` (below).
+  also holds `lastSelection` (the remembered picker selection) + UI prefs (`graphRefs`/`graphShown`/
+  `logWrap`/`hiddenLog`). (`overrides` USED to live here; it moved into the committable `config.json` —
+  a legacy `local.json.overrides` auto-migrates up on load, see below.)
 - **Missing-folder gate** (NON-blocking): the folder-consuming commands (`start`/`workspace`/`claude`/
   `install`/`graph`/`resolve`) run `warnMissing(cfg)` then `presentCfg(cfg)` — a project whose `path`
   folder is absent is EXCLUDED (as if it didn't exist) from the graph AND the selector, so you can't draw
@@ -80,8 +82,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `resolve`) exit 0. `crew check` keeps its own full report (never gated); `crew list` shows all projects
   (red/green dot per folder) plus the `warnMissing` banner. So a pulled config on a machine that hasn't
   cloned everything self-explains instead of erroring cryptically — no "set projectsDir" warning needed.
-- `overrides` (machine-local — in `local.json`, so secrets/personal values never touch the
-  shared `config.json`): extra env vars upserted into a project's **wired** env file (the one
+- `overrides` (top-level in the committable `config.json` — no secrets yet, so it's shared like the rest;
+  a legacy machine-local `local.json.overrides` auto-migrates up into `config.json` on load and is stripped
+  from `local.json`): extra env vars upserted into a project's **wired** env file (the one
   crew materializes for `{envfile}`; a project without `{envfile}` can't be overridden).
   `overrides["<project>"]` has two entry kinds: bare `VAR:val` applied whenever `<project>`
   starts (self/unconditional — e.g. a Temporal queue so the local worker consumes `foo-local`
@@ -101,8 +104,8 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   so `whenLocal` is a per-row OPTION (the `when local` column, a single-select picker of the other projects +
   an "always" choice), NOT a separate field. `⏎` on the block enters in-place row-edit (`ovEdit = {rows, ri,
   ci}`, `ci` 0=VAR 1=value 2=when): `↑↓` rows, `←→` columns, `⏎` edits the focused cell (VAR/value inline,
-  `when` opens the picker), `d` removes, `esc` commits. Writes `local.json` (moved on rename, cleared on
-  delete; empty = no entry). `crew check` validates both stored forms.
+  `when` opens the picker), `d` removes, `esc` commits. Written to `config.json` via `persist()` (moved on
+  rename, cleared on delete; empty = no entry). `crew check` validates both stored forms.
 - No groups, no `run` command. `start`/`workspace`/`claude` act on a **multiselect selection**
   (`selectMembers`, preselected with `lastSelection`); projects are never named on the CLI there
   (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
@@ -218,11 +221,12 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   open; last-writer-wins over external edits) that also **strips unknown keys** (`pruneConfig` whitelists
   top-level to `TOP_KEYS`, per-project to `PROJECT_KEYS`, per-guard to `GUARD_KEYS`), so a save normalizes the
   file. (The migration write-back in `loadUserConfig` does NOT prune — load never silently strips.) Each
-  section owns `load/save/del`: Projects/Guards write the user config; the Settings `projectsDir` field AND
-  each project's `overrides` block write `local.json` via `writeMachine`. Env **overrides live on the PROJECT
+  section owns `load/save/del`: Projects/Guards (incl. each project's `overrides` block) write the user
+  config via `persist()`; only the Settings `projectsDir` field still writes `local.json` via `writeMachine`.
+  Env **overrides live on the PROJECT
   form** as one inline **Environment Overrides** block (`kind: 'overrides'`, the `overridesToRows`/
-  `rowsToOverrides` round-trip described above) — the project's `save` writes both stores (moving overrides on
-  a rename, deleting them with the project), so there's no separate Overrides section. **Semi-auto add**: `⏎` on a project's `path` field opens
+  `rowsToOverrides` round-trip described above) — `cfg.overrides[project]` moves on a rename and is deleted
+  with the project (all via the one `persist()`), so there's no separate Overrides section. **Semi-auto add**: `⏎` on a project's `path` field opens
   a **folder picker** (`openFolderPick` — the subfolders of `projectsDir` via `projectDirs()`, single-select,
   plus a `✎ type a path…` escape that drops to the inline editor). Picking a folder (or committing a typed
   path) for a NEW project runs `detectProject(abs)` and prefills only the still-EMPTY fields — `name`

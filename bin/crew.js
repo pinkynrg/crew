@@ -384,6 +384,14 @@ export function loadUserConfig(flags) {
     delete cfg.projectsDir;
     changed = true;
   }
+  // `overrides` used to live in local.json (machine-local); it now lives in the committable config.json
+  // (no secrets). Migrate any legacy machine copy up into the config and strip it from local.json.
+  if (isObj(machine.overrides) && Object.keys(machine.overrides).length && !cfg.overrides) {
+    cfg.overrides = machine.overrides;
+    changed = true;
+    const rest = { ...machine }; delete rest.overrides;
+    try { writeMachine(flags, rest); } catch { /* read-only fs */ }
+  }
   if (changed) {
     try {
       writeUserConfig(path, cfg);
@@ -619,7 +627,7 @@ export const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 // ---------------------------------------------------------------------------
 // Config-validation key sets (used by `crew check`).
 // ---------------------------------------------------------------------------
-export const TOP_KEYS = new Set(['version', 'workspaceName', 'longRunning', 'workspaceSettings', 'projects', 'guards']);
+export const TOP_KEYS = new Set(['version', 'workspaceName', 'longRunning', 'workspaceSettings', 'projects', 'guards', 'overrides']);
 export const PROJECT_KEYS = new Set(['path', 'type', 'runner', 'env', 'local', 'match', 'tasks', 'guards', 'defaultBranch']);
 export const GUARD_KEYS = new Set(['comment', 'command', 'message']);
 export const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -977,7 +985,7 @@ export function wireText(text, peers) {
   });
 }
 
-// Local-wiring env overrides (machine-local, from local.json `overrides`). When crew starts a
+// Local-wiring env overrides (config.json `overrides` — committable, no secrets). When crew starts a
 // project locally it materializes a wired env for it; `overrides["<project>"]` upserts extra
 // `KEY=value` lines into that env. Two forms:
 //   - bare `VAR: val`  — applied whenever the project runs (e.g. a Temporal queue so your local
@@ -2054,8 +2062,8 @@ export async function cmdRun(flags, task, rest) {
   const { runnable, skipped, warnings } = resolveRun(cfg, task, members, args);
 
   // Materialize wired env files (fills {envfile}); fresh per run, cleaned up after.
-  // Env overrides come from local.json (machine-local, untracked) so secrets never hit the config.
-  const overrides = loadMachine(flags).overrides || {};
+  // Env overrides live in the config (committable — no secrets); applied to each project's wired env.
+  const overrides = cfg.overrides || {};
   const { cleanup, warnings: wireWarnings } = wireRun(userPath, runnable, members, { overrides });
 
   const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
@@ -2737,7 +2745,7 @@ async function configForm(flags, opts = {}) {
   const matchLabels = (f) => { let envs = []; try { envs = projectEnvFiles({ path: f.path, env: f.env }).map((x) => x.env); } catch { /* path unresolved */ } return [...new Set([...envs, ...Object.keys(f.match || {})])].sort(); };
   const matchValToStr = (v) => (Array.isArray(v) ? v.join(' ') : v == null ? '' : String(v)); // one env's host(s) -> a space-separated string for the value editor
   const matchCommit = (rows) => { const o = {}; for (const [k, v] of rows) { const toks = String(v).trim().split(/\s+/).filter(Boolean); if (!toks.length) continue; o[k] = toks.length === 1 ? toks[0] : toks; } return o; }; // blank = drop; several hosts = array
-  // Environment overrides ↔ editor rows. Storage (local.json) per project: bare `VAR:val` keys +
+  // Environment overrides ↔ editor rows. Storage (config.json `overrides`) per project: bare `VAR:val` keys +
   // a reserved `whenLocal: {peer:{VAR:val}}` map. The editor flattens BOTH into one flat list of
   // rows `{var, value, peer}` (peer='' = unconditional/bare), and rebuilds the storage shape on save.
   const overridesToRows = (o) => {
@@ -2761,10 +2769,10 @@ async function configForm(flags, opts = {}) {
   };
   const setOrDel = (o, key, v, keep) => { if (keep == null ? !!v : keep) o[key] = v; else delete o[key]; };
   const usersOf = (n) => Object.entries(cfg.projects).filter(([, p]) => (p.guards || []).includes(n)).map(([pn]) => pn);
-  // Machine-local env overrides (local.json) — edited as two fields at the END of each project's form.
-  const machine = loadMachine(flags);
-  machine.overrides = machine.overrides && typeof machine.overrides === 'object' ? machine.overrides : {};
-  const overrides = machine.overrides;
+  const machine = loadMachine(flags);              // projectsDir + UI prefs still live in local.json
+  // Env overrides now live in the committable config.json (no secrets) — edited as the per-project block.
+  cfg.overrides = isObj(cfg.overrides) ? cfg.overrides : {};
+  const overrides = cfg.overrides;
 
   const projectsSection = {
     key: 'projects', title: 'PROJECTS', noun: 'project', newLabel: '+ New project',
@@ -2784,8 +2792,8 @@ async function configForm(flags, opts = {}) {
       // env's host value (blank = no match). Space-separate to give one env several hosts. Union with any
       // labels already stored so existing data stays editable.
       { key: 'match', label: 'match', kind: 'match' },
-      // machine-local env overrides (local.json) — its own titled block at the end (see save/del below)
-      { key: 'overrides', label: 'overrides', kind: 'overrides', groupTitle: 'Environment Overrides  · machine-local (local.json)' },
+      // env overrides (in config.json) — its own titled block at the end (see save/del below)
+      { key: 'overrides', label: 'overrides', kind: 'overrides', groupTitle: 'Environment Overrides' },
     ],
     load: (n) => {
       const p = cfg.projects[n] || {};
@@ -2808,15 +2816,15 @@ async function configForm(flags, opts = {}) {
       setOrDel(proj, 'match', f.match, f.match && Object.keys(f.match).length > 0);
       setOrDel(proj, 'tasks', f.tasks, f.tasks && Object.keys(f.tasks).length > 0);
       setOrDel(proj, 'guards', f.guards, Array.isArray(f.guards) && f.guards.length > 0);
-      cfg.projects[name] = proj; persist();
-      // machine-local env overrides -> local.json (moves with a rename; empty = no entry)
+      cfg.projects[name] = proj;
+      // env overrides live in cfg.overrides now (moves with a rename; empty = no entry) — one persist writes it
       if (renaming) delete overrides[f.orig];
       const entry = rowsToOverrides(f.overrides);
       if (Object.keys(entry).length) overrides[name] = entry; else delete overrides[name];
-      writeMachine(flags, machine);
+      persist();
       return null;
     },
-    del: (n) => { delete cfg.projects[n]; persist(); if (overrides[n]) { delete overrides[n]; writeMachine(flags, machine); } },
+    del: (n) => { delete cfg.projects[n]; delete overrides[n]; persist(); },
     info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveProjectPath(String(f.path).trim()); } catch { return `\x1b[90mpath\x1b[39m  ${String(f.path).trim()}  \x1b[90m(set a projects dir in Settings)\x1b[39m`; } return pathExists(abs) ? `\x1b[90mpath\x1b[39m  ${abs}` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
   };
 
@@ -3266,7 +3274,7 @@ function setProjectGuard(project, name, on) {
 }
 
 // ---------------------------------------------------------------------------
-// Env overrides — machine-local per-project env vars, stored in local.json (never committed).
+// Env overrides — per-project env vars stored in config.json `overrides` (committable, no secrets).
 // Applied to a project's wired env when crew starts it (see overrideVarsFor/applyEnvOverrides).
 // ---------------------------------------------------------------------------
 
@@ -3359,32 +3367,31 @@ export function cmdCheck(flags) {
   const usedGuards = new Set(Object.values(cfg.projects || {}).flatMap((p) => (isObj(p) && Array.isArray(p.guards) ? p.guards : [])));
   for (const name of Object.keys(guards)) if (!usedGuards.has(name)) W(`guard '${name}' is defined but used by no project`);
 
-  // Machine-local local.json (overrides + remembered selection).
-  const machine = loadMachine(flags);
+  // Env overrides (config.json — committable). whenLocal is the reserved nested key.
   const projNames = new Set(Object.keys(cfg.projects || {}));
-  if (machine.overrides != null) {
-    if (!isObj(machine.overrides)) E(`local.json: overrides must be an object`);
+  if (cfg.overrides != null) {
+    if (!isObj(cfg.overrides)) E(`overrides must be an object`);
     else
-      for (const [proj, vars] of Object.entries(machine.overrides)) {
-        if (!projNames.has(proj)) W(`local.json overrides: unknown project '${proj}'`);
+      for (const [proj, vars] of Object.entries(cfg.overrides)) {
+        if (!projNames.has(proj)) W(`overrides: unknown project '${proj}'`);
         if (!isObj(vars)) {
-          E(`local.json overrides['${proj}'] must be an object of VAR:value`);
+          E(`overrides['${proj}'] must be an object of VAR:value`);
           continue;
         }
         const checkVar = (where, k, v) => {
-          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) W(`local.json ${where}: invalid env var name '${k}'`);
-          if (v === null || typeof v === 'object') W(`local.json ${where}.${k} must be a string`);
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) W(`${where}: invalid env var name '${k}'`);
+          if (v === null || typeof v === 'object') W(`${where}.${k} must be a string`);
         };
         for (const [k, v] of Object.entries(vars)) {
           if (k === OVERRIDE_WHEN_LOCAL) {
             if (!isObj(v)) {
-              E(`local.json overrides['${proj}'].whenLocal must be an object keyed by project`);
+              E(`overrides['${proj}'].whenLocal must be an object keyed by project`);
               continue;
             }
             for (const [peer, pv] of Object.entries(v)) {
-              if (!projNames.has(peer)) W(`local.json overrides['${proj}'].whenLocal: unknown project '${peer}'`);
+              if (!projNames.has(peer)) W(`overrides['${proj}'].whenLocal: unknown project '${peer}'`);
               if (!isObj(pv)) {
-                E(`local.json overrides['${proj}'].whenLocal['${peer}'] must be an object of VAR:value`);
+                E(`overrides['${proj}'].whenLocal['${peer}'] must be an object of VAR:value`);
                 continue;
               }
               for (const [vk, vv] of Object.entries(pv)) checkVar(`overrides['${proj}'].whenLocal['${peer}']`, vk, vv);
@@ -3395,6 +3402,8 @@ export function cmdCheck(flags) {
         }
       }
   }
+  // Machine-local local.json (remembered selection + prefs).
+  const machine = loadMachine(flags);
   if (Array.isArray(machine.lastSelection)) for (const n of machine.lastSelection) if (!projNames.has(n)) W(`local.json lastSelection: unknown project '${n}'`);
 
   // Report.

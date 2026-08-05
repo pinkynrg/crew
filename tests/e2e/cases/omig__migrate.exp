@@ -1,0 +1,8 @@
+# legacy overrides in local.json migrate up into the committable config.json on load; local is stripped
+source tests/e2e/lib.exp
+crun check
+want_exit 0
+config_has {"overrides"}
+config_has {"AWS_PROFILE"}
+local_hasnt {"overrides"}
+local_has {"projectsDir"}
