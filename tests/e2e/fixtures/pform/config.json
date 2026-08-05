@@ -1,5 +1,5 @@
 { "version": 2,
   "guards": { "vpn": { "comment": "vpn is up", "command": "true", "message": "connect the vpn" } },
   "projects": {
-    "api": { "path": "api", "type": "backend", "runner": "make {task}", "guards": ["vpn"], "tasks": { "start": "make run" } },
+    "api": { "path": "api", "type": "backend", "runner": "make {task}", "env": ".envs/{env}.env", "guards": ["vpn"], "tasks": { "start": "make run" } },
     "web": { "path": "web", "type": "frontend", "runner": "npm run {task}" } } }
