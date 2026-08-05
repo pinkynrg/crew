@@ -215,7 +215,10 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   (`{title, lines, choices:[{keys, label, run()->doneBool}]}`) that captures every key until a choice runs:
   here `s` save & exit / `d` discard & exit / `esc` cancel. The delete confirm uses the same `modal`
   (`y`/`esc`). `Ctrl-C` force-quits regardless. Same raw-mode primitives as the graph views
-  (`splitKeys`, alt screen, absolute cursor) and the SAME footer: every raw-mode view renders its hint line
+  (`splitKeys`, alt screen, absolute cursor). Its `repaint` composes from `\x1b[H` + a per-row `\x1b[K` (every
+  row is rewritten each frame), NEVER a full-screen `\x1b[2J` — `2J` pushes the erased lines into scrollback on
+  some terminals, which made the editor "scrollable" (a **"spirit"** left behind); the pager + log viewer already
+  paint this way, so all three leave no scrollback. Same footer too: every raw-mode view renders its hint line
   through the shared `footerText` (` · `-joined parts) + `footerBar` (one full-width reverse-video bar) —
   `graphFooter` also returns `footerText(parts)`, so the graph pager, selector and config editor bars are
   byte-for-byte the same treatment. `crew config` (no args) is the only entry. The whole old config surface —
@@ -244,7 +247,14 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   a line only when its project is in `shown`). `feed` caps each line's length at `MAX_LINE`
   (`CREW_MAX_LINE`, default 4000) and flushes an unterminated remainder longer than that — so a
   newline-less spew (minified bundle, base64/binary) can't grow `pending` unbounded or make
-  `splitRows`/`repaint` explode into hundreds of thousands of rows (which previously wedged the viewer). `f` opens the `menu` multiselect (preselected =
+  `splitRows`/`repaint` explode into hundreds of thousands of rows (which previously wedged the viewer). Pre-run
+  messages — task **skips** + **warnings** (from `resolveRun`: the unused-arg + env-derivation warnings; AND from
+  `wireRun`: env-override warnings) — are passed to `runFanout` as `notices` and **seeded into `history` as
+  `{notice:true}` rows** (unprefixed, ignore the `f` project filter, honor `/` search, excluded from `c` copy).
+  This is the anti-**"spirit"** rule: in interactive mode those messages must NOT be `console.log`/`warn`ed to the
+  MAIN screen (they'd survive the viewer's alt-screen exit as scrollback residue) — so `cmdRun` prints skips/warnings
+  inline ONLY when `!interactive` (piped / run-to-completion, no alt screen). `resolveRun` and `applyEnvOverrides`
+  therefore COLLECT their warnings into their return value instead of printing. `f` opens the `menu` multiselect (preselected =
   `shown`); applying repaints from history, so **select none = blank screen** and re-showing a
   project brings its recent lines back. Footer pinned to row R via a DECSTBM scroll region
   (`\x1b[1;R-1r`). `Ctrl-C`/`esc` -> `requestStop` (shared graceful-stop; raw mode swallows
