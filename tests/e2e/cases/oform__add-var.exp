@@ -2,12 +2,9 @@ source tests/e2e/lib.exp
 crun config
 must {config editor}
 sleep 1
-send "j"
-send "j"
-send "j"
-send "j"
-sleep 1
 send "l"
+sleep 1
+send "jjjjjjjjjj"
 sleep 1
 send "\r"
 must {add VAR}

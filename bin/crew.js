@@ -2626,6 +2626,10 @@ async function configForm(flags, opts = {}) {
   const unflattenWL = (flat) => { const wl = {}; for (const key of Object.keys(flat || {})) { const dot = String(key).lastIndexOf('.'); if (dot <= 0) continue; const peer = key.slice(0, dot), v = key.slice(dot + 1); if (!v) continue; (wl[peer] = wl[peer] || {})[v] = String(flat[key]); } return wl; };
   const setOrDel = (o, key, v, keep) => { if (keep == null ? !!v : keep) o[key] = v; else delete o[key]; };
   const usersOf = (n) => Object.entries(cfg.projects).filter(([, p]) => (p.guards || []).includes(n)).map(([pn]) => pn);
+  // Machine-local env overrides (local.json) — edited as two fields at the END of each project's form.
+  const machine = loadMachine(flags);
+  machine.overrides = machine.overrides && typeof machine.overrides === 'object' ? machine.overrides : {};
+  const overrides = machine.overrides;
 
   const projectsSection = {
     key: 'projects', title: 'PROJECTS', noun: 'project', newLabel: '+ New project',
@@ -2641,16 +2645,24 @@ async function configForm(flags, opts = {}) {
       { key: 'guards', label: 'guards', kind: 'multiselect', options: () => Object.keys(cfg.guards) },
       { key: 'defaultBranch', label: 'branch', kind: 'text' },
       { key: 'tasks', label: 'tasks', kind: 'map', kLabel: 'task', vLabel: 'command' },
+      // machine-local env overrides (local.json), shown at the end — see save/del below
+      { key: 'envOverride', label: 'envOverride', kind: 'map', kLabel: 'VAR', vLabel: 'value' },
+      { key: 'whenLocal', label: 'whenLocal', kind: 'map', kLabel: 'peer.VAR', vLabel: 'value' },
     ],
-    load: (n) => { const p = cfg.projects[n] || {}; return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', env: p.env || '', local: p.local || '', match: (p.match && typeof p.match === 'object' && !Array.isArray(p.match)) ? { ...p.match } : {}, guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: { ...(p.tasks || {}) }, isNew: false, orig: n }; },
-    blank: () => ({ name: '', path: '', type: 'other', runner: '', env: '', local: '', match: {}, guards: [], defaultBranch: '', tasks: {}, isNew: true, orig: null }),
+    load: (n) => {
+      const p = cfg.projects[n] || {};
+      const o = overrides[n] && typeof overrides[n] === 'object' ? overrides[n] : {};
+      const envOverride = {}; for (const k of Object.keys(o)) if (k !== OVERRIDE_WHEN_LOCAL) envOverride[k] = String(o[k]);
+      return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', env: p.env || '', local: p.local || '', match: (p.match && typeof p.match === 'object' && !Array.isArray(p.match)) ? { ...p.match } : {}, guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: { ...(p.tasks || {}) }, envOverride, whenLocal: flattenWL(o[OVERRIDE_WHEN_LOCAL]), isNew: false, orig: n };
+    },
+    blank: () => ({ name: '', path: '', type: 'other', runner: '', env: '', local: '', match: {}, guards: [], defaultBranch: '', tasks: {}, envOverride: {}, whenLocal: {}, isNew: true, orig: null }),
     save: (f) => {
       const name = String(f.name).trim();
       if (!name) return 'name is required';
       if (!String(f.path).trim()) return 'path is required';
       const renaming = !f.isNew && name !== f.orig;
       if ((f.isNew || renaming) && cfg.projects[name]) return `project '${name}' already exists`;
-      const base = f.isNew ? {} : { ...(cfg.projects[f.orig] || {}) }; // preserve tasks + any unmanaged/future keys
+      const base = f.isNew ? {} : { ...(cfg.projects[f.orig] || {}) }; // preserve any unmanaged/future keys
       if (renaming) delete cfg.projects[f.orig];
       const proj = { ...base, path: String(f.path).trim(), type: f.type };
       setOrDel(proj, 'runner', String(f.runner).trim());
@@ -2660,10 +2672,18 @@ async function configForm(flags, opts = {}) {
       setOrDel(proj, 'match', f.match, f.match && Object.keys(f.match).length > 0);
       setOrDel(proj, 'tasks', f.tasks, f.tasks && Object.keys(f.tasks).length > 0);
       setOrDel(proj, 'guards', f.guards, Array.isArray(f.guards) && f.guards.length > 0);
-      cfg.projects[name] = proj; writeUserConfig(path, cfg); return null;
+      cfg.projects[name] = proj; writeUserConfig(path, cfg);
+      // machine-local env overrides -> local.json (moves with a rename; empty = no entry)
+      if (renaming) delete overrides[f.orig];
+      const entry = { ...f.envOverride };
+      const wl = unflattenWL(f.whenLocal);
+      if (Object.keys(wl).length) entry[OVERRIDE_WHEN_LOCAL] = wl;
+      if (Object.keys(entry).length) overrides[name] = entry; else delete overrides[name];
+      writeMachine(flags, machine);
+      return null;
     },
-    del: (n) => { delete cfg.projects[n]; writeUserConfig(path, cfg); },
-    info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveProjectPath(String(f.path).trim()); } catch { return `\x1b[90mpath\x1b[39m  ${String(f.path).trim()}  \x1b[90m(set a projects dir in Settings)\x1b[39m`; } return pathExists(abs) ? `\x1b[90mpath\x1b[39m  ${abs}` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
+    del: (n) => { delete cfg.projects[n]; writeUserConfig(path, cfg); if (overrides[n]) { delete overrides[n]; writeMachine(flags, machine); } },
+    info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveProjectPath(String(f.path).trim()); } catch { return `\x1b[90mpath\x1b[39m  ${String(f.path).trim()}  \x1b[90m(set a projects dir in Settings)\x1b[39m`; } return pathExists(abs) ? `\x1b[90mpath\x1b[39m  ${abs}  \x1b[90m· envOverride/whenLocal are machine-local (local.json)\x1b[39m` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
   };
 
   const guardsSection = {
@@ -2690,46 +2710,6 @@ async function configForm(flags, opts = {}) {
     },
     del: (n) => { delete cfg.guards[n]; for (const pr of Object.values(cfg.projects)) setProjectGuard(pr, n, false); writeUserConfig(path, cfg); },
     info: (f) => f.isNew ? '' : `\x1b[90mused by\x1b[39m  ${usersOf(f.orig).join(', ') || '\x1b[90m(no projects)\x1b[39m'}`,
-  };
-
-  // Overrides live in local.json (machine-local), NOT the user config — keyed by project, each a bare
-  // VAR:val map plus an optional `whenLocal` (peer -> {VAR:val}). v1 edits the bare vars via the map editor;
-  // whenLocal (a 2-level map) stays read-only here, edited via `crew overrides set`.
-  const machine = loadMachine(flags);
-  machine.overrides = machine.overrides && typeof machine.overrides === 'object' ? machine.overrides : {};
-  const overrides = machine.overrides;
-  // Overrides list EVERY project (not just ones with an override) — pick a project, edit its vars/whenLocal
-  // right there (blank if none). No `project` field, no `+ New`, no picking: the row IS the project. Saving
-  // with everything cleared removes the entry; `d` clears it. `name` is carried for identity but not shown.
-  const overridesSection = {
-    key: 'overrides', title: 'OVERRIDES', noun: 'override', noNew: true,
-    names: () => Object.keys(cfg.projects),
-    fields: [
-      { key: 'vars', label: 'vars', kind: 'map', kLabel: 'VAR', vLabel: 'value' },
-      { key: 'whenLocal', label: 'whenLocal', kind: 'map', kLabel: 'peer.VAR', vLabel: 'value' },
-    ],
-    load: (n) => {
-      const e = overrides[n] && typeof overrides[n] === 'object' ? overrides[n] : {};
-      const vars = {}; for (const k of Object.keys(e)) if (k !== OVERRIDE_WHEN_LOCAL) vars[k] = String(e[k]);
-      return { name: n, vars, whenLocal: flattenWL(e[OVERRIDE_WHEN_LOCAL]), isNew: false, orig: n };
-    },
-    blank: () => ({ name: '', vars: {}, whenLocal: {}, isNew: false, orig: null }),
-    save: (f) => {
-      const name = f.name; // the project = the row (not an editable field)
-      const entry = { ...f.vars };
-      const wl = unflattenWL(f.whenLocal);
-      if (Object.keys(wl).length) entry[OVERRIDE_WHEN_LOCAL] = wl;
-      if (Object.keys(entry).length) overrides[name] = entry; else delete overrides[name]; // empty -> no entry
-      writeMachine(flags, machine); return null;
-    },
-    del: (n) => { delete overrides[n]; writeMachine(flags, machine); }, // `d` clears this project's override
-    info: (f) => {
-      const p = cfg.projects[f.name] || {};
-      const cmds = [p.runner, ...Object.values(p.tasks || {})].filter(Boolean).join(' ');
-      const wired = /\{envfile\}/.test(cmds) && p.env;
-      return wired ? '\x1b[90mvars are upserted into this project’s wired env when it starts (whenLocal = only while that peer co-runs)\x1b[39m'
-        : `\x1b[33mno {envfile} wiring — overrides won’t apply to ${f.name}\x1b[39m`;
-    },
   };
 
   // Top-level (global) config + machine-local projectsDir. A FIXED section: one synthetic item, no +New
@@ -2771,7 +2751,7 @@ async function configForm(flags, opts = {}) {
     info: (f) => { const miss = missingProjectFolders(cfg, String(f.projectsDir).trim()); const total = Object.keys(cfg.projects).length; return miss.length ? `\x1b[33m⚠ ${miss.length}/${total} project folder(s) not found under projectsDir\x1b[39m` : '\x1b[90mlongRunning = tasks that stream until Ctrl-C\x1b[39m'; },
   };
 
-  const sections = [settingsSection, projectsSection, guardsSection, overridesSection];
+  const sections = [settingsSection, projectsSection, guardsSection];
   const optionsOf = (fld) => (typeof fld.options === 'function' ? fld.options() : fld.options || []);
   // FIXED sections contribute their single item but NO "+ New" row.
   const selectable = () => { const out = []; sections.forEach((s, si) => { s.names().forEach((n) => out.push({ si, name: n })); if (!s.fixed && !s.noNew) out.push({ si, name: null }); }); return out; };
@@ -2894,7 +2874,7 @@ async function configForm(flags, opts = {}) {
       for (let r = 0; r < body; r++) out += '\x1b[K ' + padP(L[r] || '', LW) + ' \x1b[90m│\x1b[39m ' + (Rn[r] || '') + '\r\n';
       // ---- footer ----
       let parts;
-      if (pendingDel) parts = [s.key === 'overrides' ? `\x1b[31mClear overrides for '${pendingDel}'?\x1b[39m` : `\x1b[31mDelete '${pendingDel}'?\x1b[39m`, ...(s.key === 'guards' && usersOf(pendingDel).length ? [`used by ${usersOf(pendingDel).length} project(s)`] : []), 'y delete', 'esc cancel'];
+      if (pendingDel) parts = [`\x1b[31mDelete '${pendingDel}'?\x1b[39m`, ...(s.key === 'guards' && usersOf(pendingDel).length ? [`used by ${usersOf(pendingDel).length} project(s)`] : []), 'y delete', 'esc cancel'];
       else if (panel) parts = panelField.kind === 'choice' ? ['↑↓ pick', '⏎ apply', 'esc cancel'] : ['space toggle', 'a all', '⏎ apply', 'esc cancel'];
       else if (editing) parts = ['type', '←→ move', '⌥← word', '⏎ commit', 'esc cancel'];
       else if (mapEdit) parts = ['↑↓ row', '⏎ edit', 'd remove', 'esc done'];

@@ -2,12 +2,9 @@ source tests/e2e/lib.exp
 crun config
 must {config editor}
 sleep 1
-send "j"
-send "j"
-send "j"
-send "j"
+send "l"
 sleep 1
-must {Override}
+must {envOverride}
 must {AWS_PROFILE}
 must {whenLocal}
 send "\033"

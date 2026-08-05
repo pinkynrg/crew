@@ -2,16 +2,19 @@ source tests/e2e/lib.exp
 crun config
 must {config editor}
 sleep 1
-send "j"
-send "j"
-send "j"
-send "j"
+send "l"
+sleep 1
+send "jjjjjjjjjj"
+sleep 1
+send "\r"
+must {AWS_PROFILE}
 sleep 1
 send "d"
-must {Clear overrides for 'api'}
 sleep 1
-send "y"
-must {removed 'api'}
+send "\033"
+sleep 1
+send "s"
+must {saved}
 send "\033"
 want_exit 0
 local_hasnt {"AWS_PROFILE"}
