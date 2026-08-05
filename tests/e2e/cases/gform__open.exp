@@ -1,0 +1,8 @@
+source tests/e2e/lib.exp
+crun guards edit
+must {crew guards}
+must {vpn}
+must {used by}
+must {api}
+send "q"
+want_exit 0

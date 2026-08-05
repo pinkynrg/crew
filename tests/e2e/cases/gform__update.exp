@@ -1,0 +1,19 @@
+source tests/e2e/lib.exp
+crun guards edit
+must {vpn}
+sleep 1
+send "l"
+sleep 1
+send "j"
+send "j"
+send "j"
+sleep 1
+send "\r"
+send " now"
+send "\r"
+sleep 1
+send "s"
+must {saved}
+send "q"
+want_exit 0
+config_has {connect the vpn now}

@@ -466,7 +466,17 @@ function graphFooter({ mode, total, sel, vis, shown, hasRef, showRef, warn = '',
   if (hasRef) parts.push(`r refs ${showRef ? 'on' : 'off'}`);
   if (mode === 'select') parts.push('enter run');
   parts.push(mode === 'select' ? 'q cancel' : 'q quit');
-  return ` ${parts.join(' · ')} `;
+  return footerText(parts);
+}
+
+// Shared footer rendering for every raw-mode view (graph pager, selector, guards editor), so they all
+// look identical: a ` · `-joined hint line (footerText) painted as one full-width reverse-video bar
+// (footerBar). Callers prepend `\x1b[K` + any cursor positioning. ANSI inside survives the bar as long
+// as it resets with `\x1b[39m`/`\x1b[27m` (fg/attr only), never a full `\x1b[0m`.
+function footerText(parts) { return ` ${parts.filter(Boolean).join(' · ')} `; }
+function footerBar(inner, cols) {
+  const wide = [...inner.replace(/\x1b\[[0-9;]*m/g, '')].length; // display width, ANSI-stripped
+  return '\x1b[7m' + inner + ' '.repeat(Math.max(0, cols - wide)) + '\x1b[0m';
 }
 
 // Split one stdin `data` chunk into individual key tokens — a single read can bundle several
@@ -2373,7 +2383,7 @@ async function graphSelect(flags, cfg, opts = {}) {
       for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + (li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
       const split = cpw(connectivityStatus(cfg, depEdges, [...active], false)) > 0; // non-verbose returns islands text only when disconnected
       const bar = graphFooter({ mode: 'select', total: nodes.length, sel: active.size, vis: shown.size, hasRef, showRef, warn: split ? '⚠ not connected' : '' });
-      out += '\x1b[K\x1b[7m' + bar + ' '.repeat(Math.max(0, cols - cpw(bar))) + '\x1b[0m'; // one full-width reverse-video footer
+      out += '\x1b[K' + footerBar(bar, cols); // one full-width reverse-video footer (shared with the pager + guards editor)
       if (panel.active) {                                                                 // filter panel overlays the graph's right columns (graph stays visible)
         const pr = panel.rows(R), col = Math.max(1, cols - panel.width + 1);
         for (let i = 0; i < pr.length && i < R; i++) out += `\x1b[${i + 1};${col}H` + pr[i];
@@ -2470,7 +2480,7 @@ function pagerView(text, meta = {}) {
       for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + (li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
       const scroll = lines.length > R ? `↑↓ scroll ${top + 1}-${Math.min(top + R, lines.length)}/${lines.length}` : ''; // position only when it overflows
       const bar = graphFooter({ mode: 'pager', shown: shownCount, total: meta.total, hasRef: meta.hasRef, showRef: meta.showRef, scroll });
-      out += '\x1b[K\x1b[7m' + bar + ' '.repeat(Math.max(0, cols - cpw(bar))) + '\x1b[0m'; // full-width footer bar
+      out += '\x1b[K' + footerBar(bar, cols); // full-width reverse-video bar (shared with the selector + guards editor)
       if (panel && panel.active) {                                                        // filter panel overlays the graph's right columns
         const pr = panel.rows(R), col = Math.max(1, cols - panel.width + 1);
         for (let i = 0; i < pr.length && i < R; i++) out += `\x1b[${i + 1};${col}H` + pr[i];
@@ -2833,8 +2843,10 @@ export async function cmdRemove(flags, name) {
 
 // crew guards [target]           -> list all guards (or a target's), with usage
 // crew guards add|remove|link|unlink -> wizard-driven management (selects, no hand-editing)
+// crew guards edit -> the two-pane visual editor (guardsForm); bare `crew guards` -> list
 const GUARD_ACTIONS = ['add', 'remove', 'link', 'unlink'];
 export async function cmdGuards(flags, sub, rest) {
+  if (sub === 'edit') return void (await guardsForm(flags)); // two-pane visual editor (create/update/delete)
   if (sub && GUARD_ACTIONS.includes(sub)) {
     const { cfg, path } = loadUserConfig(flags);
     const p = makePrompter();
@@ -2849,6 +2861,155 @@ export async function cmdGuards(flags, sub, rest) {
     }
   }
   guardList(loadMerged(flags).cfg, sub); // sub (optional) = a target to scope the list to
+}
+
+// Two-pane raw-mode editor for the guards registry (`crew guards edit`). Left column: each guard name
+// plus a green "+ New guard" row; right column: the highlighted guard's fields. The three actions fall
+// out of position + key: CREATE = the +New row (blank form), UPDATE = edit fields then `s` save, DELETE
+// = `d` on a guard (confirm). Zero-dep, same raw-mode primitives as the graph views (splitKeys, alt
+// screen, absolute cursor). Built generically so Projects/Overrides can become extra left-column sections.
+async function guardsForm(flags) {
+  const stdout = process.stdout, stdin = process.stdin;
+  if (!stdout.isTTY || !stdin.isTTY) fail('crew guards edit needs an interactive terminal (try: crew guards)');
+  const { cfg, path } = loadUserConfig(flags);
+  cfg.guards = cfg.guards || {};
+  const NEW = '+ New guard';
+  const FIELDS = [
+    { key: 'name', label: 'name' },
+    { key: 'comment', label: 'comment' },
+    { key: 'command', label: 'command' },
+    { key: 'message', label: 'message' },
+  ];
+  const REQUIRED = new Set(['name', 'comment', 'command']); // message is optional
+  let names = Object.keys(cfg.guards);
+  let items = [...names, NEW];
+  let li = 0, focus = 'left', fi = 0, editing = false, buf = '';
+  let form = null, confirm = null, msg = '';
+
+  const usersOf = (n) => Object.entries(cfg.projects || {}).filter(([, p]) => (p.guards || []).includes(n)).map(([pn]) => pn);
+  const blank = () => ({ name: '', comment: '', command: '', message: '', isNew: true, orig: null });
+  const loadForm = () => {
+    const it = items[li];
+    if (it === NEW) { form = blank(); return; }
+    const g = cfg.guards[it] || {};
+    form = { name: it, comment: g.comment || '', command: g.command || '', message: g.message || '', isNew: false, orig: it };
+  };
+  const refresh = (keep) => { names = Object.keys(cfg.guards); items = [...names, NEW]; if (keep != null) { const at = items.indexOf(keep); li = at >= 0 ? at : Math.min(li, items.length - 1); } };
+  loadForm();
+
+  const save = () => {
+    const f = form, name = f.name.trim();
+    for (const k of FIELDS) if (REQUIRED.has(k.key) && !String(f[k.key]).trim()) { msg = `\x1b[31m${k.label} is required\x1b[39m`; return; }
+    if (f.isNew && cfg.guards[name]) { msg = `\x1b[31mguard '${name}' already exists\x1b[39m`; return; }
+    if (!f.isNew && name !== f.orig) { // rename: migrate the key + every project link
+      if (cfg.guards[name]) { msg = `\x1b[31mguard '${name}' already exists\x1b[39m`; return; }
+      delete cfg.guards[f.orig];
+      for (const pr of Object.values(cfg.projects || {})) if ((pr.guards || []).includes(f.orig)) { setProjectGuard(pr, f.orig, false); setProjectGuard(pr, name, true); }
+    }
+    cfg.guards[name] = f.message.trim() ? { comment: f.comment.trim(), command: f.command.trim(), message: f.message.trim() } : { comment: f.comment.trim(), command: f.command.trim() };
+    writeUserConfig(path, cfg);
+    refresh(name); loadForm(); msg = `\x1b[32msaved '${name}'\x1b[39m`;
+  };
+  const del = (name) => {
+    delete cfg.guards[name];
+    for (const pr of Object.values(cfg.projects || {})) setProjectGuard(pr, name, false);
+    writeUserConfig(path, cfg);
+    li = Math.max(0, Math.min(li, items.length - 2)); refresh(); li = Math.min(li, items.length - 1); loadForm(); focus = 'left'; msg = `removed '${name}'`;
+  };
+
+  return new Promise((resolve) => {
+    const w = (x) => stdout.write(x);
+    const wasRaw = stdin.isRaw;
+    const disp = (s) => [...String(s).replace(/\x1b\[[0-9;]*m/g, '')].length;
+    const clipP = (s, n) => { const a = [...String(s)]; return a.length > n ? a.slice(0, Math.max(0, n - 1)).join('') + '…' : String(s); };
+    const padP = (s, n) => { const d = [...String(s)].length; return d >= n ? String(s) : String(s) + ' '.repeat(n - d); };
+    const rev = (s) => `\x1b[7m${s}\x1b[27m`;
+    const cleanup = () => { stdin.removeListener('data', onData); stdout.removeListener('resize', repaint); w('\x1b[?25h\x1b[?7h\x1b[?1049l'); if (stdin.setRawMode) stdin.setRawMode(wasRaw); stdin.pause(); };
+
+    const repaint = () => {
+      const C = stdout.columns || 80, R = Math.max(10, stdout.rows || 24);
+      const LW = Math.min(30, Math.max(16, (C * 0.32) | 0)), RX = LW + 3, RW = Math.max(12, C - RX - 1);
+      const body = R - 2; // title (1) + footer (1) -> body fills the rest, footer pinned to the last row
+      // ---- left column ----
+      const L = [`\x1b[90mGUARDS\x1b[39m  \x1b[90m${names.length}\x1b[39m`, ''];
+      items.forEach((it, i) => {
+        const cur = i === li, isNew = it === NEW;
+        let cell = padP((cur ? '▸ ' : '  ') + clipP(it, LW - 2), LW);
+        if (cur && focus === 'left') cell = rev(cell); else if (isNew) cell = `\x1b[32m${cell}\x1b[39m`;
+        L.push(cell);
+      });
+      // ---- right column ----
+      const Rn = [];
+      Rn.push(form.isNew ? '\x1b[1mNew guard\x1b[22m' : `\x1b[1mGuard\x1b[22m \x1b[90m·\x1b[39m ${form.name || form.orig}`);
+      Rn.push('');
+      FIELDS.forEach((fld, i) => {
+        const on = focus === 'right' && i === fi;
+        const val = editing && on ? buf + '\x1b[7m \x1b[27m' : (String(form[fld.key]) || (REQUIRED.has(fld.key) ? '\x1b[90m(required)\x1b[39m' : '\x1b[90m(optional)\x1b[39m'));
+        const lab = padP(fld.label, 9);
+        Rn.push(`  ${on && !editing ? rev(' ' + lab) : '\x1b[90m ' + lab + '\x1b[39m'} ${clipP(val, RW - 12)}`);
+      });
+      if (!form.isNew) { Rn.push(''); const u = usersOf(form.orig); Rn.push(`  \x1b[90mused by\x1b[39m  ${u.length ? u.join(', ') : '\x1b[90m(no projects)\x1b[39m'}`); }
+      // ---- compose ----
+      let out = '\x1b[H\x1b[2J';
+      out += '\x1b[K ' + '\x1b[1mcrew guards\x1b[22m' + '\x1b[90m  ·  visual editor\x1b[39m' + '\r\n';
+      for (let r = 0; r < body; r++) {
+        const lc = padP(L[r] || '', LW), rc = Rn[r] || '';
+        out += '\x1b[K ' + lc + ' \x1b[90m│\x1b[39m ' + rc + '\r\n';
+      }
+      // ---- footer (same full-width reverse-video bar as the graph views) ----
+      let parts;
+      if (confirm) parts = [`\x1b[31mDelete '${confirm}'?\x1b[39m`, ...(usersOf(confirm).length ? [`used by ${usersOf(confirm).length} project(s)`] : []), 'y delete', 'esc cancel'];
+      else if (editing) parts = ['type to edit', '⏎ commit', 'esc cancel'];
+      else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', '→ fields', 'q quit'];
+      else parts = ['↑↓ field', '⏎ edit', 's save', 'd delete', '← list', 'q quit'];
+      if (msg) parts = [msg, ...parts];
+      out += '\x1b[K' + footerBar(footerText(parts), C);
+      w(out);
+    };
+
+    const startNew = () => { li = items.length - 1; loadForm(); focus = 'right'; fi = 0; };
+    const openItem = () => { if (items[li] === NEW) { form = blank(); } else loadForm(); focus = 'right'; fi = 0; };
+
+    const handleKey = (k) => {
+      msg = '';
+      if (confirm) { if (k === 'y' || k === 'Y') del(confirm); confirm = null; repaint(); return false; }
+      if (editing) {
+        if (k === '\r' || k === '\n') { form[FIELDS[fi].key] = buf; editing = false; }
+        else if (k === '\x1b') editing = false;                                  // cancel edit
+        else if (k === '\x7f' || k === '\b') buf = buf.slice(0, -1);
+        else if (k.length === 1 && k >= ' ') buf += k;                           // printable
+        else return false;                                                       // ignore arrows etc while editing
+        repaint(); return false;
+      }
+      if (k === '\x03' || k === 'q') { cleanup(); resolve(); return true; }
+      if (focus === 'left') {
+        if (k === 'k' || k === '\x1b[A') { li = Math.max(0, li - 1); loadForm(); }
+        else if (k === 'j' || k === '\x1b[B') { li = Math.min(items.length - 1, li + 1); loadForm(); }
+        else if (k === '\r' || k === '\n') openItem();
+        else if (k === 'l' || k === '\x1b[C' || k === '\t') { if (items[li] === NEW) openItem(); else { focus = 'right'; fi = 0; } }
+        else if (k === 'n') startNew();
+        else if (k === 'd') { if (items[li] !== NEW) confirm = items[li]; }
+        else return false;
+        repaint(); return false;
+      }
+      // focus === 'right'
+      if (k === 'k' || k === '\x1b[A') fi = Math.max(0, fi - 1);
+      else if (k === 'j' || k === '\x1b[B') fi = Math.min(FIELDS.length - 1, fi + 1);
+      else if (k === '\r' || k === '\n') { editing = true; buf = String(form[FIELDS[fi].key] || ''); }
+      else if (k === 's') save();
+      else if (k === 'd') { if (!form.isNew) confirm = form.orig; }
+      else if (k === 'h' || k === '\x1b[D' || k === '\x1b' || k === '\t') focus = 'left';
+      else return false;
+      repaint(); return false;
+    };
+    const onData = (buf2) => { for (const key of splitKeys(buf2.toString())) if (handleKey(key)) return; };
+
+    if (stdin.setRawMode) stdin.setRawMode(true);
+    stdin.resume();
+    w('\x1b[?1049h\x1b[?25l\x1b[?7l'); // alt screen, hide cursor, no wrap
+    stdin.on('data', onData); stdout.on('resize', repaint);
+    repaint();
+  });
 }
 
 function printGuard(reg, n) {
@@ -3263,7 +3424,7 @@ export function help() {
     ['add', '', 'Wizard: create a new project'],
     ['edit', '[name]', 'Wizard: modify an existing project'],
     ['remove', '<name>', 'Delete a project (alias rm)'],
-    ['guards', '[project]', 'List/manage guards (add/remove/link/unlink)'],
+    ['guards', '[project|edit]', 'List/manage guards; `edit` = two-pane visual editor'],
     ['overrides', '[set|remove]', 'List/set/remove per-project env overrides (local.json)'],
     ['dir', '[path]', 'Show/set the projects directory'],
     ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],

@@ -125,7 +125,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   scrollback); piped/redirected → plain print. `crew graph list` prints the adjacency text instead.
   Both graph UIs — the pager AND the start/workspace/claude selector (`graphSelect`) — share one footer
   builder `graphFooter({mode, total, sel, vis, shown, hasRef, showRef, warn, scroll})` (order: state → move
-  → `f`/`r` toggles → action → exit). The pager shows one `shown/total` count; the selector shows TWO —
+  → `f`/`r` toggles → action → exit) which returns `footerText(parts)`; the caller paints it with the
+  shared `footerBar(inner, cols)` (full-width reverse-video). The guards editor uses the same two helpers,
+  so ALL raw-mode footers are one treatment. The pager shows one `shown/total` count; the selector shows TWO —
   `sel/total sel` (projects picked to run) then `vis/total shown` (nodes left visible after the `f` filter).
   Any count that isn't full turns RED (via `\x1b[31m…\x1b[39m`, so it survives the reverse-video bar). Both
   UIs share one ref filter (`e => showRef || !e.ref`) and one node-visibility filter: `f` overlays a
@@ -162,8 +164,19 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   verifies — it's printed in faint gray beside each result when guards run. Before a run, the
   target's guards are deduped by name, run once each in parallel (pass = exit 0); any failure
   prints its message and aborts. Run before `crew start`. Managed via
-  the `crew guards` command (list/add/remove/link/unlink, all select-driven). The v1
-  `checks` key auto-migrates to `guards` on load.
+  the `crew guards` command (list/add/remove/link/unlink, all select-driven). `crew guards edit`
+  opens a **two-pane raw-mode editor** (`guardsForm`, TTY-only): left column = guard names + a green
+  `+ New guard` row, right column = the highlighted guard's fields (name/comment/command/message). The
+  three actions fall out of position + key — CREATE = the `+ New` row (blank form), UPDATE = edit fields
+  then `s` save, DELETE = `d` + confirm (unlinks it from every project too, and warns if in use). Renaming
+  a guard migrates its key AND all `project.guards` links. Inline field editor pre-fills the current value;
+  `↑↓` move, `⏎` edit/open, `tab`/`←→` switch pane, `q` quits (unsaved field edits are discarded — only `s`
+  writes). Same raw-mode primitives as the graph views (`splitKeys`, alt screen, absolute cursor) and the
+  SAME footer: every raw-mode view renders its hint line through the shared `footerText` (` · `-joined
+  parts) + `footerBar` (one full-width reverse-video bar) — `graphFooter` also returns `footerText(parts)`,
+  so the graph pager, selector and guards editor bars are byte-for-byte the same treatment. Built
+  generically so Projects/Overrides can become extra left-column sections. Bare `crew guards` still lists;
+  the select-driven subcommands are unchanged. The v1 `checks` key auto-migrates to `guards` on load.
 - `workspaceSettings` (optional top-level object): written verbatim into the generated
   `.code-workspace` `settings` (e.g. `{"jest.enable": false}` to stop the Jest extension
   auto-running per folder). crew injects nothing by default.
