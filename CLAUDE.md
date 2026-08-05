@@ -170,9 +170,12 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   (currently Projects + Guards; Overrides is the next section to add) as a name list, each ending in a
   green `+ New …` row; the right column is the highlighted item's form. The three actions fall out of
   position + key — CREATE = a `+ New` row (blank form), UPDATE = edit fields then `s` save, DELETE = `d` +
-  confirm. Field KINDS: `text` (inline editor, pre-fills current value), `name` (the item key, rename-aware),
-  `choice` (`⏎` cycles a fixed option list, e.g. project `type`), `multiselect` (`⏎` opens a `makeFilterPanel`
-  overlay — reused from the graph, e.g. a project's guard links), `readonly` (display only, e.g. project
+  confirm. Field KINDS: `text` (a real inline line-editor with a block caret — `←/→` move, Option/Ctrl+arrow
+  word-jump, Home/End or Ctrl-A/E, Ctrl-W/U/K, forward-delete, mid-string insert; pre-fills current value),
+  `name` (the item key, rename-aware, same editor),
+  `choice` (`⏎` opens a SINGLE-select `makeFilterPanel` popup — radio `(•)`, `↑↓`+`⏎`, e.g. project `type`),
+  `multiselect` (`⏎` opens the same panel in MULTI mode — checkboxes `[x]`, e.g. a project's guard links),
+  `readonly` (display only, e.g. project
   `tasks`, still edited via the `crew edit <name>` wizard). A project's `match` is edited as the compact
   `env=host …` string (same as the wizard) and parsed on save; `save` starts from the existing object so
   `tasks`/unmanaged keys survive. Each section owns `load/save/del`, so adding Overrides is just another
