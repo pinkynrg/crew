@@ -1,0 +1,17 @@
+{
+  "projects": {
+    "app": {
+      "path": "app",
+      "type": "backend",
+      "env": ".envs/{env}.env",
+      "local": "http://localhost:5000",
+      "match": { "qa": "qa-app.demo.dev", "pro": "app.demo.dev" },
+      "start": { "command": "make run" },
+      "checks": ["vpn"]
+    }
+  },
+  "checks": {
+    "vpn": { "comment": "vpn is up", "command": "true", "message": "connect the vpn first" }
+  },
+  "groups": { "legacy": ["app"] }
+}

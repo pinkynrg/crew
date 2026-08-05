@@ -30,7 +30,8 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 - `.github/workflows/publish.yml` — npm publish CI (push to main; auto-bump patch; OIDC trusted
   publishing, npm@11, `--provenance`; no NPM_TOKEN).
 - `tests/` — dev-only (NOT shipped): `graphs/*.mmd` sample graphs, `snapshots/*.txt` golden mono
-  renders, `snapshot.mjs` runner (`node tests/snapshot.mjs [-u] [name…]`).
+  renders, `snapshot.mjs` runner (`node tests/snapshot.mjs [-u] [name…]`); `e2e/` = portable
+  expect-driven CLI tests (`fixtures/`, `cases/*.exp`, `lib.exp`, `run.sh` — runs `$CREW` in a PTY).
 - `README.md` — user-facing docs (behavior reference).
 
 ## Hard constraints (do not break)
@@ -177,7 +178,23 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 
 ## Testing
 
-No test framework. Verify manually against a throwaway config (no build — run the file):
+No unit-test framework. Two suites, both run by `npm test`:
+- `tests/snapshot.mjs` — the graph renderer (imports `bin/graph.js`; golden mono renders).
+- `tests/e2e/` — **portable black-box E2E driven by `expect`** (a real PTY, so the interactive picker,
+  wizard, and log viewer are exercised as a user would). Every case runs the crew BINARY (`$CREW`,
+  default `node bin/crew.js`) — it imports NOTHING from the source, so a port to another language keeps
+  the whole suite: `CREW=./crew-rs sh tests/e2e/run.sh`. Layout: `run.sh` copies `fixtures/<fx>/` to a
+  tmp dir (sed `__DIR__`→tmp in `local.json`) and runs each `cases/<fx>__<scenario>.exp`; `lib.exp`
+  gives the helpers `crun`/`must`/`want_exit`/`want_done`/`config_has`. Covers check (+error/exit codes),
+  v1 migration (asserts the rewritten config), graph/resolve/list, add/edit/remove/dir/config/guards/
+  overrides, and the runner: `crew start` (picker → run-to-completion AND streamed viewer + teardown),
+  `workspace`/`claude` (via `code`/`claude` stubs on `PATH`), env wiring + guards. Interactive tips:
+  `spawn`-in-a-proc needs `global spawn_id`; the graph `pager`/picker/viewer are raw-mode alt-screen so
+  quit them (`q`/Ctrl-C) or they hang; `longRunning: []` makes `crew start` run-to-completion (auto-exit
+  0), pass `env=x` to skip the env prompt. Coverage: `npm run test:cov` (c8 over `NODE_V8_COVERAGE`);
+  it's black-box so it works per-language (Go `-cover`+`GOCOVERDIR`, Python coverage.py) — same tests.
+
+Also verify manually against a throwaway config (no build — run the file):
 
 ```sh
 node --check bin/crew.js

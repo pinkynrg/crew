@@ -1,0 +1,1 @@
+{ "version": 2, "projects": { "y": { "path": "y", "tasks": { "start": "run {envfile}" } } } }

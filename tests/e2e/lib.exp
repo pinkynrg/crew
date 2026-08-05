@@ -1,0 +1,59 @@
+# Shared expect helpers for crew's E2E. Sourced by each cases/*.exp.
+# Every case runs the crew BINARY ($CREW) in a real PTY against a throwaway fixture ($CONFIG), so the
+# suite is black-box + portable: a port to another language just sets CREW=./its-binary.
+set timeout 15
+set CREWBIN [split $env(CREW)]
+
+# spawn `crew --config <fixture> <args...>` in the PTY (global spawn_id so must/want_exit see it)
+proc crun {args} { global CREWBIN env spawn_id; eval spawn -noecho $CREWBIN --config $env(CONFIG) $args }
+
+# assert a regexp appears before timeout/eof
+proc must {pat} {
+  global spawn_id
+  expect {
+    -re $pat {}
+    timeout { puts "\n!! TIMEOUT waiting for: $pat"; exit 3 }
+    eof     { puts "\n!! EOF before: $pat"; exit 3 }
+  }
+}
+
+# drain to eof, then assert the child's exit code (timeout-guarded so a hung/interactive proc can't wedge)
+proc want_exit {code} {
+  global spawn_id
+  expect {
+    eof {}
+    timeout { puts "\n!! no eof (interactive/hung?)"; catch {exec kill -9 [exp_pid]}; exit 6 }
+  }
+  catch wait r
+  set got [lindex $r 3]
+  if {$got ne $code} { puts "\n!! exit $got, wanted $code"; exit 4 }
+}
+
+# quit an interactive pager/viewer (raw-mode), then assert exit
+proc quit_and_exit {key code} {
+  global spawn_id
+  send -- $key
+  want_exit $code
+}
+
+# drain to eof + reap without asserting a code (teardown/signal exit codes are non-deterministic)
+proc want_done {} {
+  global spawn_id
+  expect {
+    eof {}
+    timeout { puts "\n!! no eof (hung?)"; catch {exec kill -9 [exp_pid]}; exit 6 }
+  }
+  catch wait
+}
+
+# assert a JSON key/value pair exists in the (possibly rewritten) fixture config
+proc config_has {needle} {
+  global env
+  set fh [open $env(CONFIG) r]; set txt [read $fh]; close $fh
+  if {[string first $needle $txt] < 0} { puts "\n!! config missing: $needle"; exit 5 }
+}
+proc config_hasnt {needle} {
+  global env
+  set fh [open $env(CONFIG) r]; set txt [read $fh]; close $fh
+  if {[string first $needle $txt] >= 0} { puts "\n!! config still has: $needle"; exit 5 }
+}

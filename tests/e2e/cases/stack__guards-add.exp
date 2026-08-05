@@ -1,0 +1,15 @@
+source tests/e2e/lib.exp
+crun guards add
+must {Guard name}
+send "myguard\r"
+must {verify}
+send "checks x\r"
+must {Check command}
+send "true\r"
+must {Failure message}
+send "fix it\r"
+must {Attach to projects}
+send "\r"
+must {Saved guard}
+want_exit 0
+config_has {"myguard"}

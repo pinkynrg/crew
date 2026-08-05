@@ -5,3 +5,4 @@ node_modules/
 .crew.json
 demo/workspaces/
 demo/sessions/
+coverage/

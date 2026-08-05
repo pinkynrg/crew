@@ -1,5 +1,7 @@
 # crew
 
+![coverage](https://img.shields.io/badge/coverage-80%25-yellowgreen)
+
 Fan a **named task** out across a group of local projects — run it in parallel, open
 the group as one VSCode workspace, or hand the whole set to Claude Code. Driven by one
 persistent config. Runs via `npx` with nothing to install by hand.

@@ -1,0 +1,3 @@
+{ "version": 2, "longRunning": [],
+  "guards": { "bad": { "comment": "always fails", "command": "false", "message": "GUARD-BLOCKED" } },
+  "projects": { "g": { "path": "g", "guards": ["bad"], "tasks": { "start": "echo should-not-run" } } } }
