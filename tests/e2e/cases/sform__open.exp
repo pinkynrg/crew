@@ -2,10 +2,10 @@ source tests/e2e/lib.exp
 crun config
 must {config editor}
 sleep 1
-send "j"
-send "j"
+send "k"
 sleep 1
-must {used by}
-must {api}
+must {Settings}
+must {workspaceName}
+must {longRunning}
 send "\033"
 want_exit 0

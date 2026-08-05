@@ -1,0 +1,3 @@
+{ "version": 2, "workspaceName": "crewws", "longRunning": ["start"], "internalDomains": ["ex.com"],
+  "workspaceSettings": { "jest.enable": false },
+  "projects": { "api": { "path": "api", "type": "backend" } } }

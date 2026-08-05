@@ -202,9 +202,25 @@ export function resolveProjectPath(p) {
   if (!PROJECTS_DIR)
     fail(
       `project path '${p}' is relative but no projects directory is set.\n` +
-        `  Set it once: crew dir <path>   (e.g. crew dir ~/Projects)`
+        `  Set it in Settings: crew config`
     );
   return resolve(PROJECTS_DIR, e);
+}
+
+// Which projects' folders don't exist under `dir` (a candidate projects directory) — the consistency
+// check behind `crew dir`, `crew check` and the editor's Settings warning. Absolute/`~` paths resolve
+// as-is; relative paths join `dir` (a null dir means every relative path counts as missing). Warn-only:
+// a wrong `projectsDir` should never silently invalidate — or auto-delete — projects.
+export function missingProjectFolders(cfg, dir) {
+  const abs = dir ? resolvePath(dir) : null;
+  const out = [];
+  for (const [name, p] of Object.entries((cfg && cfg.projects) || {})) {
+    if (!p || !p.path) continue;
+    const e = expandHome(String(p.path));
+    const full = isAbsolute(e) ? e : abs ? resolve(abs, e) : null;
+    if (!full || !pathExists(full)) out.push(name);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -2123,7 +2139,7 @@ export function cmdList(flags) {
     const ok = abs ? pathExists(abs) : false;
     const dot = ok ? c.green('●') : c.red('●');
     const type = p.type || 'other';
-    const shown = abs ? tildify(abs) : `${p.path}  ${c.dim('(set projects dir: crew dir)')}`;
+    const shown = abs ? tildify(abs) : `${p.path}  ${c.dim('(set projects dir: crew config)')}`;
     const pathCell = ok ? shown : c.red(shown + (abs ? '  ✗ missing' : ''));
     console.log(`  ${dot} ${c.bold(paint.get(name)(name))}`); // header: status + name only
 
@@ -2157,38 +2173,6 @@ export function cmdList(flags) {
   );
   const machinePath = machineConfigPath(flags);
   console.log(c.dim('local         ') + c.dim(tildify(machinePath)) + (pathExists(machinePath) ? '' : c.dim('  (none yet)')));
-}
-
-// crew dir [path] — show or set the machine-local projects directory. Stored in
-// local.json (beside the config, never committed); relative project paths resolve against
-// it, so config.json can use short relative paths and be committed & shared.
-export function cmdDir(flags, arg) {
-  loadUserConfig(flags); // migrate any legacy projectsDir out of config.json into local.json
-  const machinePath = machineConfigPath(flags);
-  const machine = loadMachine(flags);
-  if (arg == null) {
-    if (machine.projectsDir) {
-      console.log(`${c.bold('projects dir')}  ${tildify(resolvePath(machine.projectsDir))}`);
-      console.log(c.dim(`stored in ${tildify(machinePath)} (machine-local, not committed)`));
-    } else {
-      console.log(c.dim('No projects directory set.'));
-      console.log(`Set it: ${c.cyan('crew dir <path>')}  (e.g. crew dir ~/Projects)`);
-    }
-    return;
-  }
-  const abs = resolvePath(arg);
-  let st = null;
-  try {
-    st = statSync(abs);
-  } catch {
-    /* missing */
-  }
-  if (!st || !st.isDirectory()) fail(`not a directory: ${abs}`);
-  machine.projectsDir = arg; // keep the user's form (e.g. ~/Projects)
-  writeMachine(flags, machine);
-  loadUserConfig(flags); // strips any legacy projectsDir out of the committable config
-  console.log(`Set projects dir → ${tildify(abs)}`);
-  console.log(c.dim(`stored in ${tildify(machinePath)} — machine-local, not committed`));
 }
 
 // crew graph [list] — read-only dependency graph derived from env files (no wiring). Default draws
@@ -2574,24 +2558,14 @@ export async function cmdGraph(flags, rest) {
     );
 }
 
-export function cmdConfig(flags, sub) {
-  const path = userConfigPath(flags);
-  if (sub === 'path') {
-    console.log(path);
-    return;
-  }
-  if (sub === 'edit') {
-    const editor = process.env.EDITOR || process.env.VISUAL || 'vi';
-    if (!pathExists(path)) writeUserConfig(path, defaultConfig());
-    const r = spawnSync(editor, [path], { stdio: 'inherit' });
-    if (r.error) fail(`failed to open editor '${editor}': ${r.error.message}`);
-    return;
-  }
-  if (sub) fail(`config: unknown subcommand '${sub}'. Use: config | config path | config edit`);
-  const { cfg, localPath } = loadMerged(flags);
-  console.log(`# resolved config path: ${path}`);
-  if (localPath) console.log(`# merged with project-local: ${localPath}`);
-  console.log(JSON.stringify(cfg, null, 2));
+// crew config — THE config command: opens the two-pane visual editor (Settings + Projects + Guards +
+// Overrides — every key). `crew config path` prints the config file path, and a non-TTY `crew config`
+// degrades to printing it too, so `cat "$(crew config path)"` and pipes keep working. No hand-editing verb.
+export async function cmdConfig(flags, sub) {
+  if (sub === 'path') { console.log(userConfigPath(flags)); return; }
+  if (sub) fail(`config: unknown subcommand '${sub}'. Use: crew config  (opens the editor)  |  crew config path`);
+  if (!canInteractive()) { console.log(userConfigPath(flags)); return; } // non-interactive: just print the path
+  await configForm(flags, { section: 'projects' });
 }
 
 // crew pull <url> — fetch a config.json from a URL and install it as the user config
@@ -2625,16 +2599,9 @@ export async function cmdPull(flags, url) {
   const n = Object.keys(cfg.projects || {}).length;
   console.log(`Loaded config → ${tildify(path)} ${c.dim(`(${n} project${n === 1 ? '' : 's'})`)}`);
   if (backed) console.log(c.dim(`  previous saved as ${tildify(path + '.bak')}`));
-  console.log(c.dim('  set your projects dir if needed: crew dir <path>'));
+  console.log(c.dim('  set your projects dir if needed: crew config (Settings)'));
 }
 
-// crew edit — the ONE config command: a two-pane visual editor for projects, guards and overrides
-// (create/update/delete, all sections in the left column). The old add/remove/guards/overrides/config
-// verbs + the sequential wizard were all folded into it.
-export async function cmdEdit(flags) {
-  if (!canInteractive()) fail('crew edit needs an interactive terminal');
-  await configForm(flags, { section: 'projects' });
-}
 
 
 // Two-pane raw-mode config editor. Left column stacks every SECTION (Projects, Guards) as a name list,
@@ -2700,7 +2667,7 @@ async function configForm(flags, opts = {}) {
       cfg.projects[name] = proj; writeUserConfig(path, cfg); return null;
     },
     del: (n) => { delete cfg.projects[n]; writeUserConfig(path, cfg); },
-    info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveProjectPath(String(f.path).trim()); } catch { return `\x1b[90mpath\x1b[39m  ${String(f.path).trim()}  \x1b[90m(set a projects dir: crew dir <path>)\x1b[39m`; } return pathExists(abs) ? `\x1b[90mpath\x1b[39m  ${abs}` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
+    info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveProjectPath(String(f.path).trim()); } catch { return `\x1b[90mpath\x1b[39m  ${String(f.path).trim()}  \x1b[90m(set a projects dir in Settings)\x1b[39m`; } return pathExists(abs) ? `\x1b[90mpath\x1b[39m  ${abs}` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
   };
 
   const guardsSection = {
@@ -2765,9 +2732,49 @@ async function configForm(flags, opts = {}) {
     info: (f) => { const unknown = !f.isNew && !cfg.projects[f.orig] ? '\x1b[33munknown project\x1b[39m  ' : ''; return unknown + '\x1b[90mwhenLocal keys are `peer.VAR` — apply only when that peer co-runs\x1b[39m'; },
   };
 
-  const sections = [projectsSection, guardsSection, overridesSection];
+  // Top-level (global) config + machine-local projectsDir. A FIXED section: one synthetic item, no +New
+  // row and no create/delete — you only edit the values. workspaceSettings values are JSON-typed (so
+  // `false`/`3` keep their type), stringified for the row editor and parsed back on save.
+  const mapStringify = (o) => { const r = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) r[k] = typeof v === 'string' ? v : JSON.stringify(v); return r; };
+  const jsonParseVals = (o) => { const r = {}; for (const [k, v] of Object.entries(o || {})) { let val = v; try { val = JSON.parse(v); } catch {} r[k] = val; } return r; };
+  const loadSettings = () => ({
+    workspaceName: cfg.workspaceName || '',
+    longRunning: [...(Array.isArray(cfg.longRunning) ? cfg.longRunning : [])],
+    internalDomains: [...(Array.isArray(cfg.internalDomains) ? cfg.internalDomains : [])],
+    workspaceSettings: mapStringify(cfg.workspaceSettings),
+    projectsDir: machine.projectsDir || '',
+    isNew: false, orig: 'config',
+  });
+  const settingsSection = {
+    key: 'settings', title: 'SETTINGS', noun: 'settings', fixed: true,
+    names: () => ['config'],
+    fields: [
+      { key: 'workspaceName', label: 'workspaceName', kind: 'text' },
+      { key: 'longRunning', label: 'longRunning', kind: 'list' },
+      { key: 'internalDomains', label: 'internalDomains', kind: 'list' },
+      { key: 'workspaceSettings', label: 'wsSettings', kind: 'map', json: true, kLabel: 'setting', vLabel: 'value' },
+      { key: 'projectsDir', label: 'projectsDir', kind: 'text' },
+    ],
+    load: loadSettings,
+    blank: loadSettings,
+    save: (f) => {
+      setOrDel(cfg, 'workspaceName', String(f.workspaceName).trim());
+      setOrDel(cfg, 'longRunning', f.longRunning, Array.isArray(f.longRunning) && f.longRunning.length > 0);
+      setOrDel(cfg, 'internalDomains', f.internalDomains, Array.isArray(f.internalDomains) && f.internalDomains.length > 0);
+      setOrDel(cfg, 'workspaceSettings', jsonParseVals(f.workspaceSettings), f.workspaceSettings && Object.keys(f.workspaceSettings).length > 0);
+      writeUserConfig(path, cfg);
+      const pd = String(f.projectsDir).trim();
+      if (pd) machine.projectsDir = pd; else delete machine.projectsDir;
+      writeMachine(flags, machine);
+      return null;
+    },
+    info: (f) => { const miss = missingProjectFolders(cfg, String(f.projectsDir).trim()); const total = Object.keys(cfg.projects).length; return miss.length ? `\x1b[33m⚠ ${miss.length}/${total} project folder(s) not found under projectsDir\x1b[39m` : '\x1b[90mlongRunning = tasks that stream until Ctrl-C\x1b[39m'; },
+  };
+
+  const sections = [settingsSection, projectsSection, guardsSection, overridesSection];
   const optionsOf = (fld) => (typeof fld.options === 'function' ? fld.options() : fld.options || []);
-  const selectable = () => { const out = []; sections.forEach((s, si) => { s.names().forEach((n) => out.push({ si, name: n })); out.push({ si, name: null }); }); return out; };
+  // FIXED sections contribute their single item but NO "+ New" row.
+  const selectable = () => { const out = []; sections.forEach((s, si) => { s.names().forEach((n) => out.push({ si, name: n })); if (!s.fixed) out.push({ si, name: null }); }); return out; };
   let sel = selectable();
   let li = 0, focus = 'left', fi = 0, editing = false, buf = '', caret = 0;
   let form = null, pendingDel = null, msg = '', panel = null, panelField = null, leftTop = 0;
@@ -2797,7 +2804,7 @@ async function configForm(flags, opts = {}) {
     const rev = (s) => `\x1b[7m${s}\x1b[27m`;
     const cleanup = () => { stdin.removeListener('data', onData); stdout.removeListener('resize', repaint); w('\x1b[?25h\x1b[?7h\x1b[?1049l'); if (stdin.setRawMode) stdin.setRawMode(wasRaw); stdin.pause(); };
 
-    const displayRows = () => { const d = []; sections.forEach((s, si) => { if (si) d.push({ kind: 'space' }); d.push({ kind: 'header', si }); s.names().forEach((n) => d.push({ kind: 'item', si, name: n })); d.push({ kind: 'new', si }); }); return d; };
+    const displayRows = () => { const d = []; sections.forEach((s, si) => { if (si) d.push({ kind: 'space' }); d.push({ kind: 'header', si }); s.names().forEach((n) => d.push({ kind: 'item', si, name: n })); if (!s.fixed) d.push({ kind: 'new', si }); }); return d; };
 
     const repaint = () => {
       const C = stdout.columns || 80, R = Math.max(10, stdout.rows || 24);
@@ -2830,22 +2837,33 @@ async function configForm(flags, opts = {}) {
         const F = mapEdit, fld = F.field;
         Rn.push(`\x1b[1m${fld.label}\x1b[22m \x1b[90m· ${s.noun} ${form.name || form.orig}\x1b[39m`);
         Rn.push('');
-        const kW = Math.min(24, Math.max(3, (fld.kLabel || 'key').length, ...F.rows.map(([k]) => [...String(k)].length)));
-        const valAvail = Math.max(8, RW - kW - 6);
-        F.rows.forEach(([k, v], i) => {
-          const on = F.ri === i;
-          const kc = padP(clipP(String(k), kW), kW);
-          const vc = (editing && editTarget === 'val' && on) ? editCell(valAvail) : clipP(String(v), valAvail);
-          const line = ` ${on && !editing ? '▸' : ' '} ${kc}  ${vc}`;
-          Rn.push(on && !editing ? rev(padP(line, RW)) : line);
-        });
-        if (editing && (editTarget === 'newkey' || editTarget === 'newval')) {
-          const kc = editTarget === 'newkey' ? editCell(kW) : padP(clipP(newKey, kW), kW);
-          const vc = editTarget === 'newval' ? editCell(valAvail) : '';
-          Rn.push(`   ${kc}  ${vc}`);
-        } else {
-          const addOn = F.ri === F.rows.length;
-          Rn.push(addOn ? rev(padP(`  ▸ + add ${fld.kLabel || 'row'}`, RW)) : `    \x1b[32m+ add ${fld.kLabel || 'row'}\x1b[39m`);
+        if (F.list) { // single-column list (longRunning, internalDomains)
+          F.rows.forEach((v, i) => {
+            const on = F.ri === i;
+            const vc = (editing && editTarget === 'listval' && on) ? editCell(RW - 6) : clipP(String(v), RW - 6);
+            const line = ` ${on && !editing ? '▸' : ' '} ${vc}`;
+            Rn.push(on && !editing ? rev(padP(line, RW)) : line);
+          });
+          if (editing && editTarget === 'newval') Rn.push(`   ${editCell(RW - 6)}`);
+          else { const addOn = F.ri === F.rows.length; Rn.push(addOn ? rev(padP(`  ▸ + add ${fld.kLabel || 'item'}`, RW)) : `    \x1b[32m+ add ${fld.kLabel || 'item'}\x1b[39m`); }
+        } else { // key -> value map (match, tasks, guards' vars, whenLocal, wsSettings)
+          const kW = Math.min(24, Math.max(3, (fld.kLabel || 'key').length, ...F.rows.map(([k]) => [...String(k)].length)));
+          const valAvail = Math.max(8, RW - kW - 6);
+          F.rows.forEach(([k, v], i) => {
+            const on = F.ri === i;
+            const kc = padP(clipP(String(k), kW), kW);
+            const vc = (editing && editTarget === 'val' && on) ? editCell(valAvail) : clipP(String(v), valAvail);
+            const line = ` ${on && !editing ? '▸' : ' '} ${kc}  ${vc}`;
+            Rn.push(on && !editing ? rev(padP(line, RW)) : line);
+          });
+          if (editing && (editTarget === 'newkey' || editTarget === 'newval')) {
+            const kc = editTarget === 'newkey' ? editCell(kW) : padP(clipP(newKey, kW), kW);
+            const vc = editTarget === 'newval' ? editCell(valAvail) : '';
+            Rn.push(`   ${kc}  ${vc}`);
+          } else {
+            const addOn = F.ri === F.rows.length;
+            Rn.push(addOn ? rev(padP(`  ▸ + add ${fld.kLabel || 'row'}`, RW)) : `    \x1b[32m+ add ${fld.kLabel || 'row'}\x1b[39m`);
+          }
         }
       } else if (panel) {
         Rn.push(`\x1b[1m${panelField.label}\x1b[22m \x1b[90m· ${s.noun} ${form.name || form.orig}\x1b[39m`);
@@ -2854,15 +2872,18 @@ async function configForm(flags, opts = {}) {
       } else {
         Rn.push(form.isNew ? `\x1b[1mNew ${s.noun}\x1b[22m` : `\x1b[1m${s.noun[0].toUpperCase() + s.noun.slice(1)}\x1b[22m \x1b[90m·\x1b[39m ${form.name || form.orig}`);
         Rn.push('');
+        const labW = s.fields.reduce((m, f) => Math.max(m, f.label.length), 4); // align values to the widest label in this section
+        const vW = Math.max(8, RW - labW - 6);
         s.fields.forEach((fld, i) => {
           const on = focus === 'right' && i === fi;
+          const editText = editing && on && (fld.kind === 'text' || fld.kind === 'name');
           let val;
-          if (editing && on && (fld.kind === 'text' || fld.kind === 'name')) val = editCell(RW - 12); // block caret, scrolls if long
-          else if (fld.kind === 'multiselect') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : '\x1b[90m(none)\x1b[39m'; }
+          if (editText) val = editCell(vW); // block caret, scrolls if long
+          else if (fld.kind === 'multiselect' || fld.kind === 'list') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : '\x1b[90m(none)\x1b[39m'; }
           else if (fld.kind === 'map') { const o = form[fld.key] || {}, ks = Object.keys(o); val = ks.length ? (fld.multiVal ? serializeMatch(o) : Object.entries(o).map(([k, v]) => `${k}=${v}`).join('  ')) : '\x1b[90m(none)\x1b[39m'; }
           else val = String(form[fld.key]) ? String(form[fld.key]) : `\x1b[90m(${fld.req ? 'required' : 'optional'})\x1b[39m`;
-          const lab = padP(fld.label, 8);
-          Rn.push(`  ${on && !editing ? rev(' ' + lab + ' ') : '\x1b[90m ' + lab + ' \x1b[39m'} ${(editing && on && (fld.kind === 'text' || fld.kind === 'name')) ? val : clipP(val, RW - 12)}`);
+          const lab = padP(fld.label, labW);
+          Rn.push(`  ${on && !editing ? rev(' ' + lab + ' ') : '\x1b[90m ' + lab + ' \x1b[39m'} ${editText ? val : clipP(val, vW)}`);
         });
         const info = s.info ? s.info(form) : '';
         if (info) { Rn.push(''); Rn.push('  ' + info); }
@@ -2878,7 +2899,7 @@ async function configForm(flags, opts = {}) {
       else if (editing) parts = ['type', '←→ move', '⌥← word', '⏎ commit', 'esc cancel'];
       else if (mapEdit) parts = ['↑↓ row', '⏎ edit', 'd remove', 'esc done'];
       else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', '→ fields', 'esc quit'];
-      else { const fld = s.fields[fi]; const eh = fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew ? [] : ['d delete']), '← list', 'esc quit'].filter(Boolean); }
+      else { const fld = s.fields[fi]; const eh = fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'list' || fld.kind === 'map' ? '⏎ rows' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew || s.fixed ? [] : ['d delete']), '← list', 'esc quit'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
       out += '\x1b[K' + footerBar(footerText(parts), C);
       w(out);
@@ -2901,8 +2922,9 @@ async function configForm(flags, opts = {}) {
         const wordR = (i) => { let j = i; while (j < buf.length && buf[j] !== ' ') j++; while (j < buf.length && buf[j] === ' ') j++; return j; };
         if (k === '\r' || k === '\n') { // route the commit: a map cell, a chained new key->value, or a plain field
           if (editTarget === 'val') { mapEdit.rows[mapEdit.ri][1] = buf; editing = false; editTarget = null; }
+          else if (editTarget === 'listval') { mapEdit.rows[mapEdit.ri] = buf; editing = false; editTarget = null; } // list row = a single string
           else if (editTarget === 'newkey') { newKey = buf; buf = ''; caret = 0; editTarget = 'newval'; } // key entered -> now the value (stay editing)
-          else if (editTarget === 'newval') { if (newKey.trim()) { mapEdit.rows.push([newKey.trim(), buf]); mapEdit.ri = mapEdit.rows.length - 1; } editing = false; editTarget = null; }
+          else if (editTarget === 'newval') { if (mapEdit.list) { if (buf.trim()) { mapEdit.rows.push(buf); mapEdit.ri = mapEdit.rows.length - 1; } } else if (newKey.trim()) { mapEdit.rows.push([newKey.trim(), buf]); mapEdit.ri = mapEdit.rows.length - 1; } editing = false; editTarget = null; }
           else { form[secOf().fields[fi].key] = buf; editing = false; }
         }
         else if (k === '\x1b') { editing = false; editTarget = null; }                                       // bare esc cancels the edit
@@ -2925,9 +2947,13 @@ async function configForm(flags, opts = {}) {
         const F = mapEdit, n = F.rows.length;
         if (k === 'k' || k === '\x1b[A') F.ri = Math.max(0, F.ri - 1);
         else if (k === 'j' || k === '\x1b[B') F.ri = Math.min(n, F.ri + 1);                                  // n = the "+ add" row
-        else if (k === '\r' || k === '\n') { if (F.ri === n) { editing = true; buf = ''; caret = 0; editTarget = 'newkey'; newKey = ''; } else { editing = true; buf = String(F.rows[F.ri][1]); caret = buf.length; editTarget = 'val'; } }
+        else if (k === '\r' || k === '\n') {
+          if (F.ri === n) { editing = true; buf = ''; caret = 0; if (F.list) editTarget = 'newval'; else { editTarget = 'newkey'; newKey = ''; } } // + add
+          else if (F.list) { editing = true; buf = String(F.rows[F.ri]); caret = buf.length; editTarget = 'listval'; }
+          else { editing = true; buf = String(F.rows[F.ri][1]); caret = buf.length; editTarget = 'val'; }
+        }
         else if (k === 'd') { if (F.ri < n) { F.rows.splice(F.ri, 1); F.ri = Math.min(F.ri, F.rows.length); } }
-        else if (k === '\x1b' || k === '\x03') { form[F.field.key] = toObj(F.rows, F.field.multiVal); mapEdit = null; } // esc commits rows back to the form field
+        else if (k === '\x1b' || k === '\x03') { form[F.field.key] = F.list ? [...F.rows] : toObj(F.rows, F.field.multiVal); mapEdit = null; } // esc commits rows back to the form field
         else return false;
         repaint(); return false;
       }
@@ -2936,8 +2962,8 @@ async function configForm(flags, opts = {}) {
         if (k === 'k' || k === '\x1b[A') { li = Math.max(0, li - 1); loadForm(); }
         else if (k === 'j' || k === '\x1b[B') { li = Math.min(sel.length - 1, li + 1); loadForm(); }
         else if (k === '\r' || k === '\n' || k === 'l' || k === '\x1b[C' || k === '\t') openItem();
-        else if (k === 'n') { const si = sel[li].si; const at = sel.findIndex((x) => x.si === si && x.name == null); li = at >= 0 ? at : li; form = sections[si].blank(); focus = 'right'; fi = 0; }
-        else if (k === 'd') { if (sel[li].name != null) pendingDel = sel[li].name; }
+        else if (k === 'n') { const si = sel[li].si; if (!sections[si].fixed) { const at = sel.findIndex((x) => x.si === si && x.name == null); li = at >= 0 ? at : li; form = sections[si].blank(); focus = 'right'; fi = 0; } } // fixed sections (Settings) have no create
+        else if (k === 'd') { if (sel[li].name != null && !secOf().fixed) pendingDel = sel[li].name; } // ...and no delete
         else return false;
         repaint(); return false;
       }
@@ -2948,7 +2974,8 @@ async function configForm(flags, opts = {}) {
       else if (k === '\r' || k === '\n') {
         if (fld.kind === 'text' || fld.kind === 'name') { editing = true; buf = String(form[fld.key] || ''); caret = buf.length; }
         else if (fld.kind === 'choice' || fld.kind === 'multiselect') openPanel(fld);
-        else if (fld.kind === 'map') { mapEdit = { field: fld, rows: toRows(form[fld.key]), ri: 0 }; }
+        else if (fld.kind === 'map') { mapEdit = { field: fld, rows: toRows(form[fld.key]), ri: 0, list: false }; }
+        else if (fld.kind === 'list') { mapEdit = { field: fld, rows: [...(Array.isArray(form[fld.key]) ? form[fld.key] : [])], ri: 0, list: true }; }
         else if (fld.kind === 'readonly' && fld.hint) msg = fld.hint;
       }
       else if (k === 's') doSave();
@@ -3204,9 +3231,7 @@ export function help() {
     ['resolve', '<env> [proj…]', 'Show the env each project resolves to for a selection (dry-run)'],
   ];
   const CONFIG = [
-    ['edit', '', 'Two-pane visual editor: projects, guards & overrides (create/update/delete)'],
-    ['dir', '[path]', 'Show/set the projects directory'],
-    ['config', '[path|edit]', 'Print config / its path / open in $EDITOR'],
+    ['config', '[path]', 'Two-pane visual editor for everything (config path = print the file path)'],
     ['check', '', 'Validate the config; report errors + warnings (alias: validate)'],
     ['pull', '<url>', 'Load config.json from a URL (backs up current)'],
     ['upgrade', '', 'Self-update crew to the latest npm release (alias: update)'],
@@ -3299,24 +3324,24 @@ async function main() {
       await cmdClaude(flags, rest);
       return;
     case 'add':
-      fail('crew add was removed — create projects visually: crew edit  (then the "+ New project" row)');
+      fail('crew add was removed — create projects visually: crew config  (then the "+ New project" row)');
       return;
     case 'edit':
-      await cmdEdit(flags);
+      fail('crew edit is now `crew config` — the two-pane visual editor');
       return;
     case 'remove':
     case 'rm':
-      fail('crew remove was removed — delete visually: crew edit  (highlight the project, press d)');
+      fail('crew remove was removed — delete visually: crew config  (highlight the project, press d)');
       return;
     case 'guards':
-      fail('crew guards was removed — view/edit guards in the visual editor: crew edit');
+      fail('crew guards was removed — view/edit guards in: crew config');
       return;
     case 'overrides':
     case 'override':
-      fail('crew overrides was removed — view/edit overrides in the visual editor: crew edit');
+      fail('crew overrides was removed — view/edit overrides in: crew config');
       return;
     case 'dir':
-      cmdDir(flags, rest[0]);
+      fail('crew dir was removed — set the projects directory in Settings: crew config');
       return;
     case 'graph':
       await cmdGraph(flags, rest);
@@ -3325,7 +3350,7 @@ async function main() {
       cmdResolve(flags, rest);
       return;
     case 'config':
-      cmdConfig(flags, rest[0]);
+      await cmdConfig(flags, rest[0]);
       return;
     case 'check':
     case 'validate':
