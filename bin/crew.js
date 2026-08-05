@@ -2757,11 +2757,14 @@ async function configForm(flags, opts = {}) {
   const selectable = () => { const out = []; sections.forEach((s, si) => { s.names().forEach((n) => out.push({ si, name: n })); if (!s.fixed && !s.noNew) out.push({ si, name: null }); }); return out; };
   let sel = selectable();
   let li = 0, focus = 'left', fi = 0, editing = false, buf = '', caret = 0;
-  let form = null, pendingDel = null, msg = '', panel = null, panelField = null, leftTop = 0;
+  let form = null, msg = '', panel = null, panelField = null, leftTop = 0, dirty = false;
   let mapEdit = null, editTarget = null, newKey = ''; // mapEdit = {field, rows:[[k,v]], ri}; editTarget routes an inline edit's commit (null=field, 'val'/'newkey'/'newval'=map cell)
+  // A MODAL captures every key until a choice runs: {title, lines[], choices:[{keys[], label, run()->doneBool}]}.
+  // Used for the delete confirm and the unsaved-changes-on-exit prompt. `run` returns true if it resolved.
+  let modal = null;
 
   const secOf = () => sections[sel[li].si];
-  const loadForm = () => { const cur = sel[li]; form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); };
+  const loadForm = () => { const cur = sel[li]; form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); dirty = false; };
   const reselect = (si, name) => { sel = selectable(); let i = sel.findIndex((n) => n.si === si && n.name === name); if (i < 0) i = sel.findIndex((n) => n.si === si); if (i < 0) i = 0; li = Math.max(0, Math.min(i, sel.length - 1)); loadForm(); };
   const startAt = (key) => { const i = sel.findIndex((n) => sections[n.si].key === key); li = i >= 0 ? i : 0; };
   startAt(opts.section || 'projects');
@@ -2770,9 +2773,10 @@ async function configForm(flags, opts = {}) {
   const doSave = () => {
     const s = secOf(), si = sel[li].si;
     const err = s.save(form);
-    if (err) { msg = `\x1b[31m${err}\x1b[39m`; return; }
+    if (err) { msg = `\x1b[31m${err}\x1b[39m`; return err; }
     const name = String(form.name).trim();
-    reselect(si, name); msg = `\x1b[32msaved '${name}'\x1b[39m`;
+    reselect(si, name); dirty = false; msg = `\x1b[32msaved '${name}'\x1b[39m`;
+    return null;
   };
   const doDelete = (name) => { const s = secOf(), si = sel[li].si; s.del(name); reselect(si, null); focus = 'left'; msg = `removed '${name}'`; };
 
@@ -2874,7 +2878,7 @@ async function configForm(flags, opts = {}) {
       for (let r = 0; r < body; r++) out += '\x1b[K ' + padP(L[r] || '', LW) + ' \x1b[90m│\x1b[39m ' + (Rn[r] || '') + '\r\n';
       // ---- footer ----
       let parts;
-      if (pendingDel) parts = [`\x1b[31mDelete '${pendingDel}'?\x1b[39m`, ...(s.key === 'guards' && usersOf(pendingDel).length ? [`used by ${usersOf(pendingDel).length} project(s)`] : []), 'y delete', 'esc cancel'];
+      if (modal) parts = modal.choices.map((c) => c.label);
       else if (panel) parts = panelField.kind === 'choice' ? ['↑↓ pick', '⏎ apply', 'esc cancel'] : ['space toggle', 'a all', '⏎ apply', 'esc cancel'];
       else if (editing) parts = ['type', '←→ move', '⌥← word', '⏎ commit', 'esc cancel'];
       else if (mapEdit) parts = ['↑↓ row', '⏎ edit', 'd remove', 'esc done'];
@@ -2882,21 +2886,41 @@ async function configForm(flags, opts = {}) {
       else { const fld = s.fields[fi]; const eh = fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'list' || fld.kind === 'map' ? '⏎ rows' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew || s.fixed ? [] : ['d delete']), '← list', 'esc quit'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
       out += '\x1b[K' + footerBar(footerText(parts), C);
+      // ---- modal overlay (roomy, perfectly-centered box; captures all keys until a choice runs) ----
+      if (modal) {
+        const dw = (x) => [...String(x).replace(/\x1b\[[0-9;]*m/g, '')].length;
+        const hint = modal.choices.map((c) => c.label).join('     ');
+        const rows2 = [...(modal.lines || []), '', hint];
+        const iw = Math.min(C - 6, Math.max(48, dw(modal.title) + 6, ...rows2.map(dw)) + 6); // bigger: min ~54, roomy padding, capped
+        const center = (ln) => { const l = Math.max(0, (iw - dw(ln)) >> 1); return ' '.repeat(l) + ln + ' '.repeat(Math.max(0, iw - l - dw(ln))); };
+        const tt = ` ${modal.title} `, dl = Math.max(0, iw - dw(tt)), lft = dl >> 1;
+        const blank = '│' + ' '.repeat(iw) + '│', vpad = 4; // generous top/bottom padding -> ~2x taller box
+        const box = ['\x1b[1m┌' + '─'.repeat(lft) + tt + '─'.repeat(dl - lft) + '┐\x1b[22m', ...Array(vpad).fill(blank)];
+        for (const ln of rows2) box.push('│' + center(ln) + '│');
+        box.push(...Array(vpad).fill(blank), '└' + '─'.repeat(iw) + '┘');
+        const w2 = iw + 2, h = box.length;
+        const top = Math.max(1, Math.round((R - h) / 2)), col = Math.max(1, Math.round((C - w2) / 2) + 1);
+        for (let i = 0; i < h; i++) out += `\x1b[${top + i};${col}H` + box[i];
+        out += '\x1b[0m';
+      }
       w(out);
     };
 
     const openPanel = (fld) => { const items = optionsOf(fld); if (!items.length) { msg = `no ${fld.label} defined yet`; return; } panelField = fld; const single = fld.kind === 'choice'; panel = makeFilterPanel(items, { paint, title: fld.label, single }); panel.open(single ? form[fld.key] : (Array.isArray(form[fld.key]) ? form[fld.key] : [])); };
     const openItem = () => { const cur = sel[li]; form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); focus = 'right'; fi = 0; };
+    const quit = () => { cleanup(); resolve(); return true; };
+    const openDelete = (name) => { const used = secOf().key === 'guards' ? usersOf(name) : []; modal = { title: 'Delete', lines: [`Delete '${name}'?`, ...(used.length ? [`\x1b[90mused by ${used.length} project(s)\x1b[39m`] : [])], choices: [{ keys: ['y', 'Y'], label: 'y delete', run: () => { doDelete(name); modal = null; return false; } }, { keys: ['\x1b', 'n', 'N'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
+    const openUnsaved = () => { modal = { title: 'Unsaved changes', lines: [`Save changes to '${form.name || form.orig || secOf().noun}' before leaving?`], choices: [{ keys: ['s', 'S'], label: 's save & exit', run: () => (doSave() ? ((modal = null), false) : quit()) }, { keys: ['d', 'D'], label: 'd discard & exit', run: quit }, { keys: ['\x1b'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
 
     const handleKey = (k) => {
       msg = '';
+      if (modal) { const ch = modal.choices.find((c) => c.keys.includes(k)); if (ch && ch.run()) return true; repaint(); return false; } // modal captures all keys
       if (panel) {
         const r = panel.key(k);
-        if (r === 'apply') { if (panelField.kind === 'choice') { const v = [...panel.selected][0]; if (v != null) form[panelField.key] = v; } else form[panelField.key] = [...panel.selected]; panel = null; }
+        if (r === 'apply') { if (panelField.kind === 'choice') { const v = [...panel.selected][0]; if (v != null) form[panelField.key] = v; } else form[panelField.key] = [...panel.selected]; panel = null; dirty = true; }
         else if (r === 'cancel') panel = null;
         repaint(); return false;
       }
-      if (pendingDel) { if (k === 'y' || k === 'Y') doDelete(pendingDel); pendingDel = null; repaint(); return false; }
       if (editing) {
         const wordL = (i) => { let j = i; while (j > 0 && buf[j - 1] === ' ') j--; while (j > 0 && buf[j - 1] !== ' ') j--; return j; };
         const wordR = (i) => { let j = i; while (j < buf.length && buf[j] !== ' ') j++; while (j < buf.length && buf[j] === ' ') j++; return j; };
@@ -2905,7 +2929,7 @@ async function configForm(flags, opts = {}) {
           else if (editTarget === 'listval') { mapEdit.rows[mapEdit.ri] = buf; editing = false; editTarget = null; } // list row = a single string
           else if (editTarget === 'newkey') { newKey = buf; buf = ''; caret = 0; editTarget = 'newval'; } // key entered -> now the value (stay editing)
           else if (editTarget === 'newval') { if (mapEdit.list) { if (buf.trim()) { mapEdit.rows.push(buf); mapEdit.ri = mapEdit.rows.length - 1; } } else if (newKey.trim()) { mapEdit.rows.push([newKey.trim(), buf]); mapEdit.ri = mapEdit.rows.length - 1; } editing = false; editTarget = null; }
-          else { form[secOf().fields[fi].key] = buf; editing = false; }
+          else { form[secOf().fields[fi].key] = buf; editing = false; dirty = true; }
         }
         else if (k === '\x1b') { editing = false; editTarget = null; }                                       // bare esc cancels the edit
         else if (k === '\x1b[D') caret = Math.max(0, caret - 1);                                             // ← left
@@ -2933,17 +2957,18 @@ async function configForm(flags, opts = {}) {
           else { editing = true; buf = String(F.rows[F.ri][1]); caret = buf.length; editTarget = 'val'; }
         }
         else if (k === 'd') { if (F.ri < n) { F.rows.splice(F.ri, 1); F.ri = Math.min(F.ri, F.rows.length); } }
-        else if (k === '\x1b' || k === '\x03') { form[F.field.key] = F.list ? [...F.rows] : toObj(F.rows, F.field.multiVal); mapEdit = null; } // esc commits rows back to the form field
+        else if (k === '\x1b' || k === '\x03') { form[F.field.key] = F.list ? [...F.rows] : toObj(F.rows, F.field.multiVal); mapEdit = null; dirty = true; } // esc commits rows back to the form field
         else return false;
         repaint(); return false;
       }
-      if (k === '\x03' || k === '\x1b') { cleanup(); resolve(); return true; } // esc/Ctrl-C quit (sub-modes above consume esc first)
+      if (k === '\x03') return quit();                                          // Ctrl-C force-quits (even with unsaved edits)
+      if (k === '\x1b') { if (dirty) { openUnsaved(); repaint(); return false; } return quit(); } // esc: prompt if the current form has unsaved edits
       if (focus === 'left') {
         if (k === 'k' || k === '\x1b[A') { li = Math.max(0, li - 1); loadForm(); }
         else if (k === 'j' || k === '\x1b[B') { li = Math.min(sel.length - 1, li + 1); loadForm(); }
         else if (k === '\r' || k === '\n' || k === 'l' || k === '\x1b[C' || k === '\t') openItem();
         else if (k === 'n') { const si = sel[li].si; if (!sections[si].fixed) { const at = sel.findIndex((x) => x.si === si && x.name == null); li = at >= 0 ? at : li; form = sections[si].blank(); focus = 'right'; fi = 0; } } // fixed sections (Settings) have no create
-        else if (k === 'd') { if (sel[li].name != null && !secOf().fixed) pendingDel = sel[li].name; } // ...and no delete
+        else if (k === 'd') { if (sel[li].name != null && !secOf().fixed) openDelete(sel[li].name); } // ...and no delete
         else return false;
         repaint(); return false;
       }
@@ -2959,7 +2984,7 @@ async function configForm(flags, opts = {}) {
         else if (fld.kind === 'readonly' && fld.hint) msg = fld.hint;
       }
       else if (k === 's') doSave();
-      else if (k === 'd') { if (!form.isNew) pendingDel = form.orig; }
+      else if (k === 'd') { if (!form.isNew && !secOf().fixed) openDelete(form.orig); }
       else if (k === 'h' || k === '\x1b[D' || k === '\t') focus = 'left';       // back to the list (esc quits the whole form)
       else return false;
       repaint(); return false;
