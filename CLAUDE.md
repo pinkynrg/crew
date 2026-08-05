@@ -121,15 +121,21 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   graph as a laid-out ASCII diagram (boxes, per-source colored double-line dep edges, thin single
   reference edges, `╦╤` box-connect T-junctions) — our own zero-dep layered-DAG renderer, no external
   tool. On a TTY it's shown in an alternate-screen pager (`pagerView`: `↑↓` scroll — shown only when the
-  graph overflows — `f` opens a `menu()` node filter, `r` toggles reference edges, `q` quits leaving no
+  graph overflows — `f` opens the node filter, `r` toggles reference edges, `q` quits leaving no
   scrollback); piped/redirected → plain print. `crew graph list` prints the adjacency text instead.
   Both graph UIs — the pager AND the start/workspace/claude selector (`graphSelect`) — share one footer
   builder `graphFooter({mode, total, sel, vis, shown, hasRef, showRef, warn, scroll})` (order: state → move
   → `f`/`r` toggles → action → exit). The pager shows one `shown/total` count; the selector shows TWO —
   `sel/total sel` (projects picked to run) then `vis/total shown` (nodes left visible after the `f` filter).
   Any count that isn't full turns RED (via `\x1b[31m…\x1b[39m`, so it survives the reverse-video bar). Both
-  UIs share one ref filter (`e => showRef || !e.ref`) and one node-visibility filter: `f` opens a `menu()`
-  of nodes (`openFilter`; in the selector, hidden nodes are also dropped from the run set), `r` toggles refs.
+  UIs share one ref filter (`e => showRef || !e.ref`) and one node-visibility filter: `f` overlays a
+  right-anchored multiselect panel (`makeFilterPanel`) ON the graph's rightmost columns — the graph stays
+  drawn (no screen clear, unlike a full-screen `menu()`) and updates LIVE: `space`/`a` toggle a node and
+  redraw the graph immediately (a snapshot is taken on open), `↵` confirms + persists, `esc`/`q` revert to
+  the pre-open state. In the selector, hidden nodes are also dropped from the run set. `r` toggles refs.
+  Both UIs process input one key at a time via a `handleKey` fed from `splitKeys` — one stdin chunk can
+  bundle several keys (e.g. Enter+`q` as `"\rq"`), so a panel-closing key mid-chunk must not swallow the
+  rest (Enter applies the filter AND the trailing `q` still quits).
   Both prefs are machine-local (`local.json`) and shared across the two UIs: `graphRefs` (show-refs) +
   `graphShown` (node filter) — see `loadGraphRefs`/`saveGraphRefs`/`loadGraphShown`/`saveGraphShown`,
   mirroring `loadLogWrap`.
