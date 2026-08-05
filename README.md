@@ -72,7 +72,7 @@ crew install      # pick projects, install them (waits, reports pass/fail)
 crew start env=qa # pick projects to run locally; env = what the rest point at (remembers your pick)
 crew workspace    # open the remembered set as one VSCode window
 crew claude       # launch Claude Code over the remembered set
-crew edit         # wizard: change a project later
+crew edit         # two-pane visual editor (projects + guards); `crew edit <name>` = one-project wizard
 ```
 
 ## Concepts
@@ -371,7 +371,7 @@ Config:
 
 ```
 crew add                               wizard: create a new project
-crew edit [name]                       wizard: modify an existing project
+crew edit [name]                       no name: two-pane visual editor; name: one-project wizard
 crew remove <name>                     delete a project (confirm) (alias: rm)
 crew guards [project|edit]             list/manage guards; `edit` = two-pane visual editor
 crew overrides [set|remove]            list/set/remove per-project env overrides (local.json)
@@ -463,10 +463,11 @@ crew guards link         pick a guard, then toggle which projects use it (multi-
 crew guards unlink       pick a guard, then pick linked projects to detach
 ```
 
-`crew guards edit` is the fastest way to eyeball and tweak the whole registry: the left column
-lists every guard plus a green `+ New guard` row, the right column is the highlighted guard's
-form. Create with the `+ New` row, edit fields then `s` to save, `d` to delete (with confirm).
-Renaming a guard carries its project links along.
+`crew guards edit` (and `crew edit` with no name) open the same **two-pane visual editor**: the
+left column stacks your projects and guards, each with a green `+ New …` row; the right column is
+the highlighted item's form. Create with a `+ New` row, edit fields then `s` to save, `d` to delete
+(with confirm). `crew guards edit` starts focused on the guards; `crew edit` starts on the projects.
+Renaming a guard carries its project links along; on a project, `guards` is a checklist you toggle.
 
 You can also attach guards from the project side in `crew edit <project>` (the guards
 multi-select). Both sides write the same `project.guards` list.

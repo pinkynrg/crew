@@ -514,7 +514,7 @@ function makeFilterPanel(items, { paint, title = 'Show nodes' } = {}) {
     get active() { return active; },
     get selected() { return selected; },
     get width() { return innerW + 2; },                                     // │ … │
-    open(pre) { const p = (pre || []).filter((n) => items.includes(n)); selected = new Set(p.length ? p : items); cursor = 0; scroll = 0; active = true; },
+    open(pre) { const p = Array.isArray(pre) ? pre.filter((n) => items.includes(n)) : items.slice(); selected = new Set(p); cursor = 0; scroll = 0; active = true; }, // array (even empty) = exact set; null = all
     close() { active = false; },
     key(k) {
       if (k === '\x1b' || k === 'q') return 'cancel';
@@ -2792,8 +2792,9 @@ export async function cmdAdd(flags) {
   }
 }
 
-// crew edit [name] — modify an EXISTING project via wizard (errors if absent).
+// crew edit [name] — no name (interactive) opens the two-pane visual editor; a name runs the wizard.
 export async function cmdEdit(flags, name) {
+  if (!name && canInteractive()) return void (await configForm(flags, { section: 'projects' }));
   const { cfg, path } = loadUserConfig(flags);
   const projects = Object.keys(cfg.projects || {});
   if (!projects.length) fail('edit: nothing to edit yet. Run: crew add');
@@ -2846,7 +2847,7 @@ export async function cmdRemove(flags, name) {
 // crew guards edit -> the two-pane visual editor (guardsForm); bare `crew guards` -> list
 const GUARD_ACTIONS = ['add', 'remove', 'link', 'unlink'];
 export async function cmdGuards(flags, sub, rest) {
-  if (sub === 'edit') return void (await guardsForm(flags)); // two-pane visual editor (create/update/delete)
+  if (sub === 'edit') return void (await configForm(flags, { section: 'guards' })); // two-pane visual editor (create/update/delete)
   if (sub && GUARD_ACTIONS.includes(sub)) {
     const { cfg, path } = loadUserConfig(flags);
     const p = makePrompter();
@@ -2863,146 +2864,227 @@ export async function cmdGuards(flags, sub, rest) {
   guardList(loadMerged(flags).cfg, sub); // sub (optional) = a target to scope the list to
 }
 
-// Two-pane raw-mode editor for the guards registry (`crew guards edit`). Left column: each guard name
-// plus a green "+ New guard" row; right column: the highlighted guard's fields. The three actions fall
-// out of position + key: CREATE = the +New row (blank form), UPDATE = edit fields then `s` save, DELETE
-// = `d` on a guard (confirm). Zero-dep, same raw-mode primitives as the graph views (splitKeys, alt
-// screen, absolute cursor). Built generically so Projects/Overrides can become extra left-column sections.
-async function guardsForm(flags) {
+// Two-pane raw-mode config editor. Left column stacks every SECTION (Projects, Guards) as a name list,
+// each ending in a green "+ New" row; the right column is the highlighted item's form. The three actions
+// fall out of position + key: CREATE = a +New row (blank form), UPDATE = edit fields then `s` save, DELETE
+// = `d` + confirm. Field kinds: text (inline editor), name (item key, rename-aware), choice (⏎ cycles a
+// fixed option list), multiselect (⏎ opens a makeFilterPanel overlay), readonly (display only). Zero-dep,
+// same raw-mode primitives as the graph views (splitKeys, alt screen, absolute cursor, footerBar). Each
+// section owns load/save/del so adding Overrides later is just another section descriptor.
+// Entry points: `crew edit` (no name) -> Projects; `crew guards edit` -> Guards.
+async function configForm(flags, opts = {}) {
   const stdout = process.stdout, stdin = process.stdin;
-  if (!stdout.isTTY || !stdin.isTTY) fail('crew guards edit needs an interactive terminal (try: crew guards)');
+  if (!stdout.isTTY || !stdin.isTTY) fail('this editor needs an interactive terminal');
   const { cfg, path } = loadUserConfig(flags);
+  cfg.projects = cfg.projects || {};
   cfg.guards = cfg.guards || {};
-  const NEW = '+ New guard';
-  const FIELDS = [
-    { key: 'name', label: 'name' },
-    { key: 'comment', label: 'comment' },
-    { key: 'command', label: 'command' },
-    { key: 'message', label: 'message' },
-  ];
-  const REQUIRED = new Set(['name', 'comment', 'command']); // message is optional
-  let names = Object.keys(cfg.guards);
-  let items = [...names, NEW];
+  const paint = projectColors(cfg);
+
+  const serializeMatch = (m) => (m && typeof m === 'object' && !Array.isArray(m))
+    ? Object.entries(m).flatMap(([e, v]) => (Array.isArray(v) ? v : [v]).map((h) => `${e}=${h}`)).join(' ') : '';
+  const parseMatch = (s) => { const m = {}; for (const tok of String(s).trim().split(/\s+/).filter(Boolean)) { const eq = tok.indexOf('='); if (eq <= 0 || !tok.slice(eq + 1)) continue; const e = tok.slice(0, eq), h = tok.slice(eq + 1); m[e] = m[e] == null ? h : [].concat(m[e], h); } return m; };
+  const setOrDel = (o, key, v, keep) => { if (keep == null ? !!v : keep) o[key] = v; else delete o[key]; };
+  const usersOf = (n) => Object.entries(cfg.projects).filter(([, p]) => (p.guards || []).includes(n)).map(([pn]) => pn);
+
+  const projectsSection = {
+    key: 'projects', title: 'PROJECTS', noun: 'project', newLabel: '+ New project',
+    names: () => Object.keys(cfg.projects),
+    fields: [
+      { key: 'name', label: 'name', kind: 'name', req: true },
+      { key: 'path', label: 'path', kind: 'text', req: true },
+      { key: 'type', label: 'type', kind: 'choice', options: PROJECT_TYPES },
+      { key: 'runner', label: 'runner', kind: 'text' },
+      { key: 'env', label: 'env', kind: 'text' },
+      { key: 'local', label: 'local', kind: 'text' },
+      { key: 'match', label: 'match', kind: 'text' },
+      { key: 'guards', label: 'guards', kind: 'multiselect', options: () => Object.keys(cfg.guards) },
+      { key: 'defaultBranch', label: 'branch', kind: 'text' },
+      { key: 'tasks', label: 'tasks', kind: 'readonly' },
+    ],
+    load: (n) => { const p = cfg.projects[n] || {}; return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', env: p.env || '', local: p.local || '', match: serializeMatch(p.match), guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: Object.keys(p.tasks || {}).join(', '), isNew: false, orig: n }; },
+    blank: () => ({ name: '', path: '', type: 'other', runner: '', env: '', local: '', match: '', guards: [], defaultBranch: '', tasks: '', isNew: true, orig: null }),
+    save: (f) => {
+      const name = String(f.name).trim();
+      if (!name) return 'name is required';
+      if (!String(f.path).trim()) return 'path is required';
+      const renaming = !f.isNew && name !== f.orig;
+      if ((f.isNew || renaming) && cfg.projects[name]) return `project '${name}' already exists`;
+      const base = f.isNew ? {} : { ...(cfg.projects[f.orig] || {}) }; // preserve tasks + any unmanaged/future keys
+      if (renaming) delete cfg.projects[f.orig];
+      const proj = { ...base, path: String(f.path).trim(), type: f.type };
+      setOrDel(proj, 'runner', String(f.runner).trim());
+      setOrDel(proj, 'env', String(f.env).trim());
+      setOrDel(proj, 'local', String(f.local).trim());
+      setOrDel(proj, 'defaultBranch', String(f.defaultBranch).trim());
+      const m = parseMatch(f.match); setOrDel(proj, 'match', m, Object.keys(m).length > 0);
+      setOrDel(proj, 'guards', f.guards, Array.isArray(f.guards) && f.guards.length > 0);
+      cfg.projects[name] = proj; writeUserConfig(path, cfg); return null;
+    },
+    del: (n) => { delete cfg.projects[n]; writeUserConfig(path, cfg); },
+    info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveProjectPath(String(f.path).trim()); } catch { return `\x1b[90mpath\x1b[39m  ${String(f.path).trim()}  \x1b[90m(set a projects dir: crew dir <path>)\x1b[39m`; } return pathExists(abs) ? `\x1b[90mpath\x1b[39m  ${abs}` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
+  };
+
+  const guardsSection = {
+    key: 'guards', title: 'GUARDS', noun: 'guard', newLabel: '+ New guard',
+    names: () => Object.keys(cfg.guards),
+    fields: [
+      { key: 'name', label: 'name', kind: 'name', req: true },
+      { key: 'comment', label: 'comment', kind: 'text', req: true },
+      { key: 'command', label: 'command', kind: 'text', req: true },
+      { key: 'message', label: 'message', kind: 'text' },
+    ],
+    load: (n) => { const g = cfg.guards[n] || {}; return { name: n, comment: g.comment || '', command: g.command || '', message: g.message || '', isNew: false, orig: n }; },
+    blank: () => ({ name: '', comment: '', command: '', message: '', isNew: true, orig: null }),
+    save: (f) => {
+      const name = String(f.name).trim();
+      if (!name) return 'name is required';
+      if (!String(f.comment).trim()) return 'comment is required';
+      if (!String(f.command).trim()) return 'command is required';
+      const renaming = !f.isNew && name !== f.orig;
+      if ((f.isNew || renaming) && cfg.guards[name]) return `guard '${name}' already exists`;
+      if (renaming) { delete cfg.guards[f.orig]; for (const pr of Object.values(cfg.projects)) if ((pr.guards || []).includes(f.orig)) { setProjectGuard(pr, f.orig, false); setProjectGuard(pr, name, true); } }
+      cfg.guards[name] = String(f.message).trim() ? { comment: String(f.comment).trim(), command: String(f.command).trim(), message: String(f.message).trim() } : { comment: String(f.comment).trim(), command: String(f.command).trim() };
+      writeUserConfig(path, cfg); return null;
+    },
+    del: (n) => { delete cfg.guards[n]; for (const pr of Object.values(cfg.projects)) setProjectGuard(pr, n, false); writeUserConfig(path, cfg); },
+    info: (f) => f.isNew ? '' : `\x1b[90mused by\x1b[39m  ${usersOf(f.orig).join(', ') || '\x1b[90m(no projects)\x1b[39m'}`,
+  };
+
+  const sections = [projectsSection, guardsSection];
+  const optionsOf = (fld) => (typeof fld.options === 'function' ? fld.options() : fld.options || []);
+  const selectable = () => { const out = []; sections.forEach((s, si) => { s.names().forEach((n) => out.push({ si, name: n })); out.push({ si, name: null }); }); return out; };
+  let sel = selectable();
   let li = 0, focus = 'left', fi = 0, editing = false, buf = '';
-  let form = null, confirm = null, msg = '';
+  let form = null, pendingDel = null, msg = '', panel = null, panelField = null, leftTop = 0;
 
-  const usersOf = (n) => Object.entries(cfg.projects || {}).filter(([, p]) => (p.guards || []).includes(n)).map(([pn]) => pn);
-  const blank = () => ({ name: '', comment: '', command: '', message: '', isNew: true, orig: null });
-  const loadForm = () => {
-    const it = items[li];
-    if (it === NEW) { form = blank(); return; }
-    const g = cfg.guards[it] || {};
-    form = { name: it, comment: g.comment || '', command: g.command || '', message: g.message || '', isNew: false, orig: it };
-  };
-  const refresh = (keep) => { names = Object.keys(cfg.guards); items = [...names, NEW]; if (keep != null) { const at = items.indexOf(keep); li = at >= 0 ? at : Math.min(li, items.length - 1); } };
-  loadForm();
+  const secOf = () => sections[sel[li].si];
+  const loadForm = () => { const cur = sel[li]; form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); };
+  const reselect = (si, name) => { sel = selectable(); let i = sel.findIndex((n) => n.si === si && n.name === name); if (i < 0) i = sel.findIndex((n) => n.si === si); if (i < 0) i = 0; li = Math.max(0, Math.min(i, sel.length - 1)); loadForm(); };
+  const startAt = (key) => { const i = sel.findIndex((n) => sections[n.si].key === key); li = i >= 0 ? i : 0; };
+  startAt(opts.section || 'projects'); loadForm();
 
-  const save = () => {
-    const f = form, name = f.name.trim();
-    for (const k of FIELDS) if (REQUIRED.has(k.key) && !String(f[k.key]).trim()) { msg = `\x1b[31m${k.label} is required\x1b[39m`; return; }
-    if (f.isNew && cfg.guards[name]) { msg = `\x1b[31mguard '${name}' already exists\x1b[39m`; return; }
-    if (!f.isNew && name !== f.orig) { // rename: migrate the key + every project link
-      if (cfg.guards[name]) { msg = `\x1b[31mguard '${name}' already exists\x1b[39m`; return; }
-      delete cfg.guards[f.orig];
-      for (const pr of Object.values(cfg.projects || {})) if ((pr.guards || []).includes(f.orig)) { setProjectGuard(pr, f.orig, false); setProjectGuard(pr, name, true); }
-    }
-    cfg.guards[name] = f.message.trim() ? { comment: f.comment.trim(), command: f.command.trim(), message: f.message.trim() } : { comment: f.comment.trim(), command: f.command.trim() };
-    writeUserConfig(path, cfg);
-    refresh(name); loadForm(); msg = `\x1b[32msaved '${name}'\x1b[39m`;
+  const doSave = () => {
+    const s = secOf(), si = sel[li].si;
+    const err = s.save(form);
+    if (err) { msg = `\x1b[31m${err}\x1b[39m`; return; }
+    const name = String(form.name).trim();
+    reselect(si, name); msg = `\x1b[32msaved '${name}'\x1b[39m`;
   };
-  const del = (name) => {
-    delete cfg.guards[name];
-    for (const pr of Object.values(cfg.projects || {})) setProjectGuard(pr, name, false);
-    writeUserConfig(path, cfg);
-    li = Math.max(0, Math.min(li, items.length - 2)); refresh(); li = Math.min(li, items.length - 1); loadForm(); focus = 'left'; msg = `removed '${name}'`;
-  };
+  const doDelete = (name) => { const s = secOf(), si = sel[li].si; s.del(name); reselect(si, null); focus = 'left'; msg = `removed '${name}'`; };
 
   return new Promise((resolve) => {
     const w = (x) => stdout.write(x);
     const wasRaw = stdin.isRaw;
-    const disp = (s) => [...String(s).replace(/\x1b\[[0-9;]*m/g, '')].length;
     const clipP = (s, n) => { const a = [...String(s)]; return a.length > n ? a.slice(0, Math.max(0, n - 1)).join('') + '…' : String(s); };
-    const padP = (s, n) => { const d = [...String(s)].length; return d >= n ? String(s) : String(s) + ' '.repeat(n - d); };
+    const padP = (s, n) => { const d = [...String(s).replace(/\x1b\[[0-9;]*m/g, '')].length; return d >= n ? String(s) : String(s) + ' '.repeat(n - d); };
     const rev = (s) => `\x1b[7m${s}\x1b[27m`;
     const cleanup = () => { stdin.removeListener('data', onData); stdout.removeListener('resize', repaint); w('\x1b[?25h\x1b[?7h\x1b[?1049l'); if (stdin.setRawMode) stdin.setRawMode(wasRaw); stdin.pause(); };
 
+    const displayRows = () => { const d = []; sections.forEach((s, si) => { if (si) d.push({ kind: 'space' }); d.push({ kind: 'header', si }); s.names().forEach((n) => d.push({ kind: 'item', si, name: n })); d.push({ kind: 'new', si }); }); return d; };
+
     const repaint = () => {
       const C = stdout.columns || 80, R = Math.max(10, stdout.rows || 24);
-      const LW = Math.min(30, Math.max(16, (C * 0.32) | 0)), RX = LW + 3, RW = Math.max(12, C - RX - 1);
-      const body = R - 2; // title (1) + footer (1) -> body fills the rest, footer pinned to the last row
-      // ---- left column ----
-      const L = [`\x1b[90mGUARDS\x1b[39m  \x1b[90m${names.length}\x1b[39m`, ''];
-      items.forEach((it, i) => {
-        const cur = i === li, isNew = it === NEW;
-        let cell = padP((cur ? '▸ ' : '  ') + clipP(it, LW - 2), LW);
-        if (cur && focus === 'left') cell = rev(cell); else if (isNew) cell = `\x1b[32m${cell}\x1b[39m`;
+      const LW = Math.min(30, Math.max(16, (C * 0.32) | 0)), RW = Math.max(12, C - LW - 4);
+      const body = R - 2; // title (1) + footer (1); body fills the rest, footer pinned to the last row
+      const cur = sel[li], s = secOf();
+      // ---- left column (all sections stacked; scrolls to keep the cursor visible) ----
+      const d = displayRows();
+      const isCur = (r) => (r.kind === 'item' && r.si === cur.si && r.name === cur.name) || (r.kind === 'new' && r.si === cur.si && cur.name == null);
+      const ci = d.findIndex(isCur);
+      if (ci < leftTop) leftTop = ci; else if (ci >= leftTop + body) leftTop = ci - body + 1;
+      leftTop = Math.max(0, Math.min(leftTop, Math.max(0, d.length - body)));
+      const L = [];
+      for (let r = 0; r < body; r++) {
+        const row = d[leftTop + r];
+        if (!row || row.kind === 'space') { L.push(''); continue; }
+        if (row.kind === 'header') { L.push(`\x1b[90m${sections[row.si].title}\x1b[39m  \x1b[90m${sections[row.si].names().length}\x1b[39m`); continue; }
+        const label = row.kind === 'new' ? sections[row.si].newLabel : row.name;
+        const on = isCur(row);
+        let cell = padP((on ? '▸ ' : '  ') + clipP(label, LW - 2), LW);
+        if (on && focus === 'left') cell = rev(cell); else if (row.kind === 'new') cell = `\x1b[32m${cell}\x1b[39m`;
         L.push(cell);
-      });
+      }
       // ---- right column ----
       const Rn = [];
-      Rn.push(form.isNew ? '\x1b[1mNew guard\x1b[22m' : `\x1b[1mGuard\x1b[22m \x1b[90m·\x1b[39m ${form.name || form.orig}`);
+      Rn.push(form.isNew ? `\x1b[1mNew ${s.noun}\x1b[22m` : `\x1b[1m${s.noun[0].toUpperCase() + s.noun.slice(1)}\x1b[22m \x1b[90m·\x1b[39m ${form.name || form.orig}`);
       Rn.push('');
-      FIELDS.forEach((fld, i) => {
+      s.fields.forEach((fld, i) => {
         const on = focus === 'right' && i === fi;
-        const val = editing && on ? buf + '\x1b[7m \x1b[27m' : (String(form[fld.key]) || (REQUIRED.has(fld.key) ? '\x1b[90m(required)\x1b[39m' : '\x1b[90m(optional)\x1b[39m'));
-        const lab = padP(fld.label, 9);
-        Rn.push(`  ${on && !editing ? rev(' ' + lab) : '\x1b[90m ' + lab + '\x1b[39m'} ${clipP(val, RW - 12)}`);
+        let val;
+        if (editing && on && (fld.kind === 'text' || fld.kind === 'name')) val = buf + '\x1b[7m \x1b[27m';
+        else if (fld.kind === 'multiselect') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : '\x1b[90m(none)\x1b[39m'; }
+        else if (fld.kind === 'readonly') val = String(form[fld.key]) ? String(form[fld.key]) : '\x1b[90m(none)\x1b[39m';
+        else val = String(form[fld.key]) ? String(form[fld.key]) : `\x1b[90m(${fld.req ? 'required' : 'optional'})\x1b[39m`;
+        const lab = padP(fld.label, 8);
+        Rn.push(`  ${on && !editing ? rev(' ' + lab + ' ') : '\x1b[90m ' + lab + ' \x1b[39m'} ${clipP(val, RW - 12)}`);
       });
-      if (!form.isNew) { Rn.push(''); const u = usersOf(form.orig); Rn.push(`  \x1b[90mused by\x1b[39m  ${u.length ? u.join(', ') : '\x1b[90m(no projects)\x1b[39m'}`); }
+      const info = s.info ? s.info(form) : '';
+      if (info) { Rn.push(''); Rn.push('  ' + info); }
       // ---- compose ----
       let out = '\x1b[H\x1b[2J';
-      out += '\x1b[K ' + '\x1b[1mcrew guards\x1b[22m' + '\x1b[90m  ·  visual editor\x1b[39m' + '\r\n';
-      for (let r = 0; r < body; r++) {
-        const lc = padP(L[r] || '', LW), rc = Rn[r] || '';
-        out += '\x1b[K ' + lc + ' \x1b[90m│\x1b[39m ' + rc + '\r\n';
-      }
-      // ---- footer (same full-width reverse-video bar as the graph views) ----
+      out += '\x1b[K ' + '\x1b[1mcrew\x1b[22m' + '\x1b[90m  ·  config editor\x1b[39m' + '\r\n';
+      for (let r = 0; r < body; r++) out += '\x1b[K ' + padP(L[r] || '', LW) + ' \x1b[90m│\x1b[39m ' + (Rn[r] || '') + '\r\n';
+      // ---- footer ----
       let parts;
-      if (confirm) parts = [`\x1b[31mDelete '${confirm}'?\x1b[39m`, ...(usersOf(confirm).length ? [`used by ${usersOf(confirm).length} project(s)`] : []), 'y delete', 'esc cancel'];
+      if (pendingDel) parts = [`\x1b[31mDelete '${pendingDel}'?\x1b[39m`, ...(s.key === 'guards' && usersOf(pendingDel).length ? [`used by ${usersOf(pendingDel).length} project(s)`] : []), 'y delete', 'esc cancel'];
+      else if (panel) parts = ['space toggle', 'a all', '⏎ apply', 'esc cancel'];
       else if (editing) parts = ['type to edit', '⏎ commit', 'esc cancel'];
       else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', '→ fields', 'q quit'];
-      else parts = ['↑↓ field', '⏎ edit', 's save', 'd delete', '← list', 'q quit'];
+      else { const fld = s.fields[fi]; const eh = fld.kind === 'choice' ? '⏎ cycle' : fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew ? [] : ['d delete']), '← list', 'q quit'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
       out += '\x1b[K' + footerBar(footerText(parts), C);
+      // ---- multiselect overlay (paints over the right columns; graph filter panel reused) ----
+      if (panel) { const pr = panel.rows(body); const col = Math.max(1, C - panel.width + 1); for (let i = 0; i < pr.length && i < body; i++) out += `\x1b[${i + 2};${col}H` + pr[i]; out += '\x1b[0m'; }
       w(out);
     };
 
-    const startNew = () => { li = items.length - 1; loadForm(); focus = 'right'; fi = 0; };
-    const openItem = () => { if (items[li] === NEW) { form = blank(); } else loadForm(); focus = 'right'; fi = 0; };
+    const openPanel = (fld) => { const items = optionsOf(fld); if (!items.length) { msg = `no ${fld.label} defined yet`; return; } panelField = fld; panel = makeFilterPanel(items, { paint, title: fld.label }); panel.open(Array.isArray(form[fld.key]) ? form[fld.key] : []); };
+    const openItem = () => { const cur = sel[li]; form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); focus = 'right'; fi = 0; };
 
     const handleKey = (k) => {
       msg = '';
-      if (confirm) { if (k === 'y' || k === 'Y') del(confirm); confirm = null; repaint(); return false; }
+      if (panel) {
+        const r = panel.key(k);
+        if (r === 'apply') { form[panelField.key] = [...panel.selected]; panel = null; }
+        else if (r === 'cancel') panel = null;
+        repaint(); return false;
+      }
+      if (pendingDel) { if (k === 'y' || k === 'Y') doDelete(pendingDel); pendingDel = null; repaint(); return false; }
       if (editing) {
-        if (k === '\r' || k === '\n') { form[FIELDS[fi].key] = buf; editing = false; }
+        if (k === '\r' || k === '\n') { form[secOf().fields[fi].key] = buf; editing = false; }
         else if (k === '\x1b') editing = false;                                  // cancel edit
         else if (k === '\x7f' || k === '\b') buf = buf.slice(0, -1);
         else if (k.length === 1 && k >= ' ') buf += k;                           // printable
-        else return false;                                                       // ignore arrows etc while editing
+        else return false;
         repaint(); return false;
       }
       if (k === '\x03' || k === 'q') { cleanup(); resolve(); return true; }
       if (focus === 'left') {
         if (k === 'k' || k === '\x1b[A') { li = Math.max(0, li - 1); loadForm(); }
-        else if (k === 'j' || k === '\x1b[B') { li = Math.min(items.length - 1, li + 1); loadForm(); }
-        else if (k === '\r' || k === '\n') openItem();
-        else if (k === 'l' || k === '\x1b[C' || k === '\t') { if (items[li] === NEW) openItem(); else { focus = 'right'; fi = 0; } }
-        else if (k === 'n') startNew();
-        else if (k === 'd') { if (items[li] !== NEW) confirm = items[li]; }
+        else if (k === 'j' || k === '\x1b[B') { li = Math.min(sel.length - 1, li + 1); loadForm(); }
+        else if (k === '\r' || k === '\n' || k === 'l' || k === '\x1b[C' || k === '\t') openItem();
+        else if (k === 'n') { const si = sel[li].si; const at = sel.findIndex((x) => x.si === si && x.name == null); li = at >= 0 ? at : li; form = sections[si].blank(); focus = 'right'; fi = 0; }
+        else if (k === 'd') { if (sel[li].name != null) pendingDel = sel[li].name; }
         else return false;
         repaint(); return false;
       }
       // focus === 'right'
+      const fields = secOf().fields, fld = fields[fi];
       if (k === 'k' || k === '\x1b[A') fi = Math.max(0, fi - 1);
-      else if (k === 'j' || k === '\x1b[B') fi = Math.min(FIELDS.length - 1, fi + 1);
-      else if (k === '\r' || k === '\n') { editing = true; buf = String(form[FIELDS[fi].key] || ''); }
-      else if (k === 's') save();
-      else if (k === 'd') { if (!form.isNew) confirm = form.orig; }
+      else if (k === 'j' || k === '\x1b[B') fi = Math.min(fields.length - 1, fi + 1);
+      else if (k === '\r' || k === '\n') {
+        if (fld.kind === 'text' || fld.kind === 'name') { editing = true; buf = String(form[fld.key] || ''); }
+        else if (fld.kind === 'choice') { const o = optionsOf(fld); form[fld.key] = o[(o.indexOf(form[fld.key]) + 1) % o.length]; }
+        else if (fld.kind === 'multiselect') openPanel(fld);
+        else if (fld.kind === 'readonly' && fld.key === 'tasks') msg = 'edit tasks via: crew edit <name>';
+      }
+      else if (k === 's') doSave();
+      else if (k === 'd') { if (!form.isNew) pendingDel = form.orig; }
       else if (k === 'h' || k === '\x1b[D' || k === '\x1b' || k === '\t') focus = 'left';
       else return false;
       repaint(); return false;
     };
-    const onData = (buf2) => { for (const key of splitKeys(buf2.toString())) if (handleKey(key)) return; };
+    const onData = (chunk) => { for (const key of splitKeys(chunk.toString())) if (handleKey(key)) return; };
 
     if (stdin.setRawMode) stdin.setRawMode(true);
     stdin.resume();
@@ -3422,7 +3504,7 @@ export function help() {
   ];
   const CONFIG = [
     ['add', '', 'Wizard: create a new project'],
-    ['edit', '[name]', 'Wizard: modify an existing project'],
+    ['edit', '[name]', 'No name: two-pane visual editor; name: wizard for one project'],
     ['remove', '<name>', 'Delete a project (alias rm)'],
     ['guards', '[project|edit]', 'List/manage guards; `edit` = two-pane visual editor'],
     ['overrides', '[set|remove]', 'List/set/remove per-project env overrides (local.json)'],

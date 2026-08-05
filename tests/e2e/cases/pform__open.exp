@@ -1,8 +1,8 @@
 source tests/e2e/lib.exp
-crun guards edit
+crun edit
 must {config editor}
-must {vpn}
-must {used by}
+must {PROJECTS}
 must {api}
+must {backend}
 send "q"
 want_exit 0

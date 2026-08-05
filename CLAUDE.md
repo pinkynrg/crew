@@ -164,19 +164,27 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   verifies — it's printed in faint gray beside each result when guards run. Before a run, the
   target's guards are deduped by name, run once each in parallel (pass = exit 0); any failure
   prints its message and aborts. Run before `crew start`. Managed via
-  the `crew guards` command (list/add/remove/link/unlink, all select-driven). `crew guards edit`
-  opens a **two-pane raw-mode editor** (`guardsForm`, TTY-only): left column = guard names + a green
-  `+ New guard` row, right column = the highlighted guard's fields (name/comment/command/message). The
-  three actions fall out of position + key — CREATE = the `+ New` row (blank form), UPDATE = edit fields
-  then `s` save, DELETE = `d` + confirm (unlinks it from every project too, and warns if in use). Renaming
-  a guard migrates its key AND all `project.guards` links. Inline field editor pre-fills the current value;
-  `↑↓` move, `⏎` edit/open, `tab`/`←→` switch pane, `q` quits (unsaved field edits are discarded — only `s`
-  writes). Same raw-mode primitives as the graph views (`splitKeys`, alt screen, absolute cursor) and the
-  SAME footer: every raw-mode view renders its hint line through the shared `footerText` (` · `-joined
-  parts) + `footerBar` (one full-width reverse-video bar) — `graphFooter` also returns `footerText(parts)`,
-  so the graph pager, selector and guards editor bars are byte-for-byte the same treatment. Built
-  generically so Projects/Overrides can become extra left-column sections. Bare `crew guards` still lists;
-  the select-driven subcommands are unchanged. The v1 `checks` key auto-migrates to `guards` on load.
+  the `crew guards` command (list/add/remove/link/unlink, all select-driven).
+- **Visual editor (`configForm`, TTY-only)**: the single two-pane raw-mode editor behind `crew edit` (no
+  name → focus Projects) and `crew guards edit` (→ focus Guards). Left column stacks every SECTION
+  (currently Projects + Guards; Overrides is the next section to add) as a name list, each ending in a
+  green `+ New …` row; the right column is the highlighted item's form. The three actions fall out of
+  position + key — CREATE = a `+ New` row (blank form), UPDATE = edit fields then `s` save, DELETE = `d` +
+  confirm. Field KINDS: `text` (inline editor, pre-fills current value), `name` (the item key, rename-aware),
+  `choice` (`⏎` cycles a fixed option list, e.g. project `type`), `multiselect` (`⏎` opens a `makeFilterPanel`
+  overlay — reused from the graph, e.g. a project's guard links), `readonly` (display only, e.g. project
+  `tasks`, still edited via the `crew edit <name>` wizard). A project's `match` is edited as the compact
+  `env=host …` string (same as the wizard) and parsed on save; `save` starts from the existing object so
+  `tasks`/unmanaged keys survive. Each section owns `load/save/del`, so adding Overrides is just another
+  descriptor. Renaming a guard migrates its key AND every `project.guards` link; deleting a guard unlinks it
+  everywhere (warns if in use). `↑↓` move, `tab`/`←→` switch pane, `q` quits (only `s` writes; field edits
+  and the multiselect overlay are discarded on `esc`). Same raw-mode primitives as the graph views
+  (`splitKeys`, alt screen, absolute cursor) and the SAME footer: every raw-mode view renders its hint line
+  through the shared `footerText` (` · `-joined parts) + `footerBar` (one full-width reverse-video bar) —
+  `graphFooter` also returns `footerText(parts)`, so the graph pager, selector and config editor bars are
+  byte-for-byte the same treatment. Bare `crew guards` still lists; `crew edit <name>` + `crew add` keep the
+  sequential wizard (`collectProject`); the select-driven guard subcommands are unchanged. The v1 `checks`
+  key auto-migrates to `guards` on load.
 - `workspaceSettings` (optional top-level object): written verbatim into the generated
   `.code-workspace` `settings` (e.g. `{"jest.enable": false}` to stop the Jest extension
   auto-running per folder). crew injects nothing by default.
