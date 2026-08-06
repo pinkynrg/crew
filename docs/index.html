@@ -81,6 +81,21 @@
   .prin span { font-family:ui-monospace,Menlo,monospace; font-size:.82rem; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:.4rem .9rem; }
   .prin span b { color:var(--accent); }
 
+  /* why-not-docker: the on/off switchboard */
+  #why .switch-demo { display:grid; gap:.55rem; max-width:560px; margin:1.6rem 0; }
+  #why .switch-row { display:grid; grid-template-columns:3.4rem auto 1fr; align-items:center; gap:.8rem;
+    background:var(--panel); border:1px solid var(--line); border-radius:11px; padding:.6rem .95rem;
+    font-family:ui-monospace,Menlo,monospace; font-size:.9rem; }
+  #why .switch-row .svc { font-weight:700; }
+  #why .switch-row .tog { justify-self:start; font-size:.7rem; letter-spacing:.05em; text-transform:uppercase;
+    padding:.18rem .55rem; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+  #why .switch-row .tog.on { color:#0c0e15; background:var(--accent); border-color:var(--accent); }
+  #why .switch-row .dst { color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #why .switch-row .dst.is-local { color:var(--fg); }
+  #why .switch-row .dst .note { color:var(--accent); }
+  #why .compose-note { max-width:60ch; margin:0 0 1.6rem; color:var(--muted); font-size:1rem; }
+  #why .compose-note b { color:var(--fg); font-weight:600; }
+
   ol.steps { list-style:none; counter-reset:s; margin:0; padding:0; display:grid; gap:.9rem; }
   ol.steps li { counter-increment:s; display:grid; grid-template-columns:auto 1fr; gap:1.15rem; align-items:start;
     background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:1.15rem 1.35rem;
@@ -149,6 +164,7 @@
     .cmd button { padding:.24rem .5rem; }
     #config .term pre { font-size:11px; padding:.85rem .9rem; line-height:1.45; }
     #config .cfg-graph .cfg-graph-svg { width:190px; }
+    #why .switch-row { grid-template-columns:3rem auto 1fr; gap:.55rem; padding:.55rem .7rem; font-size:.78rem; }
     ol.steps li { padding:1rem 1.05rem; gap:.85rem; }
     ol.steps li::before { width:30px; height:30px; }
     footer .wrap { gap:.8rem 1.4rem; }
@@ -161,6 +177,7 @@
   <div class="wrap">
     <span class="brand">cr<b>ew</b></span>
     <nav>
+      <a href="#why" class="hidephone">Why&nbsp;not&nbsp;Docker</a>
       <a href="#how" class="hidephone">How it's built</a>
       <a href="#config" class="hidephone">Config&nbsp;file</a>
       <a href="#start">Get&nbsp;started</a>
@@ -191,6 +208,26 @@
     <div class="term">
       <div class="bar"><i></i><i></i><i></i><span>crew start</span></div>
       <img class="cast" src="media/crew-start.gif" alt="crew start: pick a connected slice of services in the dependency graph, run it locally, watch the labelled logs" loading="lazy" decoding="async">
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <p class="kicker">why not docker</p>
+    <h2>Every service is a switch.</h2>
+    <p class="intro"><b style="color:var(--fg)">On = local, off = remote.</b> Flip a service on and crew runs it locally and rewrites every peer that talks to it to point at your <span class="mono">localhost</span>. Flip it off and it stays on its deployed environment, callers untouched. The slice you run is just which switches are on &mdash; one service, or the whole stack.</p>
+    <div class="switch-demo" aria-label="Example: web and api switched on to localhost, auth left on staging">
+      <div class="switch-row"><span class="svc" style="color:rgb(95,211,141)">web</span><span class="tog on">on</span><span class="dst is-local">→ http://localhost:3000</span></div>
+      <div class="switch-row"><span class="svc" style="color:rgb(86,203,219)">api</span><span class="tog on">on</span><span class="dst is-local">→ http://localhost:4000 <span class="note">(web now calls this)</span></span></div>
+      <div class="switch-row"><span class="svc" style="color:rgb(183,148,246)">auth</span><span class="tog">off</span><span class="dst">→ https://auth.staging.acme.dev</span></div>
+    </div>
+    <p class="compose-note">Docker Compose has no equivalent to that switch: a service is in the compose file or it isn't, and pointing at the deployed one is a manual env edit &mdash; so you run the <b>whole</b> graph locally or maintain a second file full of stubs, and either drifts from production. crew reads the wiring from the <span class="mono">.env</span> files you already ship, so there's nothing to keep in sync.</p>
+    <div class="prin">
+      <span>run <b>one</b> service or <b>all</b> of them</span>
+      <span><b>native</b> processes, no daemon</span>
+      <span>no images, no rebuilds</span>
+      <span>wiring from your <b>env files</b></span>
     </div>
   </div>
 </section>
