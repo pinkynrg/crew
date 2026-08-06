@@ -102,24 +102,28 @@
   #why .switch-row .note:empty { display:none; }
   #why .compose-note { max-width:60ch; margin:0 0 1.6rem; color:var(--muted); font-size:1rem; }
   #why .compose-note b { color:var(--fg); font-weight:600; }
-  /* comparison table */
-  #why .cmp-wrap { overflow-x:auto; margin:.2rem 0 1.1rem; border:1px solid var(--line); border-radius:12px; }
-  #why table.cmp { border-collapse:collapse; width:100%; min-width:560px; font-size:.85rem; }
-  #why table.cmp th, #why table.cmp td { text-align:center; padding:.6rem .7rem; border-bottom:1px solid var(--line); white-space:nowrap; }
-  #why table.cmp thead th { font-family:ui-monospace,Menlo,monospace; font-size:.76rem; color:var(--muted); font-weight:600; white-space:normal; vertical-align:bottom; }
-  #why table.cmp thead th.me { color:var(--accent); }
-  #why table.cmp tbody th { text-align:left; font-weight:500; color:var(--fg); white-space:normal; min-width:11.5rem; }
-  #why table.cmp td.me { color:var(--fg); font-weight:700; background:color-mix(in srgb, var(--accent) 8%, transparent); }
+  /* comparison table: fixed layout = equal columns; uniform ✓/✕ cells; crew column gently highlighted */
+  #why .cmp-wrap { overflow-x:auto; margin:.4rem 0 1.1rem; }
+  #why table.cmp { table-layout:fixed; border-collapse:collapse; width:100%; font-size:.86rem; }
+  #why table.cmp col.lbl { width:33%; }
+  #why table.cmp th, #why table.cmp td { padding:.6rem .3rem; text-align:center; border-bottom:1px solid var(--line); }
+  #why table.cmp thead th { font-family:ui-monospace,Menlo,monospace; font-size:.8rem; font-weight:600; color:var(--muted); padding-bottom:.7rem; }
+  #why table.cmp thead th.me { color:var(--accent); background:color-mix(in srgb, var(--accent) 9%, transparent); border-radius:9px 9px 0 0; }
+  #why table.cmp tbody th { text-align:left; font-weight:500; color:var(--fg); font-size:.9rem; }
+  #why table.cmp td.me { background:color-mix(in srgb, var(--accent) 9%, transparent); }
+  #why table.cmp tr:last-child td.me { border-radius:0 0 9px 9px; }
   #why table.cmp tr:last-child th, #why table.cmp tr:last-child td { border-bottom:none; }
-  #why table.cmp .yes { color:rgb(95,211,141); font-weight:700; }
-  #why table.cmp .no { color:var(--muted); }
-  #why table.cmp small { color:var(--muted); font-size:.72rem; }
-  #why .cmp-niche { max-width:62ch; margin:0 0 1.5rem; color:var(--muted); font-size:.98rem; }
+  #why table.cmp .yes { color:rgb(76,192,128); font-weight:700; font-size:1.02rem; }
+  #why table.cmp .no { color:var(--muted); opacity:.4; }
+  #why .cmp-niche { margin:0 0 1.5rem; color:var(--muted); font-size:.98rem; }
   #why .cmp-niche b { color:var(--fg); font-weight:600; }
-  #why .assume { max-width:62ch; margin:1.3rem 0 0; padding:.7rem 1rem; border-left:3px solid var(--accent);
+  #why .assume { margin:1.3rem 0 0; padding:.75rem 1.05rem; border-left:3px solid var(--accent);
     background:var(--accent-soft); border-radius:0 9px 9px 0; color:var(--fg); font-size:.95rem; }
+  /* one consistent content width across the why / faq sections so blocks line up */
+  #why .intro, #why .switch-hint, #why .switch-demo, #why .compose-note, #why .cmp-wrap, #why .cmp-niche, #why .assume, #why .prin,
+  #faq .intro, #faq .faq-grid { max-width:42rem; }
   /* faq */
-  #faq .faq-grid { max-width:760px; }
+  #faq .faq-grid { max-width:42rem; }
   #faq details { border:1px solid var(--line); border-radius:11px; background:var(--panel); margin:0 0 .7rem; }
   #faq summary { cursor:pointer; padding:.9rem 2.5rem .9rem 1.1rem; font-weight:650; list-style:none; position:relative; }
   #faq summary::-webkit-details-marker { display:none; }
@@ -197,6 +201,11 @@
     #config .term pre { font-size:11px; padding:.85rem .9rem; line-height:1.45; }
     #config .cfg-graph .cfg-graph-svg { width:190px; }
     #why .switch-row { font-size:.78rem; padding:.55rem .75rem; gap:.3rem .55rem; }
+    #why table.cmp col.lbl { width:28%; }
+    #why table.cmp th, #why table.cmp td { padding:.5rem .12rem; }
+    #why table.cmp thead th { font-size:.58rem; letter-spacing:-.01em; }
+    #why table.cmp tbody th { font-size:.76rem; }
+    #why table.cmp .yes { font-size:.9rem; }
     ol.steps li { padding:1rem 1.05rem; gap:.85rem; }
     ol.steps li::before { width:30px; height:30px; }
     footer .wrap { gap:.8rem 1.4rem; }
@@ -265,18 +274,19 @@
     <p class="compose-note">Docker Compose has no equivalent to that switch: a service is in the compose file or it isn't, and pointing at the deployed one is a manual env edit &mdash; so you run the <b>whole</b> graph locally or maintain a second file full of stubs, and either drifts from production. crew reads the wiring from the <span class="mono">.env</span> files you already ship, so there's nothing to keep in sync.</p>
     <div class="cmp-wrap">
       <table class="cmp">
+        <colgroup><col class="lbl"><col><col><col><col><col></colgroup>
         <thead>
-          <tr><th></th><th class="me">crew</th><th>Docker Compose</th><th>Tilt / Skaffold</th><th>Telepresence / mirrord</th><th>overmind / foreman</th></tr>
+          <tr><th></th><th class="me">crew</th><th>Compose</th><th>Tilt</th><th>mirrord</th><th>overmind</th></tr>
         </thead>
         <tbody>
-          <tr><th>Runs your slice <b>natively</b> (no containers)</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-          <tr><th>Rest of the stack = <b>real deployed envs</b></th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span> <small>(needs a cluster)</small></td><td><span class="no">✕</span></td></tr>
-          <tr><th>Wiring comes from</th><td class="me">your <span class="mono">.env</span> files</td><td>a compose file</td><td>k8s manifests</td><td>cluster intercept</td><td><span class="no">&mdash;</span></td></tr>
-          <tr><th>Infra required</th><td class="me"><b>none</b></td><td>Docker daemon</td><td>Kubernetes</td><td>Kubernetes</td><td>none</td></tr>
+          <tr><th>Runs natively, no containers</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+          <tr><th>Uses your real remote stack</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td><td><span class="no">✕</span></td></tr>
+          <tr><th>No daemon or cluster</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td></tr>
+          <tr><th>No parallel config to keep</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td></tr>
         </tbody>
       </table>
     </div>
-    <p class="cmp-niche">crew sits <b>between</b> plain process-runners (overmind, mprocs, foreman) and remote-wiring tools (mirrord, Telepresence): the native-slice-plus-real-remote of the latter, without the cluster, proxy, or containers of either.</p>
+    <p class="cmp-niche">Columns are the representative tool of each family. crew sits <b>between</b> process-runners (overmind, foreman, mprocs) and remote-wiring tools (mirrord, Telepresence): the native-slice-plus-real-remote of the latter, with none of the cluster, daemon, or containers &mdash; just URL swaps in the <span class="mono">.env</span> files you already have.</p>
     <div class="prin">
       <span>run <b>one</b> service or <b>all</b> of them</span>
       <span><b>native</b> processes, no daemon</span>
