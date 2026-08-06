@@ -1,6 +1,10 @@
 name: Publish to npm
 
-# On every push to main: run checks + tests, refresh the coverage badge, then publish to npm.
+# Runs only when the SHIPPED package changes — the code under bin/** or the package
+# manifest/lock. Pushes that touch just docs, the website, tests, or *.md (README, CLAUDE.md,
+# …) do NOT cut a release, so unrelated commits don't bump the npm version. Want to publish a
+# docs-only change anyway? Trigger this workflow manually (workflow_dispatch, in the Actions tab).
+# When it does run: checks + tests, refresh the coverage badge, then publish to npm.
 # Version handling is automatic:
 #   - if package.json's version is NOT yet on npm -> publish it as-is (tag it);
 #   - if it IS already on npm -> auto-bump the patch version, commit + tag, publish.
@@ -11,6 +15,10 @@ name: Publish to npm
 on:
   push:
     branches: [main]
+    paths:
+      - 'bin/**'
+      - 'package.json'
+      - 'package-lock.json'
   workflow_dispatch:
 
 concurrency:
