@@ -117,7 +117,7 @@
   #config .term pre .jp { color:var(--accent); font-weight:600; }   /* crew {placeholder} */
   #config .cfg-graph { margin:1.9rem 0 0; text-align:center; }
   #config .cfg-graph figcaption { margin:0 0 .8rem; font-size:.78rem; letter-spacing:.14em; text-transform:uppercase; font-family:ui-monospace,Menlo,monospace; color:var(--accent); }
-  #config .cfg-graph pre { display:inline-block; text-align:left; margin:0; padding:0; background:none; border:none; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:13px; line-height:1.15; overflow-x:auto; }
+  #config .cfg-graph .cfg-graph-svg { display:inline-block; width:210px; max-width:100%; height:auto; }
   /* the crew config walkthrough GIF (full-width, above the file/graph grid) */
   #config .cfg-intro { max-width:72ch; }
   #config .cfg-cast { margin:1.7rem 0 2.6rem; }
@@ -148,7 +148,7 @@
     .cmd { max-width:none; font-size:.86rem; padding:.65rem .8rem; }
     .cmd button { padding:.24rem .5rem; }
     #config .term pre { font-size:11px; padding:.85rem .9rem; line-height:1.45; }
-    #config .cfg-graph pre { font-size:12px; }
+    #config .cfg-graph .cfg-graph-svg { width:190px; }
     ol.steps li { padding:1rem 1.05rem; gap:.85rem; }
     ol.steps li::before { width:30px; height:30px; }
     footer .wrap { gap:.8rem 1.4rem; }
@@ -232,19 +232,26 @@
       <p class="cfg-note">Committable as-is: no secrets, no machine paths. Those live in a gitignored <code>local.json</code> beside it.</p>
       <figure class="cfg-graph" aria-label="Dependency graph crew derives from this config: web depends on api and auth; api depends on auth.">
         <figcaption>the graph crew derives</figcaption>
-        <pre>   <span style="color:rgb(95,211,141)">╔═════╗</span>
-   <span style="color:rgb(95,211,141)">║</span> <span style="color:rgb(95,211,141)">web</span> <span style="color:rgb(95,211,141)">║</span>
-   <span style="color:rgb(95,211,141)">╚╦═══╦╝</span>
-    <span style="color:rgb(95,211,141)">║</span>   <span style="color:rgb(95,211,141)">╚╗</span>
-    <span style="color:rgb(95,211,141)">▼</span>    <span style="color:rgb(95,211,141)">║</span>
- <span style="color:rgb(86,203,219)">╔═════╗</span> <span style="color:rgb(95,211,141)">║</span>
- <span style="color:rgb(86,203,219)">║</span> <span style="color:rgb(86,203,219)">api</span> <span style="color:rgb(86,203,219)">║</span> <span style="color:rgb(95,211,141)">║</span>
- <span style="color:rgb(86,203,219)">╚════╦╝</span> <span style="color:rgb(95,211,141)">║</span>
-      <span style="color:rgb(86,203,219)">║</span> <span style="color:rgb(95,211,141)">╔╝</span>
-      <span style="color:rgb(86,203,219)">▼</span> <span style="color:rgb(95,211,141)">▼</span>
-  <span style="color:rgb(183,148,246)">╔══════╗</span>
-  <span style="color:rgb(183,148,246)">║</span> <span style="color:rgb(183,148,246)">auth</span> <span style="color:rgb(183,148,246)">║</span>
-  <span style="color:rgb(183,148,246)">╚══════╝</span></pre>
+        <svg class="cfg-graph-svg" viewBox="0 0 240 282" role="img" aria-label="Dependency graph crew derives: web depends on api and auth; api depends on auth." xmlns="http://www.w3.org/2000/svg">
+          <!-- dependency edges, colored by source -->
+          <g fill="none" stroke-width="2" stroke-linecap="square">
+            <path d="M110,54 V112" stroke="rgb(95,211,141)"/>            <!-- web -> api -->
+            <path d="M128,54 V70 H188 V210 H130 V218" stroke="rgb(95,211,141)"/> <!-- web -> auth -->
+            <path d="M102,160 V218" stroke="rgb(86,203,219)"/>           <!-- api -> auth -->
+          </g>
+          <path d="M106,112 H114 L110,120 Z" fill="rgb(95,211,141)"/>
+          <path d="M126,218 H134 L130,226 Z" fill="rgb(95,211,141)"/>
+          <path d="M98,218 H106 L102,226 Z" fill="rgb(86,203,219)"/>
+          <!-- boxes: outer + inner rect echo the double-line ASCII box -->
+          <g fill="none" stroke-width="1.6" stroke="rgb(95,211,141)"><rect x="70" y="14" width="80" height="40" rx="2"/><rect x="73" y="17" width="74" height="34" rx="1"/></g>
+          <g fill="none" stroke-width="1.6" stroke="rgb(86,203,219)"><rect x="70" y="120" width="80" height="40" rx="2"/><rect x="73" y="123" width="74" height="34" rx="1"/></g>
+          <g fill="none" stroke-width="1.6" stroke="rgb(183,148,246)"><rect x="64" y="226" width="92" height="40" rx="2"/><rect x="67" y="229" width="86" height="34" rx="1"/></g>
+          <g font-family='ui-monospace,"SF Mono",Menlo,Consolas,monospace' font-size="15" font-weight="600" text-anchor="middle">
+            <text x="110" y="39" fill="rgb(95,211,141)">web</text>
+            <text x="110" y="145" fill="rgb(86,203,219)">api</text>
+            <text x="110" y="251" fill="rgb(183,148,246)">auth</text>
+          </g>
+        </svg>
       </figure>
     </div>
     <div class="config-code">
