@@ -59,17 +59,21 @@ parallel process runner. Self-update with `crew upgrade`.
   <img src="docs/media/crew-config.gif" alt="crew config: add a frontend and a backend by picking their folders (crew auto-fills type, runner, env, local URL and start command), fill the deployed hosts, and create a guard" width="720">
 </p>
 
-**You don't hand-write the config.** `crew config` is a two-pane visual editor: pick a project's
-folder and crew auto-detects its type, runner, env files, local URL and start command. You confirm,
-fill in the deployed hosts, and out comes one readable `config.json` - committable, no secrets.
+**You don't hand-write the config.** `crew config` is a two-pane visual editor: pick a
+project's folder and crew fills in the mechanical parts it can read from your `package.json`,
+lockfiles and `.envs` - type, runner, start command and env-file path. The URLs are yours to add:
+the project's local URL/port and its deployed host per environment. Out comes one readable
+`config.json` - committable, no secrets.
 
-A project entry holds just a few things:
+A project entry holds just a few things (crew fills the first two, you fill the URLs):
 
-- **`path`** + **`tasks.start`** - where the repo lives and how to run it. Drop **`{envfile}`** in the
-  command and crew injects the wired env file it materializes for the run.
-- **`match`** - the host(s) the project is deployed under, per env. crew matches these against the
-  URLs in your env files to **auto-discover who depends on whom** - no manual edge list.
-- **`local`** - its local URL, so crew can rewrite a peer's env to point at your local copy.
+- **`path`** + **`tasks.start`** - where the repo lives and how to run it (auto-filled from the
+  folder). Drop **`{envfile}`** in the command and crew injects the wired env file it materializes.
+- **`local`** - the project's local URL/port. crew guesses it when it can spot a port; otherwise you
+  add it. This is what a peer's env gets rewritten to point at.
+- **`match`** - the host(s) the project is deployed under, per env. **Always entered by hand** - crew
+  never guesses it. It matches these against the URLs in your env files to **auto-discover who
+  depends on whom**, so there's no manual edge list.
 
 ```json
 {

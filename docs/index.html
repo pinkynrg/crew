@@ -213,13 +213,13 @@
   <div class="wrap">
     <p class="kicker">the config file</p>
     <h2>You don't hand-write it.</h2>
-    <p class="intro cfg-intro"><code>crew config</code> is a visual editor: add a project by picking its folder and crew auto-detects its type, runner, env files, local URL and start command. You just confirm and fill the deployed hosts &mdash; out comes one readable <code>config.json</code>, committable, no secrets.</p>
+    <p class="intro cfg-intro"><code>crew config</code> is a visual editor: pick a project's folder and crew fills in the mechanical parts it can read from your <code>package.json</code>, lockfiles and <code>.envs</code> &mdash; type, runner, start command and env-file path. The URLs are yours to add: the project's local URL/port, and its deployed host for each environment. Out comes one readable <code>config.json</code>, committable, no secrets.</p>
     <figure class="cfg-cast">
       <div class="term">
         <div class="bar"><i></i><i></i><i></i><span>crew config</span></div>
-        <img class="cast" src="media/crew-config.gif" alt="crew config: add a frontend and a backend by picking their folders (crew auto-fills type, runner, env, local URL and start command), fill the deployed hosts, and create a guard" loading="lazy" decoding="async">
+        <img class="cast" src="media/crew-config.gif" alt="crew config: add a frontend and a backend by picking their folders (crew auto-fills type, runner, env and start command), add each one's local URL and deployed host per env, and create a guard" loading="lazy" decoding="async">
       </div>
-      <figcaption>add a frontend &amp; a backend from their folders (auto-filled), then a guard</figcaption>
+      <figcaption>add a frontend &amp; a backend from their folders (scaffolding auto-filled), fill their URLs, then a guard</figcaption>
     </figure>
     <div class="config-grid">
       <div class="config-copy">
