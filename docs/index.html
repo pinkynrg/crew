@@ -81,18 +81,25 @@
   .prin span { font-family:ui-monospace,Menlo,monospace; font-size:.82rem; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:.4rem .9rem; }
   .prin span b { color:var(--accent); }
 
-  /* why-not-docker: the on/off switchboard */
-  #why .switch-demo { display:grid; gap:.55rem; max-width:560px; margin:1.6rem 0; }
-  #why .switch-row { display:grid; grid-template-columns:3.4rem auto 1fr; align-items:center; gap:.8rem;
-    background:var(--panel); border:1px solid var(--line); border-radius:11px; padding:.6rem .95rem;
-    font-family:ui-monospace,Menlo,monospace; font-size:.9rem; }
-  #why .switch-row .svc { font-weight:700; }
-  #why .switch-row .tog { justify-self:start; font-size:.7rem; letter-spacing:.05em; text-transform:uppercase;
+  /* why-not-docker: the interactive on/off switchboard */
+  #why .switch-hint { margin:1.5rem 0 .1rem; font-family:ui-monospace,Menlo,monospace; font-size:.78rem; letter-spacing:.03em; color:var(--muted); }
+  #why .switch-hint b { color:var(--accent); font-weight:600; }
+  #why .switch-demo { display:grid; gap:.55rem; max-width:560px; margin:.7rem 0 1.6rem; }
+  #why .switch-row { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem .7rem; width:100%; text-align:left;
+    appearance:none; -webkit-appearance:none; margin:0; background:var(--panel); border:1px solid var(--line);
+    border-radius:11px; padding:.6rem .95rem; font-family:ui-monospace,Menlo,monospace; font-size:.9rem;
+    color:var(--fg); cursor:pointer; transition:border-color .15s ease, transform .1s ease; }
+  #why .switch-row:hover { border-color:color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  #why .switch-row:active { transform:translateY(1px); }
+  #why .switch-row:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  #why .switch-row .svc { font-weight:700; flex:0 0 2.6rem; }
+  #why .switch-row .tog { flex:0 0 auto; font-size:.7rem; letter-spacing:.05em; text-transform:uppercase;
     padding:.18rem .55rem; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
-  #why .switch-row .tog.on { color:#0c0e15; background:var(--accent); border-color:var(--accent); }
-  #why .switch-row .dst { color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #why .switch-row .dst.is-local { color:var(--fg); }
-  #why .switch-row .dst .note { color:var(--accent); }
+  #why .switch-row.is-on .tog { color:#0c0e15; background:var(--accent); border-color:var(--accent); }
+  #why .switch-row .dst { flex:1 1 auto; min-width:0; color:var(--muted); overflow-wrap:anywhere; }
+  #why .switch-row.is-on .dst { color:var(--fg); }
+  #why .switch-row .note { flex-basis:100%; margin:.15rem 0 0; color:var(--accent); font-size:.82rem; }
+  #why .switch-row .note:empty { display:none; }
   #why .compose-note { max-width:60ch; margin:0 0 1.6rem; color:var(--muted); font-size:1rem; }
   #why .compose-note b { color:var(--fg); font-weight:600; }
 
@@ -164,7 +171,7 @@
     .cmd button { padding:.24rem .5rem; }
     #config .term pre { font-size:11px; padding:.85rem .9rem; line-height:1.45; }
     #config .cfg-graph .cfg-graph-svg { width:190px; }
-    #why .switch-row { grid-template-columns:3rem auto 1fr; gap:.55rem; padding:.55rem .7rem; font-size:.78rem; }
+    #why .switch-row { font-size:.78rem; padding:.55rem .75rem; gap:.3rem .55rem; }
     ol.steps li { padding:1rem 1.05rem; gap:.85rem; }
     ol.steps li::before { width:30px; height:30px; }
     footer .wrap { gap:.8rem 1.4rem; }
@@ -217,10 +224,17 @@
     <p class="kicker">why not docker</p>
     <h2>Every service is a switch.</h2>
     <p class="intro"><b style="color:var(--fg)">On = local, off = remote.</b> Flip a service on and crew runs it locally and rewrites every peer that talks to it to point at your <span class="mono">localhost</span>. Flip it off and it stays on its deployed environment, callers untouched. The slice you run is just which switches are on &mdash; one service, or the whole stack.</p>
-    <div class="switch-demo" aria-label="Example: web and api switched on to localhost, auth left on staging">
-      <div class="switch-row"><span class="svc" style="color:rgb(95,211,141)">web</span><span class="tog on">on</span><span class="dst is-local">→ http://localhost:3000</span></div>
-      <div class="switch-row"><span class="svc" style="color:rgb(86,203,219)">api</span><span class="tog on">on</span><span class="dst is-local">→ http://localhost:4000 <span class="note">(web now calls this)</span></span></div>
-      <div class="switch-row"><span class="svc" style="color:rgb(183,148,246)">auth</span><span class="tog">off</span><span class="dst">→ https://auth.staging.acme.dev</span></div>
+    <p class="switch-hint"><b>Tap a service</b> to flip it — the URLs and wiring update live.</p>
+    <div class="switch-demo" aria-label="Toggle each service on (local) or off (remote); URLs and wiring update live">
+      <button type="button" class="switch-row is-on" data-svc="web" aria-pressed="true">
+        <span class="svc" style="color:rgb(95,211,141)">web</span><span class="tog">on</span><span class="dst">→ http://localhost:3000</span><span class="note"></span>
+      </button>
+      <button type="button" class="switch-row is-on" data-svc="api" aria-pressed="true">
+        <span class="svc" style="color:rgb(86,203,219)">api</span><span class="tog">on</span><span class="dst">→ http://localhost:4000</span><span class="note">↳ web now calls this locally</span>
+      </button>
+      <button type="button" class="switch-row" data-svc="auth" aria-pressed="false">
+        <span class="svc" style="color:rgb(183,148,246)">auth</span><span class="tog">off</span><span class="dst">→ https://auth.staging.acme.dev</span><span class="note"></span>
+      </button>
     </div>
     <p class="compose-note">Docker Compose has no equivalent to that switch: a service is in the compose file or it isn't, and pointing at the deployed one is a manual env edit &mdash; so you run the <b>whole</b> graph locally or maintain a second file full of stubs, and either drifts from production. crew reads the wiring from the <span class="mono">.env</span> files you already ship, so there's nothing to keep in sync.</p>
     <div class="prin">
@@ -424,6 +438,46 @@
   const topEl = document.querySelector('#top');
   if (topEl) { topEl.addEventListener('mouseenter', stop); topEl.addEventListener('mouseleave', start); topEl.addEventListener('focusin', stop); topEl.addEventListener('focusout', start); }
   show(0); start();
+
+  // Interactive on/off switchboard (#why). Toggling a service recomputes every row's URL
+  // (on -> local, off -> deployed) and the wiring note, following the dependency graph.
+  (() => {
+    const demo = document.querySelector('#why .switch-demo');
+    if (!demo) return;
+    const NODES = {
+      web:  { local: 'http://localhost:3000', remote: 'https://web.staging.acme.dev' },
+      api:  { local: 'http://localhost:4000', remote: 'https://api.staging.acme.dev' },
+      auth: { local: 'http://localhost:4500', remote: 'https://auth.staging.acme.dev' },
+    };
+    const DEPS = { web: ['api', 'auth'], api: ['auth'], auth: [] }; // consumer -> deps it calls
+    const ORDER = ['web', 'api', 'auth'];
+    const state = { web: true, api: true, auth: false };
+    const rows = {};
+    const fmt = (a) => (a.length < 2 ? a[0] : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]);
+    const noteFor = (d) => {
+      if (!state[d]) return '';                                   // remote copy: nothing local points at it
+      const callers = ORDER.filter((c) => state[c] && DEPS[c].includes(d));
+      if (!callers.length) return '';
+      return '↳ ' + fmt(callers) + (callers.length > 1 ? ' now call this locally' : ' now calls this locally');
+    };
+    const render = () => {
+      for (const n of ORDER) {
+        const on = state[n], r = rows[n];
+        r.el.classList.toggle('is-on', on);
+        r.el.setAttribute('aria-pressed', String(on));
+        r.tog.textContent = on ? 'on' : 'off';
+        r.dst.textContent = '→ ' + (on ? NODES[n].local : NODES[n].remote);
+        r.note.textContent = noteFor(n);
+      }
+    };
+    for (const n of ORDER) {
+      const el = demo.querySelector('.switch-row[data-svc="' + n + '"]');
+      if (!el) continue;
+      rows[n] = { el, tog: el.querySelector('.tog'), dst: el.querySelector('.dst'), note: el.querySelector('.note') };
+      el.addEventListener('click', () => { state[n] = !state[n]; render(); });
+    }
+    render();
+  })();
 </script>
 </body>
 </html>
