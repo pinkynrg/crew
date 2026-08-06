@@ -102,6 +102,31 @@
   #why .switch-row .note:empty { display:none; }
   #why .compose-note { max-width:60ch; margin:0 0 1.6rem; color:var(--muted); font-size:1rem; }
   #why .compose-note b { color:var(--fg); font-weight:600; }
+  /* comparison table */
+  #why .cmp-wrap { overflow-x:auto; margin:.2rem 0 1.1rem; border:1px solid var(--line); border-radius:12px; }
+  #why table.cmp { border-collapse:collapse; width:100%; min-width:560px; font-size:.85rem; }
+  #why table.cmp th, #why table.cmp td { text-align:center; padding:.6rem .7rem; border-bottom:1px solid var(--line); white-space:nowrap; }
+  #why table.cmp thead th { font-family:ui-monospace,Menlo,monospace; font-size:.76rem; color:var(--muted); font-weight:600; white-space:normal; vertical-align:bottom; }
+  #why table.cmp thead th.me { color:var(--accent); }
+  #why table.cmp tbody th { text-align:left; font-weight:500; color:var(--fg); white-space:normal; min-width:11.5rem; }
+  #why table.cmp td.me { color:var(--fg); font-weight:700; background:color-mix(in srgb, var(--accent) 8%, transparent); }
+  #why table.cmp tr:last-child th, #why table.cmp tr:last-child td { border-bottom:none; }
+  #why table.cmp .yes { color:rgb(95,211,141); font-weight:700; }
+  #why table.cmp .no { color:var(--muted); }
+  #why table.cmp small { color:var(--muted); font-size:.72rem; }
+  #why .cmp-niche { max-width:62ch; margin:0 0 1.5rem; color:var(--muted); font-size:.98rem; }
+  #why .cmp-niche b { color:var(--fg); font-weight:600; }
+  #why .assume { max-width:62ch; margin:1.3rem 0 0; padding:.7rem 1rem; border-left:3px solid var(--accent);
+    background:var(--accent-soft); border-radius:0 9px 9px 0; color:var(--fg); font-size:.95rem; }
+  /* faq */
+  #faq .faq-grid { max-width:760px; }
+  #faq details { border:1px solid var(--line); border-radius:11px; background:var(--panel); margin:0 0 .7rem; }
+  #faq summary { cursor:pointer; padding:.9rem 2.5rem .9rem 1.1rem; font-weight:650; list-style:none; position:relative; }
+  #faq summary::-webkit-details-marker { display:none; }
+  #faq summary::after { content:"+"; position:absolute; right:1.1rem; top:.85rem; color:var(--accent); font-family:ui-monospace,Menlo,monospace; font-size:1.15rem; line-height:1; }
+  #faq details[open] summary::after { content:"\2013"; }
+  #faq details .a { margin:0; padding:0 1.1rem 1.05rem; color:var(--muted); font-size:.96rem; max-width:70ch; }
+  #faq code { font-family:ui-monospace,Menlo,monospace; font-size:.9em; }
 
   ol.steps { list-style:none; counter-reset:s; margin:0; padding:0; display:grid; gap:.9rem; }
   ol.steps li { counter-increment:s; display:grid; grid-template-columns:auto 1fr; gap:1.15rem; align-items:start;
@@ -187,6 +212,7 @@
       <a href="#why" class="hidephone">Why&nbsp;not&nbsp;Docker</a>
       <a href="#how" class="hidephone">How it's built</a>
       <a href="#config" class="hidephone">Config&nbsp;file</a>
+      <a href="#faq" class="hidephone">FAQ</a>
       <a href="#start">Get&nbsp;started</a>
       <a href="https://www.npmjs.com/package/@pinkynrg/crew" class="hidephone">npm</a>
       <a href="https://github.com/pinkynrg/crew" class="ghbtn">GitHub</a>
@@ -237,12 +263,27 @@
       </button>
     </div>
     <p class="compose-note">Docker Compose has no equivalent to that switch: a service is in the compose file or it isn't, and pointing at the deployed one is a manual env edit &mdash; so you run the <b>whole</b> graph locally or maintain a second file full of stubs, and either drifts from production. crew reads the wiring from the <span class="mono">.env</span> files you already ship, so there's nothing to keep in sync.</p>
+    <div class="cmp-wrap">
+      <table class="cmp">
+        <thead>
+          <tr><th></th><th class="me">crew</th><th>Docker Compose</th><th>Tilt / Skaffold</th><th>Telepresence / mirrord</th><th>overmind / foreman</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>Runs your slice <b>natively</b> (no containers)</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+          <tr><th>Rest of the stack = <b>real deployed envs</b></th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span> <small>(needs a cluster)</small></td><td><span class="no">✕</span></td></tr>
+          <tr><th>Wiring comes from</th><td class="me">your <span class="mono">.env</span> files</td><td>a compose file</td><td>k8s manifests</td><td>cluster intercept</td><td><span class="no">&mdash;</span></td></tr>
+          <tr><th>Infra required</th><td class="me"><b>none</b></td><td>Docker daemon</td><td>Kubernetes</td><td>Kubernetes</td><td>none</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cmp-niche">crew sits <b>between</b> plain process-runners (overmind, mprocs, foreman) and remote-wiring tools (mirrord, Telepresence): the native-slice-plus-real-remote of the latter, without the cluster, proxy, or containers of either.</p>
     <div class="prin">
       <span>run <b>one</b> service or <b>all</b> of them</span>
       <span><b>native</b> processes, no daemon</span>
       <span>no images, no rebuilds</span>
       <span>wiring from your <b>env files</b></span>
     </div>
+    <p class="assume"><b>Assumes you have shared remote environments</b> (qa / staging / prod) to borrow from &mdash; the services you don't run locally keep running there. No deployed stack to point at? A full-stack tool like Compose fits your case better.</p>
   </div>
 </section>
 
@@ -351,6 +392,36 @@
 }</pre>
       </div>
     </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <p class="kicker">questions</p>
+    <h2>Is it safe to point at real environments?</h2>
+    <p class="intro">Short version: crew reads your env files and rewrites a throwaway copy &mdash; it never edits your repo, and there are no secrets in the committable config.</p>
+    <div class="faq-grid">
+      <details>
+        <summary>Does crew modify my repos or my <code>.env</code> files?</summary>
+        <p class="a">No. It <em>reads</em> your env file and writes a wired <b>copy</b> to <code>~/.config/crew/tmp/&lt;project&gt;.env</code> (URLs swapped to <code>localhost</code> for the peers you're running), passes that path to your start command via <code>{envfile}</code>, and deletes it on teardown. Your checkout and its committed env files are never touched.</p>
+      </details>
+      <details>
+        <summary>Where do my secrets live?</summary>
+        <p class="a">In your own env files, same as today &mdash; crew only reads them. The committable <code>config.json</code> holds no secrets; machine-local bits (projects dir, remembered selection) live in a gitignored <code>local.json</code>. The temporary wired copy under <code>~/.config/crew/tmp/</code> is the only materialized secret, and it's regenerated per run and removed on exit.</p>
+      </details>
+      <details>
+        <summary>What if a remote env (staging) is down?</summary>
+        <p class="a">Then the services you left <em>off</em> are unreachable &mdash; exactly as if you called staging directly. crew doesn't proxy or cache; turn those services <em>on</em> to run them locally, or wait for staging to recover.</p>
+      </details>
+      <details>
+        <summary>Do I have to run everything?</summary>
+        <p class="a">No &mdash; that's the whole point. Run one service or all of them; whatever you don't run stays on its deployed env, wired in automatically.</p>
+      </details>
+      <details>
+        <summary>Which platforms are supported?</summary>
+        <p class="a">macOS and Linux. It's POSIX-only &mdash; teardown relies on process groups (<code>setsid</code> / <code>kill(-pgid)</code>) &mdash; and needs Node&nbsp;&ge;&nbsp;18.</p>
+      </details>
     </div>
   </div>
 </section>

@@ -1,13 +1,32 @@
 # crew
 
+[![npm version](https://img.shields.io/npm/v/@pinkynrg/crew)](https://www.npmjs.com/package/@pinkynrg/crew)
+[![downloads](https://img.shields.io/npm/dm/@pinkynrg/crew)](https://www.npmjs.com/package/@pinkynrg/crew)
+[![node](https://img.shields.io/node/v/@pinkynrg/crew)](https://www.npmjs.com/package/@pinkynrg/crew)
+[![license](https://img.shields.io/npm/l/@pinkynrg/crew)](#license)
 ![coverage](https://img.shields.io/badge/coverage-86%25-green)
 
 **Quickly select and run the slice of your stack you're interested in - locally, wired to the rest.**
 
-crew is a zero-dependency CLI for local dev on a distributed stack. Pick the few services
-you're actually working on; crew runs them natively, rewires them to talk to each other, and
-leaves everything else pointing at its real deployed environment. Then open that same set as
-one VS Code workspace, or hand it to a single Claude Code session.
+**Every service is a switch: on = local, off = remote.** Flip a service *on* and crew runs it
+natively and rewrites every peer that talks to it to point at your `localhost`; leave it *off* and it
+stays on its real deployed environment, callers untouched. The slice you run is just which switches
+are on - one service, or the whole stack - and flipping one re-wires the rest for you, straight from
+the `.env` files you already ship.
+
+```
+crew start env=staging     web   [x] on  → http://localhost:3000
+                           api   [x] on  → http://localhost:4000   (web now calls this)
+                           auth  [ ] off → https://auth.staging.acme.dev
+                           …     [ ] off → deployed staging
+```
+
+crew is a **zero-dependency** CLI for local dev on a distributed stack. Once a slice is running you
+can also open it as one VS Code workspace, or hand it to a single Claude Code session.
+
+> **Assumes you have shared remote environments** (qa / staging / prod) to borrow from - the services
+> you don't run locally keep running there. No deployed stack to point at? A full-stack tool like
+> Docker Compose fits your case better; see [Why not just use Docker?](#why-not-just-use-docker) below.
 
 ## What it does
 
@@ -115,45 +134,31 @@ The full field-by-field reference is in [Config reference](#config-reference) be
 
 ## Why not just use Docker?
 
-**Every service is a switch. On = local, off = remote. Flipping it re-wires the rest automatically.**
+crew leans on [the switch model above](#crew) - run your slice natively, borrow the rest from their
+deployed envs - which puts it in a different category from the usual suspects:
 
-That's the whole idea:
+| | **crew** | Docker Compose | Tilt / Skaffold | Telepresence / mirrord | overmind / foreman |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| Runs your slice **natively** (no containers) | ✅ | ❌ | ❌ | ✅ | ✅ |
+| Rest of the stack = **real deployed envs** | ✅ | ❌ | ❌ | ✅ *(needs a cluster)* | ❌ |
+| Wiring comes from | your `.env` files | a compose file | k8s manifests | cluster intercept | — |
+| Infra required | **none** | Docker daemon | Kubernetes | Kubernetes | none |
 
-- **On** → crew runs the service locally *and* rewrites every peer that talks to it to point at your
-  `localhost`.
-- **Off** → the service stays on its deployed environment (qa / staging / prod), and its consumers
-  keep pointing at the real host.
+crew sits **between** plain process-runners (overmind, mprocs, foreman) and remote-wiring tools
+(mirrord, Telepresence): the native-slice-plus-real-remote of the latter, without the cluster, proxy,
+or containers of either. Just URL rewrites in the `.env` files you already have.
 
-The "slice" you run is nothing more than *which switches are on* - flip one on and the rest of the
-stack is remote; flip them all on and you're running the whole cake locally; anything in between.
-And the only magic is that **flipping a switch flips the wiring for you**: crew re-reads your env
-files and swaps the URLs for whatever's currently on. No config edit, no second file to maintain.
+**Versus Compose specifically:** a service is in the compose file or it isn't, and "use the deployed
+one instead" is a manual env edit - so you tend to run the *whole* graph locally or maintain a second
+compose file full of stubs, and either drifts from production. crew has a per-service local/remote
+switch and derives the wiring from your env files, so there's nothing parallel to keep in sync.
 
-```
-crew start env=staging     web   [x] on  → http://localhost:3000
-                           api   [x] on  → http://localhost:4000   (web now calls this)
-                           auth  [ ] off → https://auth.staging.acme.dev
-                           …     [ ] off → deployed staging
-```
+Running natively also gets you real hot-reload, a debugger you attach directly, and native file
+watching - no daemon, no images, no rebuild-on-change, and nothing to install (one file, zero deps).
 
-Docker Compose has no equivalent to that switch. A service is in the compose file or it isn't, and
-"use the deployed one instead" is a manual env edit - so you tend to either run the *whole* graph
-locally or maintain a second compose file full of stubs, and either way it drifts from production.
-crew derives the graph from the `.env` files you already ship, so there's no parallel source of
-truth to keep in sync.
-
-Two more things fall out of running natively rather than in containers:
-
-- **Real local dev.** Plain processes with your normal toolchain (`make`, `npm`, `uvicorn`, `go run`):
-  real hot-reload, attach a debugger directly, native file watching. No daemon, no images, no
-  rebuild-on-change, no volume latency.
-- **Nothing to install or clean up.** One file, zero runtime deps.
-
-**When Docker is still the right call:** you genuinely need full-stack isolation, byte-for-byte
-prod/CI parity, or your services can't run natively on your machine at all - and you need a real
-deployed stack to borrow the "off" services from in the first place. crew doesn't replace Docker
-there. It replaces the daily loop of flipping a couple of services on and letting everything else
-stay remote.
+**When Docker is still the right call:** you need full-stack isolation, byte-for-byte prod/CI parity,
+or your services can't run natively at all. crew doesn't replace Docker there - it replaces the daily
+loop of flipping a couple of services on and letting everything else stay remote.
 
 ---
 
@@ -314,6 +319,30 @@ optional session name: `crew claude billing-work`.
   their dependencies coming up in any order.
 - No bundler command, no terminal/pane spawning, no tmux, no health-check / wait-for-ready, no
   port-conflict detection, no plugin system, no telemetry.
+
+## FAQ
+
+**Does crew modify my repos or my `.env` files?**
+No. It *reads* your env file and writes a wired **copy** to `~/.config/crew/tmp/<project>.env` (URLs
+swapped to `localhost` for the peers you're running), passes that path to your start command via
+`{envfile}`, and deletes it on teardown. Your checkout and its committed env files are never touched.
+
+**Where do my secrets live?**
+In your own env files, same as today - crew only reads them. The committable `config.json` holds no
+secrets; machine-local bits (projects dir, remembered selection) live in a gitignored `local.json`.
+The temporary wired copy under `~/.config/crew/tmp/` is the only materialized secret, and it's
+regenerated per run and removed on exit.
+
+**What if a remote env (staging) is down?**
+Then the services you left *off* are unreachable - exactly as if you called staging directly. crew
+doesn't proxy or cache; turn those services *on* to run them locally, or wait for staging to recover.
+
+**Do I have to run everything?**
+No - that's the whole point. Run one service or all of them; whatever you don't run stays on its
+deployed env, wired in automatically.
+
+**Windows?**
+POSIX only (macOS + Linux) - teardown relies on process groups (`setsid` / `kill(-pgid)`).
 
 ## License
 
