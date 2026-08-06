@@ -56,8 +56,8 @@
   .tail .fast { color:var(--accent); font-weight:700; }
 
   .cmd { display:flex; align-items:center; gap:.6rem; background:var(--term-bg); border:1px solid var(--line);
-    border-radius:10px; padding:.75rem 1rem; font-family:ui-monospace,Menlo,monospace; font-size:.94rem; color:var(--term-fg); box-shadow:var(--shadow); max-width:22rem; }
-  .cmd .p { color:var(--accent); } .cmd code { flex:1; }
+    border-radius:10px; padding:.75rem 1rem; font-family:ui-monospace,Menlo,monospace; font-size:.94rem; color:var(--term-fg); box-shadow:var(--shadow); max-width:27rem; }
+  .cmd .p { color:var(--accent); } .cmd code { flex:1; white-space:nowrap; }
   .cmd button { background:none; border:1px solid #2a3040; color:#8a93a8; border-radius:6px; padding:.26rem .55rem; font:inherit; font-size:.76rem; cursor:pointer; }
   .cmd button:hover { color:#fff; border-color:#3a4152; }
   .subnote { margin:.85rem 0 0; font-size:.85rem; color:var(--muted); }
@@ -183,7 +183,7 @@
       </div>
       <p class="tail" id="tail" aria-live="polite"></p>
       <div class="cmd">
-        <span class="p">$</span><code id="install">npx @pinkynrg/crew</code>
+        <span class="p">$</span><code id="install">npm install -g @pinkynrg/crew</code>
         <button id="copy">copy</button>
       </div>
       <p class="subnote">Zero dependencies · macOS &amp; Linux · <a href="https://github.com/pinkynrg/crew">MIT on GitHub</a></p>
@@ -349,7 +349,7 @@
     root.setAttribute('data-theme', next); localStorage.setItem(TK, next);
   });
   document.getElementById('copy').addEventListener('click', async (e) => {
-    try { await navigator.clipboard.writeText('npx @pinkynrg/crew'); e.target.textContent='copied'; setTimeout(()=>e.target.textContent='copy',1400);} catch(_){}
+    try { await navigator.clipboard.writeText('npm install -g @pinkynrg/crew'); e.target.textContent='copied'; setTimeout(()=>e.target.textContent='copy',1400);} catch(_){}
   });
 
   // the 3 buttons just cycle their description (the GIF above is always `crew start` — the only real recording)
