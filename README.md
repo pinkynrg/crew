@@ -111,32 +111,45 @@ The full field-by-field reference is in [Config reference](#config-reference) be
 
 ## Why not just use Docker?
 
-crew and Docker Compose solve overlapping problems, but crew makes a different bet.
+**Every service is a switch. On = local, off = remote. Flipping it re-wires the rest automatically.**
 
-**Docker's model:** describe the *whole* stack in compose files and images, then bring it up in
-isolated containers. Great for reproducibility and prod parity — at the cost of Dockerfiles and a
-`docker-compose.yml` to write and keep from drifting, images to build and pull, a daemon and disk
-to feed, volume-mount file-watching, and container rebuilds when a dependency changes. And you
-typically run the *entire* graph (or maintain a second compose file full of stubs) even when you're
-touching two services.
+That's the whole idea:
 
-**crew's bet:** you rarely need the whole stack running locally. You need *your slice* running
-natively, talking to the real rest.
+- **On** → crew runs the service locally *and* rewrites every peer that talks to it to point at your
+  `localhost`.
+- **Off** → the service stays on its deployed environment (qa / staging / prod), and its consumers
+  keep pointing at the real host.
 
-- **Native, not containerized.** Your services run as plain processes with your normal toolchain
-  (`make`, `npm`, `uvicorn`, `go run`). Real hot-reload, attach a debugger directly, native file
-  watching — no volume latency, no rebuild-on-change, no daemon.
-- **Only the slice you touch.** Pick two services; the other thirteen stay on their deployed qa /
-  staging / prod environment, wired in automatically. No stubs to maintain, nothing else to boot.
-- **No parallel source of truth.** crew derives the dependency graph from the `.env` files you
-  already ship — there's no compose file mirroring (and drifting from) production.
-- **Nothing to install, nothing to clean up.** One file, zero runtime deps. No images, no daemon,
-  no disk bloat.
+The "slice" you run is nothing more than *which switches are on* — flip one on and the rest of the
+stack is remote; flip them all on and you're running the whole cake locally; anything in between.
+And the only magic is that **flipping a switch flips the wiring for you**: crew re-reads your env
+files and swaps the URLs for whatever's currently on. No config edit, no second file to maintain.
 
-**When Docker is still the right call:** you genuinely need to run the *full* stack in isolation,
-you want byte-for-byte prod/CI parity, or your services can't run natively on your machine at all.
-crew doesn't replace Docker there — it replaces the daily "I just want *these* two services up and
-wired to everything else" loop, which is most of local dev.
+```
+crew start env=staging     web   [x] on  → http://localhost:3000
+                           api   [x] on  → http://localhost:4000   (web now calls this)
+                           auth  [ ] off → https://auth.staging.acme.dev
+                           …     [ ] off → deployed staging
+```
+
+Docker Compose has no equivalent to that switch. A service is in the compose file or it isn't, and
+"use the deployed one instead" is a manual env edit — so you tend to either run the *whole* graph
+locally or maintain a second compose file full of stubs, and either way it drifts from production.
+crew derives the graph from the `.env` files you already ship, so there's no parallel source of
+truth to keep in sync.
+
+Two more things fall out of running natively rather than in containers:
+
+- **Real local dev.** Plain processes with your normal toolchain (`make`, `npm`, `uvicorn`, `go run`)
+  — real hot-reload, attach a debugger directly, native file watching. No daemon, no images, no
+  rebuild-on-change, no volume latency.
+- **Nothing to install or clean up.** One file, zero runtime deps.
+
+**When Docker is still the right call:** you genuinely need full-stack isolation, byte-for-byte
+prod/CI parity, or your services can't run natively on your machine at all — and you need a real
+deployed stack to borrow the "off" services from in the first place. crew doesn't replace Docker
+there. It replaces the daily loop of flipping a couple of services on and letting everything else
+stay remote.
 
 ---
 
