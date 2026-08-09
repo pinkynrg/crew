@@ -8,7 +8,7 @@
 
 **Quickly select and run the slice of your stack you're interested in - locally, wired to the rest.**
 
-**Every service is a switch: on = local, off = remote.** Flip a service *on* and crew runs it
+**Every service is a switch: on is local, off is remote.** Flip a service *on* and crew runs it
 natively and rewrites every peer that talks to it to point at your `localhost`; leave it *off* and it
 stays on its real deployed environment, callers untouched. The slice you run is just which switches
 are on - one service, or the whole stack - and flipping one re-wires the rest for you, straight from
