@@ -25,14 +25,14 @@
     --ink:#f4f6fa; --panel:#ffffff; --line:#dfe3ec; --fg:#262b36; --muted:#5c6474;
     --accent:#c8791b; --accent-soft:#f6ead6;
     --shadow:0 1px 2px rgba(20,24,40,.06), 0 14px 40px rgba(20,24,40,.10);
-    --term-bg:#0c0e15; --term-bar:#171a24; --term-fg:#c7cdda;
+    --term-bg:#262c3c; --term-bar:#333a4e; --term-fg:#c7cdda;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --ink:#0b0d13; --panel:#12151f; --line:#232839; --fg:#c6ccda; --muted:#838ba0;
-            --accent:#e9a94a; --accent-soft:#241d10; --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 48px rgba(0,0,0,.4); }
+    :root:not([data-theme="light"]) { --ink:#0b0d13; --panel:#12151f; --line:#232839; --fg:#c6ccda; --muted:#838ba0;
+            --accent:#e9a94a; --accent-soft:#241d10; --term-bg:#0c0e15; --term-bar:#171a24; --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 48px rgba(0,0,0,.4); }
   }
-  :root[data-theme="light"]{ --ink:#f4f6fa; --panel:#fff; --line:#dfe3ec; --fg:#262b36; --muted:#5c6474; --accent:#c8791b; --accent-soft:#f6ead6; --shadow:0 1px 2px rgba(20,24,40,.06),0 14px 40px rgba(20,24,40,.10); }
-  :root[data-theme="dark"]{ --ink:#0b0d13; --panel:#12151f; --line:#232839; --fg:#c6ccda; --muted:#838ba0; --accent:#e9a94a; --accent-soft:#241d10; --shadow:0 1px 2px rgba(0,0,0,.4),0 16px 48px rgba(0,0,0,.4); }
+  :root[data-theme="light"]{ --ink:#f4f6fa; --panel:#fff; --line:#dfe3ec; --fg:#262b36; --muted:#5c6474; --accent:#c8791b; --accent-soft:#f6ead6; --term-bg:#262c3c; --term-bar:#333a4e; --shadow:0 1px 2px rgba(20,24,40,.06),0 14px 40px rgba(20,24,40,.10); }
+  :root[data-theme="dark"]{ --ink:#0b0d13; --panel:#12151f; --line:#232839; --fg:#c6ccda; --muted:#838ba0; --accent:#e9a94a; --accent-soft:#241d10; --term-bg:#0c0e15; --term-bar:#171a24; --shadow:0 1px 2px rgba(0,0,0,.4),0 16px 48px rgba(0,0,0,.4); }
 
   * { box-sizing:border-box; }
   html { scroll-behavior:smooth; }
@@ -217,6 +217,8 @@
     #themeToggle { width:32px; height:28px; font-size:.9rem; }
     section { padding:2.4rem 0; }
     #top .pitch-col h1 { font-size:1.5rem; }
+    .tabs { gap:.3rem; }
+    .tabs button { font-size:.7rem; padding:.35rem .5rem; }   /* shrink so all three fit one row on a phone */
     #top .tail { min-height:0; margin-bottom:1.2rem; }   /* don't reserve 3 lines on a phone — it's just a gap */
     .cmd { max-width:none; font-size:.86rem; padding:.65rem .8rem; }
     .cmd button { padding:.24rem .5rem; }
