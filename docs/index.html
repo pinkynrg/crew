@@ -77,6 +77,13 @@
   .cmd button:hover { color:#fff; border-color:#3a4152; }
   .subnote { margin:.85rem 0 0; font-size:.85rem; color:var(--muted); }
   .subnote a { color:var(--muted); text-decoration:underline; }
+  .hero-cta { display:flex; flex-wrap:wrap; align-items:center; gap:.7rem; }
+  .star { display:inline-flex; align-items:center; gap:.5rem; background:var(--accent); color:#0c0e15;
+    border:1px solid var(--accent); border-radius:10px; padding:.75rem 1.1rem; font-weight:650;
+    font-size:.94rem; text-decoration:none; white-space:nowrap; box-shadow:var(--shadow); transition:filter .15s; }
+  .star:hover { text-decoration:none; filter:brightness(1.06); }
+  .star .s { font-size:1.05em; line-height:1; }
+  .nav .ghbtn .s { color:var(--accent); }
 
   /* terminal window (the crew start GIF) */
   .term { background:var(--term-bg); border-radius:12px; box-shadow:var(--shadow); overflow:hidden; border:1px solid rgba(255,255,255,.06); display:flex; flex-direction:column; }
@@ -239,7 +246,7 @@
       <a href="#faq" class="hidephone">FAQ</a>
       <a href="#start">Get&nbsp;started</a>
       <a href="https://www.npmjs.com/package/@pinkynrg/crew" class="hidephone">npm</a>
-      <a href="https://github.com/pinkynrg/crew" class="ghbtn">GitHub</a>
+      <a href="https://github.com/pinkynrg/crew" class="ghbtn"><span class="s">★</span> Star</a>
       <button id="themeToggle" aria-label="Toggle light or dark theme" title="Toggle theme">◑</button>
     </nav>
   </div>
@@ -256,9 +263,12 @@
         <button role="tab" aria-selected="false" data-i="2">crew claude</button>
       </div>
       <p class="tail" id="tail" aria-live="polite"></p>
-      <div class="cmd">
-        <span class="p">$</span><code id="install">npm install -g @pinkynrg/crew</code>
-        <button id="copy">copy</button>
+      <div class="hero-cta">
+        <div class="cmd">
+          <span class="p">$</span><code id="install">npm install -g @pinkynrg/crew</code>
+          <button id="copy">copy</button>
+        </div>
+        <a class="star" href="https://github.com/pinkynrg/crew" target="_blank" rel="noopener"><span class="s">★</span> Star on GitHub</a>
       </div>
       <p class="subnote">Zero dependencies · macOS &amp; Linux · <a href="https://github.com/pinkynrg/crew">MIT on GitHub</a></p>
     </div>
@@ -486,7 +496,7 @@
     <span class="brand mono">cr<b style="color:var(--accent)">ew</b></span>
     <span>Quickly select &amp; run the slice of your stack you're interested in locally, wired to the rest.</span>
     <nav>
-      <a href="https://github.com/pinkynrg/crew">GitHub</a>
+      <a href="https://github.com/pinkynrg/crew">★ Star on GitHub</a>
       <a href="https://www.npmjs.com/package/@pinkynrg/crew">npm</a>
       <a href="https://github.com/pinkynrg/crew/blob/main/README.md">Docs</a>
     </nav>
