@@ -97,7 +97,7 @@
   section { padding:clamp(2.4rem,6vw,4.2rem) 0; border-top:1px solid var(--line); }
   .kicker { font-family:ui-monospace,Menlo,monospace; font-size:.76rem; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); margin:0 0 .7rem; }
   h2 { font-size:clamp(1.55rem,3.4vw,2.05rem); letter-spacing:-.02em; margin:0 0 .6rem; font-weight:720; text-wrap:balance; }
-  section p.intro { color:var(--muted); max-width:62ch; margin:0 0 2rem; font-size:1.04rem; }
+  section p.intro { color:var(--muted); margin:0 0 2rem; font-size:1.04rem; }
 
   .prin { display:flex; flex-wrap:wrap; gap:.6rem; }
   .prin span { font-family:ui-monospace,Menlo,monospace; font-size:.82rem; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:.4rem .9rem; }
@@ -106,7 +106,7 @@
   /* why-not-docker: the interactive on/off switchboard */
   #why .switch-hint { margin:1.5rem 0 .1rem; font-family:ui-monospace,Menlo,monospace; font-size:.78rem; letter-spacing:.03em; color:var(--muted); }
   #why .switch-hint b { color:var(--accent); font-weight:600; }
-  #why .switch-demo { display:grid; gap:.55rem; max-width:560px; margin:.7rem 0 1.6rem; }
+  #why .switch-demo { display:grid; grid-template-columns:repeat(3,1fr); gap:.7rem; margin:.7rem 0 1.6rem; align-items:stretch; }
   #why .switch-row { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem .7rem; width:100%; text-align:left;
     appearance:none; -webkit-appearance:none; margin:0; background:var(--panel); border:1px solid var(--line);
     border-radius:11px; padding:.6rem .95rem; font-family:ui-monospace,Menlo,monospace; font-size:.9rem;
@@ -141,17 +141,16 @@
   #why .cmp-niche b { color:var(--fg); font-weight:600; }
   #why .assume { margin:1.3rem 0 0; padding:.75rem 1.05rem; border-left:3px solid var(--accent);
     background:var(--accent-soft); border-radius:0 9px 9px 0; color:var(--fg); font-size:.95rem; }
-  /* one consistent content width across the why / faq sections so blocks line up */
-  #why .intro, #why .switch-hint, #why .switch-demo, #why .compose-note, #why .cmp-wrap, #why .cmp-niche, #why .assume, #why .prin,
-  #faq .intro, #faq .faq-grid { max-width:42rem; }
+  /* content fills the same container width as the hero across all sections */
+  #why .intro, #why .switch-hint, #why .compose-note, #why .cmp-wrap, #why .cmp-niche, #why .assume, #why .prin,
+  #faq .intro, #faq .faq-grid { max-width:none; }
   /* faq */
-  #faq .faq-grid { max-width:42rem; }
   #faq details { border:1px solid var(--line); border-radius:11px; background:var(--panel); margin:0 0 .7rem; }
   #faq summary { cursor:pointer; padding:.9rem 2.5rem .9rem 1.1rem; font-weight:650; list-style:none; position:relative; }
   #faq summary::-webkit-details-marker { display:none; }
   #faq summary::after { content:"+"; position:absolute; right:1.1rem; top:.85rem; color:var(--accent); font-family:ui-monospace,Menlo,monospace; font-size:1.15rem; line-height:1; }
   #faq details[open] summary::after { content:"\2013"; }
-  #faq details .a { margin:0; padding:0 1.1rem 1.05rem; color:var(--muted); font-size:.96rem; max-width:70ch; }
+  #faq details .a { margin:0; padding:0 1.1rem 1.05rem; color:var(--muted); font-size:.96rem; }
   #faq code { font-family:ui-monospace,Menlo,monospace; font-size:.9em; }
 
   ol.steps { list-style:none; counter-reset:s; margin:0; padding:0; display:grid; gap:.9rem; }
@@ -192,7 +191,7 @@
   #config .cfg-graph figcaption { margin:0 0 .8rem; font-size:.78rem; letter-spacing:.14em; text-transform:uppercase; font-family:ui-monospace,Menlo,monospace; color:var(--accent); }
   #config .cfg-graph .cfg-graph-svg { display:inline-block; width:210px; max-width:100%; height:auto; }
   /* the crew config walkthrough GIF (full-width, above the file/graph grid) */
-  #config .cfg-intro { max-width:72ch; }
+  #config .cfg-intro { max-width:none; }
   #config .cfg-cast { margin:1.7rem 0 2.6rem; }
   #config .cfg-cast .term { max-width:880px; margin:0; }   /* left-aligned */
   #config .cfg-cast .cast { aspect-ratio:25 / 18; }   /* matches the 1000x720 recording */
@@ -224,6 +223,7 @@
     .cmd button { padding:.24rem .5rem; }
     #config .term pre { font-size:11px; padding:.85rem .9rem; line-height:1.45; }
     #config .cfg-graph .cfg-graph-svg { width:190px; }
+    #why .switch-demo { grid-template-columns:1fr; }
     #why .switch-row { font-size:.78rem; padding:.55rem .75rem; gap:.3rem .55rem; }
     #why table.cmp col.lbl { width:28%; }
     #why table.cmp th, #why table.cmp td { padding:.5rem .12rem; }
