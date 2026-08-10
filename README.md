@@ -24,9 +24,10 @@ crew start env=staging     web   [x] on  → http://localhost:3000
 crew is a **zero-dependency** CLI for local dev on a distributed stack. Once a slice is running you
 can also open it as one VS Code workspace, or hand it to a single Claude Code session.
 
-> **Assumes you have shared remote environments** (qa / staging / prod) to borrow from - the services
-> you don't run locally keep running there. No deployed stack to point at? A full-stack tool like
-> Docker Compose fits your case better; see [Why not just use Docker?](#why-not-just-use-docker) below.
+> **Assumes each project ships at least one environment file** with its peers' URLs plus a deployed
+> host those point at - that's what crew borrows for the services you leave off. The env names are
+> entirely yours (there's no fixed qa / staging / prod). Nothing deployed to point at? A full-stack
+> tool like Docker Compose fits your case better; see [Why not just use Docker?](#why-not-just-use-docker) below.
 
 ## What it does
 

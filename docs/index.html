@@ -320,7 +320,7 @@
       <span>no images, no rebuilds</span>
       <span>wiring from your <b>env files</b></span>
     </div>
-    <p class="assume"><b>Assumes you have shared remote environments</b> (qa / staging / prod) to borrow from &mdash; the services you don't run locally keep running there. No deployed stack to point at? A full-stack tool like Compose fits your case better.</p>
+    <p class="assume"><b>Assumes each project ships at least one environment file</b> with its peers' URLs, plus a deployed host those point at. That's what crew borrows for the services you leave off, and the env names are entirely yours (there's no fixed qa / staging / prod). Nothing deployed to point at? A full-stack tool like Compose fits your case better.</p>
   </div>
 </section>
 
