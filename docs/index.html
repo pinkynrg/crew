@@ -242,9 +242,9 @@
   <div class="wrap">
     <span class="brand">cr<b>ew</b></span>
     <nav>
-      <a href="#why" class="hidephone">Why&nbsp;not&nbsp;Docker</a>
       <a href="#how" class="hidephone">How it's built</a>
       <a href="#config" class="hidephone">Config&nbsp;file</a>
+      <a href="#why" class="hidephone">Why&nbsp;not&nbsp;Docker</a>
       <a href="#faq" class="hidephone">FAQ</a>
       <a href="#start">Get&nbsp;started</a>
       <a href="https://www.npmjs.com/package/@pinkynrg/crew" class="hidephone">npm</a>
@@ -278,49 +278,6 @@
       <div class="bar"><i></i><i></i><i></i><span>crew start</span></div>
       <img class="cast" src="media/crew-start.gif" style="background-image:url('media/crew-start-poster.png')" alt="crew start: pick a connected slice of services in the dependency graph, run it locally, watch the labelled logs" loading="lazy" decoding="async">
     </div>
-  </div>
-</section>
-
-<section id="why">
-  <div class="wrap">
-    <p class="kicker">why not docker</p>
-    <h2>Every service is a switch.</h2>
-    <p class="intro"><b style="color:var(--fg)">On is local, off is remote.</b> Flip a service on and crew runs it locally and rewrites every peer that talks to it to point at your <span class="mono">localhost</span>. Flip it off and it stays on its deployed environment, callers untouched. The slice you run is just which switches are on &mdash; one service, or the whole stack.</p>
-    <p class="switch-hint"><b>Tap a service</b> to flip it — the URLs and wiring update live.</p>
-    <div class="switch-demo" aria-label="Toggle each service on (local) or off (remote); URLs and wiring update live">
-      <button type="button" class="switch-row is-on" data-svc="web" aria-pressed="true">
-        <span class="svc" style="color:rgb(95,211,141)">web</span><span class="tog">on</span><span class="dst">→ http://localhost:3000</span><span class="note"></span>
-      </button>
-      <button type="button" class="switch-row is-on" data-svc="api" aria-pressed="true">
-        <span class="svc" style="color:rgb(86,203,219)">api</span><span class="tog">on</span><span class="dst">→ http://localhost:4000</span><span class="note">↳ web now calls this locally</span>
-      </button>
-      <button type="button" class="switch-row" data-svc="auth" aria-pressed="false">
-        <span class="svc" style="color:rgb(183,148,246)">auth</span><span class="tog">off</span><span class="dst">→ https://auth.example.com</span><span class="note"></span>
-      </button>
-    </div>
-    <p class="compose-note">Docker Compose has no equivalent to that switch: a service is in the compose file or it isn't, and pointing at the deployed one is a manual env edit &mdash; so you run the <b>whole</b> graph locally or maintain a second file full of stubs, and either drifts from production. crew reads the wiring from the <span class="mono">.env</span> files you already ship, so there's nothing to keep in sync.</p>
-    <div class="cmp-wrap">
-      <table class="cmp">
-        <colgroup><col class="lbl"><col><col><col><col><col></colgroup>
-        <thead>
-          <tr><th></th><th class="me">crew</th><th>Compose</th><th>Tilt</th><th>mirrord</th><th>overmind</th></tr>
-        </thead>
-        <tbody>
-          <tr><th>Runs natively, no containers</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-          <tr><th>Uses your real remote stack</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td><td><span class="no">✕</span></td></tr>
-          <tr><th>No daemon or cluster</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td></tr>
-          <tr><th>No parallel config to keep</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td></tr>
-        </tbody>
-      </table>
-    </div>
-    <p class="cmp-niche">Columns are the representative tool of each family. crew sits <b>between</b> process-runners (overmind, foreman, mprocs) and remote-wiring tools (mirrord, Telepresence): the native-slice-plus-real-remote of the latter, with none of the cluster, daemon, or containers &mdash; just URL swaps in the <span class="mono">.env</span> files you already have.</p>
-    <div class="prin">
-      <span>run <b>one</b> service or <b>all</b> of them</span>
-      <span><b>native</b> processes, no daemon</span>
-      <span>no images, no rebuilds</span>
-      <span>wiring from your <b>env files</b></span>
-    </div>
-    <p class="assume"><b>Assumes each project ships at least one environment file</b> with its peers' URLs, plus a deployed host those point at. That's what crew borrows for the services you leave off. Nothing deployed to point at? A full-stack tool like Compose fits your case better.</p>
   </div>
 </section>
 
@@ -427,6 +384,49 @@
       </div>
     </div>
     </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <p class="kicker">why not docker</p>
+    <h2>Every service is a switch.</h2>
+    <p class="intro"><b style="color:var(--fg)">On is local, off is remote.</b> Flip a service on and crew runs it locally and rewrites every peer that talks to it to point at your <span class="mono">localhost</span>. Flip it off and it stays on its deployed environment, callers untouched. The slice you run is just which switches are on &mdash; one service, or the whole stack.</p>
+    <p class="switch-hint"><b>Tap a service</b> to flip it — the URLs and wiring update live.</p>
+    <div class="switch-demo" aria-label="Toggle each service on (local) or off (remote); URLs and wiring update live">
+      <button type="button" class="switch-row is-on" data-svc="web" aria-pressed="true">
+        <span class="svc" style="color:rgb(95,211,141)">web</span><span class="tog">on</span><span class="dst">→ http://localhost:3000</span><span class="note"></span>
+      </button>
+      <button type="button" class="switch-row is-on" data-svc="api" aria-pressed="true">
+        <span class="svc" style="color:rgb(86,203,219)">api</span><span class="tog">on</span><span class="dst">→ http://localhost:4000</span><span class="note">↳ web now calls this locally</span>
+      </button>
+      <button type="button" class="switch-row" data-svc="auth" aria-pressed="false">
+        <span class="svc" style="color:rgb(183,148,246)">auth</span><span class="tog">off</span><span class="dst">→ https://auth.example.com</span><span class="note"></span>
+      </button>
+    </div>
+    <p class="compose-note">Docker Compose has no equivalent to that switch: a service is in the compose file or it isn't, and pointing at the deployed one is a manual env edit &mdash; so you run the <b>whole</b> graph locally or maintain a second file full of stubs, and either drifts from production. crew reads the wiring from the <span class="mono">.env</span> files you already ship, so there's nothing to keep in sync.</p>
+    <div class="cmp-wrap">
+      <table class="cmp">
+        <colgroup><col class="lbl"><col><col><col><col><col></colgroup>
+        <thead>
+          <tr><th></th><th class="me">crew</th><th>Compose</th><th>Tilt</th><th>mirrord</th><th>overmind</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>Runs natively, no containers</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+          <tr><th>Uses your real remote stack</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td><td><span class="no">✕</span></td></tr>
+          <tr><th>No daemon or cluster</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td></tr>
+          <tr><th>No parallel config to keep</th><td class="me"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cmp-niche">Columns are the representative tool of each family. crew sits <b>between</b> process-runners (overmind, foreman, mprocs) and remote-wiring tools (mirrord, Telepresence): the native-slice-plus-real-remote of the latter, with none of the cluster, daemon, or containers &mdash; just URL swaps in the <span class="mono">.env</span> files you already have.</p>
+    <div class="prin">
+      <span>run <b>one</b> service or <b>all</b> of them</span>
+      <span><b>native</b> processes, no daemon</span>
+      <span>no images, no rebuilds</span>
+      <span>wiring from your <b>env files</b></span>
+    </div>
+    <p class="assume"><b>Assumes each project ships at least one environment file</b> with its peers' URLs, plus a deployed host those point at. That's what crew borrows for the services you leave off. Nothing deployed to point at? A full-stack tool like Compose fits your case better.</p>
   </div>
 </section>
 
