@@ -92,7 +92,7 @@
   .term .bar i:nth-child(1){ background:#ff5f57;} .term .bar i:nth-child(2){ background:#febc2e;} .term .bar i:nth-child(3){ background:#28c840;}
   .term .bar span { margin-left:.5rem; font-family:ui-monospace,Menlo,monospace; font-size:.78rem; color:#6b7286; }
   /* real recorded session (GIF); height:auto -> the window fits the GIF exactly, no letterbox */
-  .term .cast { display:block; width:100%; height:auto; aspect-ratio:4 / 3; }
+  .term .cast { display:block; width:100%; height:auto; aspect-ratio:4 / 3; background-size:cover; background-position:top center; background-repeat:no-repeat; }
 
   section { padding:clamp(2.4rem,6vw,4.2rem) 0; border-top:1px solid var(--line); }
   .kicker { font-family:ui-monospace,Menlo,monospace; font-size:.76rem; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); margin:0 0 .7rem; }
@@ -276,7 +276,7 @@
     </div>
     <div class="term">
       <div class="bar"><i></i><i></i><i></i><span>crew start</span></div>
-      <img class="cast" src="media/crew-start.gif" alt="crew start: pick a connected slice of services in the dependency graph, run it locally, watch the labelled logs" loading="lazy" decoding="async">
+      <img class="cast" src="media/crew-start.gif" style="background-image:url('media/crew-start-poster.png')" alt="crew start: pick a connected slice of services in the dependency graph, run it locally, watch the labelled logs" loading="lazy" decoding="async">
     </div>
   </div>
 </section>
@@ -346,7 +346,7 @@
     <figure class="cfg-cast">
       <div class="term">
         <div class="bar"><i></i><i></i><i></i><span>crew config</span></div>
-        <img class="cast" src="media/crew-config.gif" alt="crew config: add a frontend and a backend by picking their folders (crew auto-fills type, runner, env and start command), add each one's local URL and deployed host per env, and create a guard" loading="lazy" decoding="async">
+        <img class="cast" src="media/crew-config.gif" style="background-image:url('media/crew-config-poster.png');background-position:top left" alt="crew config: add a frontend and a backend by picking their folders (crew auto-fills type, runner, env and start command), add each one's local URL and deployed host per env, and create a guard" loading="lazy" decoding="async">
       </div>
       <figcaption>add a frontend &amp; a backend from their folders (scaffolding auto-filled), fill their URLs, then a guard</figcaption>
     </figure>
