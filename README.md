@@ -25,9 +25,8 @@ crew is a **zero-dependency** CLI for local dev on a distributed stack. Once a s
 can also open it as one VS Code workspace, or hand it to a single Claude Code session.
 
 > **Assumes each project ships at least one environment file** with its peers' URLs plus a deployed
-> host those point at - that's what crew borrows for the services you leave off. The env names are
-> entirely yours (there's no fixed qa / staging / prod). Nothing deployed to point at? A full-stack
-> tool like Docker Compose fits your case better; see [Why not just use Docker?](#why-not-just-use-docker) below.
+> host those point at - that's what crew borrows for the services you leave off. Nothing deployed to
+> point at? A full-stack tool like Docker Compose fits your case better; see [Why not just use Docker?](#why-not-just-use-docker) below.
 
 ## What it does
 

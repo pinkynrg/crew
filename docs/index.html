@@ -295,7 +295,7 @@
         <span class="svc" style="color:rgb(86,203,219)">api</span><span class="tog">on</span><span class="dst">→ http://localhost:4000</span><span class="note">↳ web now calls this locally</span>
       </button>
       <button type="button" class="switch-row" data-svc="auth" aria-pressed="false">
-        <span class="svc" style="color:rgb(183,148,246)">auth</span><span class="tog">off</span><span class="dst">→ https://auth.staging.acme.dev</span><span class="note"></span>
+        <span class="svc" style="color:rgb(183,148,246)">auth</span><span class="tog">off</span><span class="dst">→ https://auth.example.com</span><span class="note"></span>
       </button>
     </div>
     <p class="compose-note">Docker Compose has no equivalent to that switch: a service is in the compose file or it isn't, and pointing at the deployed one is a manual env edit &mdash; so you run the <b>whole</b> graph locally or maintain a second file full of stubs, and either drifts from production. crew reads the wiring from the <span class="mono">.env</span> files you already ship, so there's nothing to keep in sync.</p>
@@ -320,7 +320,7 @@
       <span>no images, no rebuilds</span>
       <span>wiring from your <b>env files</b></span>
     </div>
-    <p class="assume"><b>Assumes each project ships at least one environment file</b> with its peers' URLs, plus a deployed host those point at. That's what crew borrows for the services you leave off, and the env names are entirely yours (there's no fixed qa / staging / prod). Nothing deployed to point at? A full-stack tool like Compose fits your case better.</p>
+    <p class="assume"><b>Assumes each project ships at least one environment file</b> with its peers' URLs, plus a deployed host those point at. That's what crew borrows for the services you leave off. Nothing deployed to point at? A full-stack tool like Compose fits your case better.</p>
   </div>
 </section>
 
@@ -396,8 +396,7 @@
       },
       <span class="jk">"env"</span>: <span class="js">".envs/{env}.env"</span>,
       <span class="jk">"match"</span>: {
-        <span class="jk">"staging"</span>: <span class="js">"web.staging.acme.dev"</span>,
-        <span class="jk">"prod"</span>:    <span class="js">"web.acme.dev"</span>
+        <span class="jk">"your-env"</span>: <span class="js">"web.example.com"</span>
       },
       <span class="jk">"local"</span>: <span class="js">"http://localhost:3000"</span>
     },
@@ -408,8 +407,7 @@
       },
       <span class="jk">"env"</span>: <span class="js">".envs/{env}.env"</span>,
       <span class="jk">"match"</span>: {
-        <span class="jk">"staging"</span>: <span class="js">"api.staging.acme.dev"</span>,
-        <span class="jk">"prod"</span>:    <span class="js">"api.acme.dev"</span>
+        <span class="jk">"your-env"</span>: <span class="js">"api.example.com"</span>
       },
       <span class="jk">"local"</span>: <span class="js">"http://localhost:4000"</span>
     },
@@ -420,8 +418,7 @@
       },
       <span class="jk">"env"</span>: <span class="js">".envs/{env}.env"</span>,
       <span class="jk">"match"</span>: {
-        <span class="jk">"staging"</span>: <span class="js">"auth.staging.acme.dev"</span>,
-        <span class="jk">"prod"</span>:    <span class="js">"auth.acme.dev"</span>
+        <span class="jk">"your-env"</span>: <span class="js">"auth.example.com"</span>
       },
       <span class="jk">"local"</span>: <span class="js">"http://localhost:4500"</span>
     }
@@ -448,8 +445,8 @@
         <p class="a">In your own env files, same as today &mdash; crew only reads them. The committable <code>config.json</code> holds no secrets; machine-local bits (projects dir, remembered selection) live in a gitignored <code>local.json</code>. The temporary wired copy under <code>~/.config/crew/tmp/</code> is the only materialized secret, and it's regenerated per run and removed on exit.</p>
       </details>
       <details>
-        <summary>What if a remote env (staging) is down?</summary>
-        <p class="a">Then the services you left <em>off</em> are unreachable &mdash; exactly as if you called staging directly. crew doesn't proxy or cache; turn those services <em>on</em> to run them locally, or wait for staging to recover.</p>
+        <summary>What if a remote environment is down?</summary>
+        <p class="a">Then the services you left <em>off</em> are unreachable, exactly as if you called that deployed environment directly. crew doesn't proxy or cache; turn those services <em>on</em> to run them locally, or wait for the environment to recover.</p>
       </details>
       <details>
         <summary>Do I have to run everything?</summary>
@@ -485,7 +482,7 @@
       <li>
         <div>
           <span class="t">Run the set</span>
-          <pre class="step-cmd"><span class="p">$</span> crew start env=staging</pre>
+          <pre class="step-cmd"><span class="p">$</span> crew start env=your-env</pre>
           <p>Pick a connected slice in the dependency graph (click or arrow keys); crew runs those locally, wires them together, and leaves the rest on their resolved remote env.</p>
         </div>
       </li>
@@ -553,9 +550,9 @@
     const demo = document.querySelector('#why .switch-demo');
     if (!demo) return;
     const NODES = {
-      web:  { local: 'http://localhost:3000', remote: 'https://web.staging.acme.dev' },
-      api:  { local: 'http://localhost:4000', remote: 'https://api.staging.acme.dev' },
-      auth: { local: 'http://localhost:4500', remote: 'https://auth.staging.acme.dev' },
+      web:  { local: 'http://localhost:3000', remote: 'https://web.example.com' },
+      api:  { local: 'http://localhost:4000', remote: 'https://api.example.com' },
+      auth: { local: 'http://localhost:4500', remote: 'https://auth.example.com' },
     };
     const DEPS = { web: ['api', 'auth'], api: ['auth'], auth: [] }; // consumer -> deps it calls
     const ORDER = ['web', 'api', 'auth'];
