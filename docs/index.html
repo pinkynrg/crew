@@ -189,7 +189,7 @@
   #config .term pre .jp { color:var(--accent); font-weight:600; }   /* crew {placeholder} */
   #config .cfg-graph { margin:1.9rem 0 0; text-align:center; }
   #config .cfg-graph figcaption { margin:0 0 .8rem; font-size:.78rem; letter-spacing:.14em; text-transform:uppercase; font-family:ui-monospace,Menlo,monospace; color:var(--accent); }
-  #config .cfg-graph .cfg-graph-svg { display:inline-block; width:210px; max-width:100%; height:auto; }
+  #config .cfg-graph .cfg-graph-svg { display:inline-block; width:290px; max-width:100%; height:auto; }
   /* the crew config walkthrough GIF (full-width, above the file/graph grid) */
   #config .cfg-intro { max-width:none; }
   #config .cfg-cast { margin:1.7rem 0 2.6rem; }
@@ -258,7 +258,7 @@
   <div class="wrap top-grid">
     <div class="pitch-col">
       <p class="eyebrow">local dev for a distributed stack</p>
-      <h1>Quickly select &amp; run <span class="amber">the slice of your stack you're interested in</span> locally, wired to the rest.</h1>
+      <h1>Run <span class="amber">the slice of your stack</span> you're working on. Locally, wired to the rest.</h1>
       <div class="tabs" role="tablist" aria-label="What crew does">
         <button role="tab" aria-selected="true" data-i="0">crew start</button>
         <button role="tab" aria-selected="false" data-i="1">crew workspace</button>
@@ -317,7 +317,7 @@
       </ul>
       <p class="cfg-note">Committable as-is: no secrets, no machine paths. Those live in a gitignored <code>local.json</code> beside it.</p>
       <figure class="cfg-graph" aria-label="Dependency graph crew derives from this config: web depends on api and auth; api depends on auth.">
-        <figcaption>the graph crew derives</figcaption>
+        <figcaption>crew reads these hosts &rarr; derives this graph</figcaption>
         <svg class="cfg-graph-svg" viewBox="0 0 240 282" role="img" aria-label="Dependency graph crew derives: web depends on api and auth; api depends on auth." xmlns="http://www.w3.org/2000/svg">
           <!-- dependency edges, colored by source -->
           <g fill="none" stroke-width="2" stroke-linecap="square">
