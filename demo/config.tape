@@ -1,12 +1,25 @@
 # Regenerate:  vhs demo/config.tape   (run from repo root)
 # Real `crew config` session against an empty config: add a FRONTEND and a BACKEND straight from
 # their folders (crew auto-fills the fields), then create a GUARD. -> docs/media/crew-config.gif
+#
+# 16:10 at 1100x688, which is the shape and the size every demo across these
+# repos is delivered at. The gif is optimised after recording; the mp4 is the
+# recording as vhs made it:
+#
+#   vhs demo/config.tape
+#   ffmpeg -i docs/media/crew-config.gif -vf "fps=10,scale=880:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=3" -loop 0 /tmp/crew-config.gif -y
+#   gifsicle -O3 --lossy=60 --colors 80 /tmp/crew-config.gif -o docs/media/crew-config.gif
+#
+# Framerate 12 is load-bearing rather than cosmetic: vhs captures each frame
+# through the browser, and at this size the default rate outruns the capture,
+# so the recording comes out playing at half the length the Sleeps ask for.
 Output docs/media/crew-config.gif
 
 Set Shell "bash"
-Set FontSize 16
-Set Width 1000
-Set Height 720
+Set FontSize 17
+Set Framerate 12
+Set Width 1100
+Set Height 688
 Set Padding 16
 Set TypingSpeed 42ms
 
