@@ -28,7 +28,6 @@ export const c = {
   green: wrap(32),
   yellow: wrap(33),
   cyan: wrap(36),
-  gray: wrap(90),
 };
 // Truecolor when the terminal advertises it, otherwise fall back to the xterm-256 cube.
 const TRUECOLOR = COLOR && /^(truecolor|24bit)$/i.test(process.env.COLORTERM || '');
@@ -43,6 +42,11 @@ export function fgRGB(r, g, b) {
 }
 // A subdued gray for low-priority annotations (guard descriptions, etc.) — darker than c.dim.
 export const faint = fgRGB(110, 110, 110);
+// Chrome (labels, separators, hints): the dim ATTRIBUTE, not a color — the terminal fades it
+// toward its own background, so it stays legible on both light and dark themes (unlike bright-
+// black \x1b[90m, which a light theme maps to a light gray that's nearly invisible on white).
+// Closes with 22m, never 39m (39m restores the foreground color, it doesn't turn dim off).
+const DIM = '\x1b[2m', UNDIM = '\x1b[22m';
 function hslToRgb(h, s, l) {
   const a = s * Math.min(l, 1 - l);
   const f = (n) => {
@@ -52,11 +56,11 @@ function hslToRgb(h, s, l) {
   return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
 }
 // An ordered palette where each color sits ~137.5 deg (golden angle) from the previous
-// one, so consecutive indices are maximally distant in hue. Vivid S/L keep it readable
-// on a dark background. Index N is stable and reproducible — not random.
+// one, so consecutive indices are maximally distant in hue. Mid S/L keep it readable on
+// both light and dark backgrounds. Index N is stable and reproducible — not random.
 function rgbForIndex(i) {
   const hue = (i * 137.508) % 360;
-  return hslToRgb(hue, 0.72, 0.62);
+  return hslToRgb(hue, 0.75, 0.45);
 }
 export function colorForIndex(i) {
   const [r, g, b] = rgbForIndex(i);
@@ -1537,7 +1541,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       stdin.resume();
       // Guards appear as pseudo-projects (`[vpn]`/`[aws]`) — filterable rows. Their names join the
       // project names in the filter list + hidden memory. Rows are added live by viewerRunGuards.
-      const guardProcs = new Map(guards.map((g) => [g.name, { _name: g.name, _color: (s) => c.gray(s) }]));
+      const guardProcs = new Map(guards.map((g) => [g.name, { _name: g.name, _color: (s) => c.dim(s) }]));
       const names = [...commands.map((cmd) => cmd.name), ...guards.map((g) => g.name)];
       const history = []; // { proc, text } complete lines (capped at LOG_HISTORY); { notice:true } rows are unprefixed + always shown
       for (const n of notices) history.push({ proc: null, text: c.yellow(n), notice: true }); // pre-run skips/warnings, shown inside the viewer (not leaked to the main screen)
@@ -2328,7 +2332,7 @@ async function graphSelect(flags, cfg, opts = {}) {
   const hasRef = ref.length > 0;
   const paint = projectColors(cfg);
   const prefix = (n) => { const f = paint.get(n); if (!f) return ''; const s = f('\x01'); const i = s.indexOf('\x01'); return i > 0 ? s.slice(0, i) : ''; };
-  const GRAY = '\x1b[90m', selEnv = opts.selEnv;
+  const GRAY = DIM, selEnv = opts.selEnv;
   const depEdges = dependencyEdges(cfg, Object.entries(cfg.projects));
   let active = new Set(loadLastSelection(flags).filter((n) => nodes.includes(n)));
   if (!active.size) active = new Set(nodes);        // default: everything selected
@@ -2825,7 +2829,7 @@ async function configForm(flags, opts = {}) {
       return null;
     },
     del: (n) => { delete cfg.projects[n]; delete overrides[n]; persist(); },
-    info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveProjectPath(String(f.path).trim()); } catch { return `\x1b[90mpath\x1b[39m  ${String(f.path).trim()}  \x1b[90m(set a projects dir in Settings)\x1b[39m`; } return pathExists(abs) ? `\x1b[90mpath\x1b[39m  ${abs}` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
+    info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveProjectPath(String(f.path).trim()); } catch { return `${DIM}path${UNDIM}  ${String(f.path).trim()}  ${DIM}(set a projects dir in Settings)${UNDIM}`; } return pathExists(abs) ? `${DIM}path${UNDIM}  ${abs}` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
   };
 
   const guardsSection = {
@@ -2851,7 +2855,7 @@ async function configForm(flags, opts = {}) {
       persist(); return null;
     },
     del: (n) => { delete cfg.guards[n]; for (const pr of Object.values(cfg.projects)) setProjectGuard(pr, n, false); persist(); },
-    info: (f) => f.isNew ? '' : `\x1b[90mused by\x1b[39m  ${usersOf(f.orig).join(', ') || '\x1b[90m(no projects)\x1b[39m'}`,
+    info: (f) => f.isNew ? '' : `${DIM}used by${UNDIM}  ${usersOf(f.orig).join(', ') || `${DIM}(no projects)${UNDIM}`}`,
   };
 
   // Top-level (global) config + machine-local projectsDir. A FIXED section: one synthetic item, no +New
@@ -2887,7 +2891,7 @@ async function configForm(flags, opts = {}) {
       writeMachine(flags, machine);
       return null;
     },
-    info: (f) => { const miss = missingProjectFolders(cfg, String(f.projectsDir).trim()); const total = Object.keys(cfg.projects).length; return miss.length ? `\x1b[33m⚠ ${miss.length}/${total} project folder(s) not found under projectsDir\x1b[39m` : '\x1b[90mlongRunning = tasks that stream until Ctrl-C\x1b[39m'; },
+    info: (f) => { const miss = missingProjectFolders(cfg, String(f.projectsDir).trim()); const total = Object.keys(cfg.projects).length; return miss.length ? `\x1b[33m⚠ ${miss.length}/${total} project folder(s) not found under projectsDir\x1b[39m` : `${DIM}longRunning = tasks that stream until Ctrl-C${UNDIM}`; },
   };
 
   const sections = [settingsSection, projectsSection, guardsSection];
@@ -2955,7 +2959,7 @@ async function configForm(flags, opts = {}) {
     if (!form.env && d.env) { form.env = d.env; got.push('env'); }
     if (!form.local && d.local) { form.local = d.local; got.push('local'); }
     if (d.start && !(form.tasks && form.tasks.start)) { form.tasks = { ...(form.tasks || {}), start: d.start }; got.push('tasks.start'); }
-    if (got.length) { dirty = true; msg = `\x1b[90mauto-filled from folder: ${got.join(', ')}\x1b[39m`; }
+    if (got.length) { dirty = true; msg = `${DIM}auto-filled from folder: ${got.join(', ')}${UNDIM}`; }
   };
   // Folder picker for the project `path` field: the subfolders of projectsDir + a "type a path…" escape
   // (for folders elsewhere, or when no projectsDir is set). So you don't type the path from memory.
@@ -2995,7 +2999,7 @@ async function configForm(flags, opts = {}) {
       for (let r = 0; r < body; r++) {
         const row = d[leftTop + r];
         if (!row || row.kind === 'space') { L.push(''); continue; }
-        if (row.kind === 'header') { L.push(`\x1b[90m${sections[row.si].title}\x1b[39m  \x1b[90m${sections[row.si].names().length}\x1b[39m`); continue; }
+        if (row.kind === 'header') { L.push(`${DIM}${sections[row.si].title}${UNDIM}  ${DIM}${sections[row.si].names().length}${UNDIM}`); continue; }
         const label = row.kind === 'new' ? sections[row.si].newLabel : (isCur(row) && form.name ? form.name : row.name); // current item shows its live (possibly-edited) name
         const on = isCur(row);
         let cell = padP((on ? '▸ ' : '  ') + clipP(label, LW - 2), LW);
@@ -3009,7 +3013,7 @@ async function configForm(flags, opts = {}) {
       const Rn = [];
       if (mapEdit && !panel) {
         const F = mapEdit, fld = F.field;
-        Rn.push(`\x1b[1m${fld.label}\x1b[22m \x1b[90m· ${s.noun} ${form.name || form.orig}\x1b[39m`);
+        Rn.push(`\x1b[1m${fld.label}\x1b[22m ${DIM}· ${s.noun} ${form.name || form.orig}${UNDIM}`);
         Rn.push('');
         if (F.list) { // single-column list (e.g. longRunning)
           F.rows.forEach((v, i) => {
@@ -3040,11 +3044,11 @@ async function configForm(flags, opts = {}) {
           }
         }
       } else if (panel) {
-        Rn.push(`\x1b[1m${panelField.label}\x1b[22m \x1b[90m· ${s.noun} ${form.name || form.orig}\x1b[39m`);
+        Rn.push(`\x1b[1m${panelField.label}\x1b[22m ${DIM}· ${s.noun} ${form.name || form.orig}${UNDIM}`);
         Rn.push('');
         for (const ln of panel.bareRows(body - 2, RW)) Rn.push(ln);
       } else {
-        Rn.push(form.isNew ? `\x1b[1mNew ${s.noun}\x1b[22m` : `\x1b[1m${s.noun[0].toUpperCase() + s.noun.slice(1)}\x1b[22m \x1b[90m·\x1b[39m ${form.name || form.orig}`);
+        Rn.push(form.isNew ? `\x1b[1mNew ${s.noun}\x1b[22m` : `\x1b[1m${s.noun[0].toUpperCase() + s.noun.slice(1)}\x1b[22m ${DIM}·${UNDIM} ${form.name || form.orig}`);
         Rn.push('');
         const labW = s.fields.reduce((m, f) => Math.max(m, f.label.length), 4); // align values to the widest label in this section
         const vW = Math.max(8, RW - labW - 6);
@@ -3059,11 +3063,11 @@ async function configForm(flags, opts = {}) {
               : isMatch ? matchLabels(form).map((env) => ({ env, host: matchValToStr((form.match || {})[env]) }))
                         : (form[fld.key] || []);
             Rn.push('');
-            const title = isMatch ? 'match  \x1b[90m· env-labeled hosts (keys from env files)\x1b[39m' : fld.groupTitle;
+            const title = isMatch ? `match  ${DIM}· env-labeled hosts (keys from env files)${UNDIM}` : fld.groupTitle;
             const titleFocused = on && !editingRows && !editing;
-            Rn.push(titleFocused ? rev(`  ${title.replace(/\x1b\[[0-9;]*m/g, '')}  ⏎ edit `) : `  \x1b[90m${title}\x1b[39m`);
+            Rn.push(titleFocused ? rev(`  ${title.replace(/\x1b\[[0-9;]*m/g, '')}  ⏎ edit `) : `  ${DIM}${title}${UNDIM}`);
             const keyW = Math.min(20, Math.max(3, ...rows.map((r) => [...String((isMatch ? r.env : r.var) || '(VAR)')].length)));
-            if (!rows.length) Rn.push(isMatch ? '    \x1b[90m(no env files found — set env / create them)\x1b[39m' : '    \x1b[90m(none)\x1b[39m');
+            if (!rows.length) Rn.push(isMatch ? `    ${DIM}(no env files found — set env / create them)${UNDIM}` : `    ${DIM}(none)${UNDIM}`);
             rows.forEach((row, ri) => {
               const rowOn = editingRows && ovEdit.ri === ri, ci = editingRows ? ovEdit.ci : -1;
               const k0 = isMatch ? (row.env || '') : (row.var || '(VAR)');
@@ -3076,22 +3080,22 @@ async function configForm(flags, opts = {}) {
               const v1 = isMatch ? (row.host || '(host)') : (row.value || '(value)');
               const vDisp = (editing && rowOn && (editTarget === 'ovVal' || editTarget === 'meHost')) ? editCell(Math.max(8, vW - keyW - 8)) : clipP(v1, Math.max(8, vW - keyW - 20));
               const c1 = (rowOn && !editing && ci === 1) ? rev(` ${vDisp} `) : ` ${vDisp} `;
-              let line = `  ${rowOn && !editing ? '▸' : ' '}${c0}\x1b[90m=\x1b[39m${c1}`;
-              if (!isMatch) { const wp = row.peer ? `when ${row.peer} local` : 'always'; line += (rowOn && !editing && ci === 2) ? rev(` ${wp} `) : (row.peer ? ` \x1b[36m${wp}\x1b[39m` : ` \x1b[90m${wp}\x1b[39m`); }
+              let line = `  ${rowOn && !editing ? '▸' : ' '}${c0}${DIM}=${UNDIM}${c1}`;
+              if (!isMatch) { const wp = row.peer ? `when ${row.peer} local` : 'always'; line += (rowOn && !editing && ci === 2) ? rev(` ${wp} `) : (row.peer ? ` \x1b[36m${wp}\x1b[39m` : ` ${DIM}${wp}${UNDIM}`); }
               Rn.push(line);
             });
             if (editingRows && !isMatch) { const addOn = ovEdit.ri === rows.length; Rn.push(`  ${addOn && !editing ? rev(' ▸ + add override ') : ' \x1b[32m+ add override\x1b[39m'}`); }
             return;
           }
-          if (fld.groupTitle) { Rn.push(''); Rn.push(`  \x1b[90m${fld.groupTitle}\x1b[39m`); } // a titled block separator before this field
+          if (fld.groupTitle) { Rn.push(''); Rn.push(`  ${DIM}${fld.groupTitle}${UNDIM}`); } // a titled block separator before this field
           const editText = editing && on && (fld.kind === 'text' || fld.kind === 'name');
           let val;
           if (editText) val = editCell(vW); // block caret, scrolls if long
-          else if (fld.kind === 'multiselect' || fld.kind === 'list') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : '\x1b[90m(none)\x1b[39m'; }
-          else if (fld.kind === 'map') { const o = form[fld.key] || {}, ks = Object.keys(o); val = ks.length ? Object.entries(o).map(([k, v]) => `${k}=${v}`).join('  ') : '\x1b[90m(none)\x1b[39m'; }
-          else val = String(form[fld.key]) ? String(form[fld.key]) : `\x1b[90m(${fld.req ? 'required' : 'optional'})\x1b[39m`;
+          else if (fld.kind === 'multiselect' || fld.kind === 'list') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : `${DIM}(none)${UNDIM}`; }
+          else if (fld.kind === 'map') { const o = form[fld.key] || {}, ks = Object.keys(o); val = ks.length ? Object.entries(o).map(([k, v]) => `${k}=${v}`).join('  ') : `${DIM}(none)${UNDIM}`; }
+          else val = String(form[fld.key]) ? String(form[fld.key]) : `${DIM}(${fld.req ? 'required' : 'optional'})${UNDIM}`;
           const lab = padP(fld.label, labW);
-          Rn.push(`  ${on && !editing ? rev(' ' + lab + ' ') : '\x1b[90m ' + lab + ' \x1b[39m'} ${editText ? val : clipP(val, vW)}`);
+          Rn.push(`  ${on && !editing ? rev(' ' + lab + ' ') : DIM + ' ' + lab + ' ' + UNDIM} ${editText ? val : clipP(val, vW)}`);
         });
         const info = s.info ? s.info(form) : '';
         if (info) { Rn.push(''); Rn.push('  ' + info); }
@@ -3100,8 +3104,8 @@ async function configForm(flags, opts = {}) {
       // lines into scrollback on some terminals, making the editor "scrollable". The graph pager and
       // log viewer avoid it the same way — every row is rewritten each frame, so [K is enough.)
       let out = '\x1b[H';
-      out += '\x1b[K ' + '\x1b[1mcrew\x1b[22m' + '\x1b[90m  ·  config editor\x1b[39m' + '\r\n';
-      for (let r = 0; r < body; r++) out += '\x1b[K ' + padP(L[r] || '', LW) + ' \x1b[90m│\x1b[39m ' + (Rn[r] || '') + '\r\n';
+      out += '\x1b[K ' + '\x1b[1mcrew\x1b[22m' + DIM + '  ·  config editor' + UNDIM + '\r\n';
+      for (let r = 0; r < body; r++) out += '\x1b[K ' + padP(L[r] || '', LW) + ' ' + DIM + '│' + UNDIM + ' ' + (Rn[r] || '') + '\r\n';
       // ---- footer ----
       let parts;
       if (modal) parts = modal.choices.map((c) => c.label);
@@ -3136,7 +3140,7 @@ async function configForm(flags, opts = {}) {
     const openPanel = (fld) => { const items = optionsOf(fld); if (!items.length) { msg = `no ${fld.label} defined yet`; return; } panelField = fld; const single = fld.kind === 'choice'; panel = makeFilterPanel(items, { paint, title: fld.label, single }); panel.open(single ? form[fld.key] : (Array.isArray(form[fld.key]) ? form[fld.key] : [])); };
     const openItem = () => { focus = 'right'; fi = 0; }; // form already synced to sel[li] by loadForm — don't reload here (a col1→col2→col1→col2 round-trip would discard unsaved edits, e.g. a rename)
     const quit = () => { cleanup(); resolve(); return true; };
-    const openDelete = (name) => { const used = secOf().key === 'guards' ? usersOf(name) : []; modal = { title: 'Delete', lines: [`Delete '${name}'?`, ...(used.length ? [`\x1b[90mused by ${used.length} project(s)\x1b[39m`] : [])], choices: [{ keys: ['y', 'Y'], label: 'y delete', run: () => { doDelete(name); modal = null; return false; } }, { keys: ['\x1b', 'n', 'N'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
+    const openDelete = (name) => { const used = secOf().key === 'guards' ? usersOf(name) : []; modal = { title: 'Delete', lines: [`Delete '${name}'?`, ...(used.length ? [`${DIM}used by ${used.length} project(s)${UNDIM}`] : [])], choices: [{ keys: ['y', 'Y'], label: 'y delete', run: () => { doDelete(name); modal = null; return false; } }, { keys: ['\x1b', 'n', 'N'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
     const openUnsaved = () => { const n = drafts.size; modal = { title: 'Unsaved changes', lines: [`${n} unsaved change${n === 1 ? '' : 's'} — save all before leaving?`], choices: [{ keys: ['s', 'S'], label: 's save all & exit', run: () => (saveAll() ? ((modal = null), false) : quit()) }, { keys: ['d', 'D'], label: 'd discard all & exit', run: () => { discardAll(); return quit(); } }, { keys: ['\x1b'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
 
     const handleKey = (k) => {
