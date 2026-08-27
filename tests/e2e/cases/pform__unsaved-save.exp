@@ -18,4 +18,4 @@ must {Unsaved changes}
 sleep 1
 send "s"
 want_exit 0
-config_has {"make {task}Z"}
+config_has {"make runZ"}

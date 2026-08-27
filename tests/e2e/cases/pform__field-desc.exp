@@ -6,15 +6,15 @@ must {config editor}
 sleep 1
 send "l"
 sleep 1
-# name(0) path(1) type(2) runner(3) start(4) -> 4 j's to the start field
-send "jjjj"
+# name(0) path(1) type(2) start(3) -> 3 j's to the start field
+send "jjj"
 sleep 1
 must {command that starts this service}
-# debug (5) -> its own description
+# debug (4) -> its own description
 send "j"
 sleep 1
 must {debug mode}
-# env (6) -> its own description
+# env (5) -> its own description
 send "j"
 sleep 1
 must {this service's env files live}

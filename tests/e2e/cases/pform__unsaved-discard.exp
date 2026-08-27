@@ -18,4 +18,4 @@ must {discard all & exit}
 sleep 1
 send "d"
 want_exit 0
-config_hasnt {"make {task}Z"}
+config_hasnt {"make runZ"}

@@ -331,6 +331,9 @@ export function migrate(cfg) {
     delete cfg.longRunning;
     changed = true;
   }
+  for (const svc of Object.values(cfg.services || cfg.projects || {})) { // retired per-service keys
+    if (svc && typeof svc === 'object') for (const k of ['runner', 'defaultBranch']) if (k in svc) { delete svc[k]; changed = true; }
+  }
   if (!cfg.services) {
     cfg.services = {};
     changed = true;
@@ -682,7 +685,7 @@ export const SERVICE_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 // Config-validation key sets (used by `crew check`).
 // ---------------------------------------------------------------------------
 export const TOP_KEYS = new Set(['version', 'workspaceName', 'workspaceSettings', 'services', 'guards', 'overrides']);
-export const SERVICE_KEYS = new Set(['path', 'type', 'runner', 'env', 'local', 'match', 'tasks', 'guards', 'defaultBranch']);
+export const SERVICE_KEYS = new Set(['path', 'type', 'env', 'local', 'match', 'tasks', 'guards']);
 export const GUARD_KEYS = new Set(['comment', 'command', 'message']);
 export const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const isStrArr = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
@@ -807,7 +810,7 @@ export function serviceDir(service) {
 }
 
 // ---------------------------------------------------------------------------
-// Task resolution — tasks[task] -> runner{task} -> skip. Strict placeholders.
+// Task resolution — tasks[task] -> skip. Strict placeholders.
 // ---------------------------------------------------------------------------
 export function resolveRun(cfg, task, members, args) {
   const runnable = [];
@@ -816,7 +819,6 @@ export function resolveRun(cfg, task, members, args) {
     const t = m.task || task; // a member can override the task (e.g. 'debug' from the selector); else the command's task
     let template;
     if (m.service.tasks && m.service.tasks[t] != null) template = m.service.tasks[t];
-    else if (m.service.runner) template = m.service.runner;
     else {
       skipped.push(m.name);
       continue;
@@ -2238,21 +2240,19 @@ export function cmdList(flags) {
     const pathCell = ok ? shown : c.red(shown + (abs ? '  ✗ missing' : ''));
     console.log(`  ${dot} ${c.bold(paint.get(name)(name))}`); // header: status + name only
 
-    // Every field is a labeled row, columns aligned per service (type/path like runner/branch/…).
+    // Every field is a labeled row, columns aligned per service (type/path like the task rows).
     const taskEntries = Object.entries(p.tasks || {});
-    const labels = ['type', 'path', ...(p.runner ? ['runner'] : []), ...taskEntries.map(([t]) => t), ...(p.guards && p.guards.length ? ['guards'] : []), ...(p.defaultBranch ? ['branch'] : [])];
+    const labels = ['type', 'path', ...taskEntries.map(([t]) => t), ...(p.guards && p.guards.length ? ['guards'] : [])];
     const labelW = Math.max(6, ...labels.map((s) => s.length));
     const lab = (s) => c.dim(s.padEnd(labelW + 2));
     console.log(`      ${lab('type')}${type}`);
     console.log(`      ${lab('path')}${pathCell}`);
-    if (p.runner) console.log(`      ${lab('runner')}${p.runner}`);
     for (const [t, cmd] of taskEntries) {
       const kind = STREAMED_TASKS.has(t) ? c.yellow('service') : c.green('task');
       console.log(`      ${lab(t)}${cmd}  ${c.dim('[')}${kind}${c.dim(']')}`);
     }
-    if (!p.runner && taskEntries.length === 0) console.log(`      ${c.dim('(run-less)')}`);
+    if (taskEntries.length === 0) console.log(`      ${c.dim('(run-less)')}`);
     if (p.guards && p.guards.length) console.log(`      ${lab('guards')}${p.guards.join(', ')}`);
-    if (p.defaultBranch) console.log(`      ${lab('branch')}${p.defaultBranch}`);
   }
 
   // --- Footer ---------------------------------------------------------------
@@ -2720,7 +2720,7 @@ export async function cmdPull(flags, url) {
 
 // Derive a service's fields from the folder on disk (best-effort) — used by the config editor when a NEW
 // service's `path` points at an existing folder, to prefill the empty fields. Reads package.json / lockfiles
-// / manifests / .envs / dev scripts. Returns { type, runner, env, local, start }; `match` (deployed host)
+// / manifests / .envs / dev scripts. Returns { type, env, local, start }; `match` (deployed host)
 // is intentionally not derived — the guess was too weak, so the user always fills it by hand.
 export function detectService(abs) {
   const rd = (rel) => { try { return readFileSync(join(abs, rel), 'utf8'); } catch { return ''; } };
@@ -2734,12 +2734,6 @@ export function detectService(abs) {
   let type = '';
   if (FRONT.some((d) => d in deps) || isFile('index.html') || isFile('public/index.html')) type = 'frontend';
   else if (pkg || ['go.mod', 'manage.py', 'pyproject.toml', 'requirements.txt', 'Gemfile', 'pom.xml', 'Cargo.toml', 'composer.json'].some(isFile)) type = 'backend';
-
-  let runner = '';
-  if (isFile('yarn.lock')) runner = 'yarn {task}';
-  else if (isFile('pnpm-lock.yaml')) runner = 'pnpm {task}';
-  else if (pkg) runner = 'npm run {task}';
-  else if (isFile('Makefile') || isFile('makefile')) runner = 'make {task}';
 
   const envNames = ls('.envs').filter((f) => f !== '.gitkeep' && isFile(join('.envs', f)));
   let env = '';
@@ -2770,7 +2764,7 @@ export function detectService(abs) {
 
   // NB: `match` (deployed hosts) is deliberately NOT derived — guessing it from env-file hosts vs the
   // folder name was too unreliable. It's the one field the user always fills by hand.
-  return { type, runner, env, local, start };
+  return { type, env, local, start };
 }
 
 // Two-pane raw-mode config editor. Left column stacks every SECTION (Services, Guards) as a name list,
@@ -2840,13 +2834,11 @@ async function configForm(flags, opts = {}) {
       { key: 'name', label: 'name', kind: 'name', req: true, desc: 'A short, unique name for this service.' },
       { key: 'path', label: 'path', kind: 'text', req: true, desc: "Where the repo lives, relative to your services dir. Shared with the team — if it shows 'not found', fix YOUR services dir in Settings, don't change this. Press ⏎ to pick from your services dir." },
       { key: 'type', label: 'type', kind: 'choice', options: SERVICE_TYPES, desc: 'What this service is: a frontend app, a backend service, or other.' },
-      { key: 'runner', label: 'runner', kind: 'text', desc: 'Optional. A command template with {task} (e.g. "npm run {task}"). You can usually skip this and just fill start below.' },
       // start: the core command, entered as a plain string (stored as tasks.start). The `tasks` map below
       // holds only the OTHER, optional tasks (e.g. debug) — start is edited here, not as a map row.
       { key: 'start', label: 'start', kind: 'text', desc: 'The command that starts this service (e.g. "npm run dev"). Write {envfile} where it should load the env file.' },
       { key: 'debug', label: 'debug', kind: 'text', desc: 'Optional. A command to start this service in debug mode (attachable). If set, the picker offers a "d" toggle to launch it instead of start.' },
       { key: 'env', label: 'env', kind: 'text', desc: 'Where this service\'s env files live, with {env} for the environment name (e.g. ".envs/{env}").' },
-      { key: 'defaultBranch', label: 'branch', kind: 'text', desc: 'Optional. The branch you cut new work from (e.g. main). Just a note — crew runs no git.' },
       { key: 'tasks', label: 'tasks (other)', kind: 'map', kLabel: 'task', vLabel: 'command', desc: 'Optional extra commands besides start (e.g. a "debug" command). Not required.' },
       { key: 'guards', label: 'guards', kind: 'multiselect', options: () => Object.keys(cfg.guards), desc: 'Checks that must pass before this service starts. Tick the ones to require.' },
       { key: 'local', label: 'local', kind: 'text', desc: "This service's local URL, e.g. http://localhost:3000." },
@@ -2863,9 +2855,9 @@ async function configForm(flags, opts = {}) {
     load: (n) => {
       const p = cfg.services[n] || {};
       const { start = '', debug = '', ...otherTasks } = { ...(p.tasks || {}) }; // start + debug are edited in their own fields; the map shows the rest
-      return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', start, debug, env: p.env || '', local: p.local || '', match: (p.match && typeof p.match === 'object' && !Array.isArray(p.match)) ? { ...p.match } : {}, guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: otherTasks, overrides: overridesToRows(overrides[n]), localOverrides: overridesToRows(localOverrides[n]), isNew: false, orig: n };
+      return { name: n, path: p.path || '', type: p.type || 'other', start, debug, env: p.env || '', local: p.local || '', match: (p.match && typeof p.match === 'object' && !Array.isArray(p.match)) ? { ...p.match } : {}, guards: [...(p.guards || [])], tasks: otherTasks, overrides: overridesToRows(overrides[n]), localOverrides: overridesToRows(localOverrides[n]), isNew: false, orig: n };
     },
-    blank: () => ({ name: '', path: '', type: 'other', runner: '', start: '', debug: '', env: '', local: '', match: {}, guards: [], defaultBranch: '', tasks: {}, overrides: [], localOverrides: [], isNew: true, orig: null }),
+    blank: () => ({ name: '', path: '', type: 'other', start: '', debug: '', env: '', local: '', match: {}, guards: [], tasks: {}, overrides: [], localOverrides: [], isNew: true, orig: null }),
     save: (f) => {
       const name = String(f.name).trim();
       if (!name) return 'name is required';
@@ -2875,10 +2867,8 @@ async function configForm(flags, opts = {}) {
       const base = f.isNew ? {} : { ...(cfg.services[f.orig] || {}) }; // preserve any unmanaged/future keys
       if (renaming) delete cfg.services[f.orig];
       const proj = { ...base, path: String(f.path).trim(), type: f.type };
-      setOrDel(proj, 'runner', String(f.runner).trim());
       setOrDel(proj, 'env', String(f.env).trim());
       setOrDel(proj, 'local', String(f.local).trim());
-      setOrDel(proj, 'defaultBranch', String(f.defaultBranch).trim());
       setOrDel(proj, 'match', f.match, f.match && Object.keys(f.match).length > 0);
       // the dedicated `start` + `debug` fields fold back into tasks.start / tasks.debug; the map holds the rest
       const tasks = { ...(f.tasks || {}) };
@@ -3025,7 +3015,6 @@ async function configForm(flags, opts = {}) {
     const d = detectService(abs), got = [];
     if (!form.name) { form.name = pth.split(/[\\/]/).filter(Boolean).pop() || ''; if (form.name) got.push('name'); }
     if ((!form.type || form.type === 'other') && d.type) { form.type = d.type; got.push('type'); }
-    if (!form.runner && d.runner) { form.runner = d.runner; got.push('runner'); }
     if (!form.env && d.env) { form.env = d.env; got.push('env'); }
     if (!form.local && d.local) { form.local = d.local; got.push('local'); }
     if (d.start && !form.start) { form.start = d.start; got.push('start'); }
@@ -3204,10 +3193,10 @@ async function configForm(flags, opts = {}) {
               const kP = padP(clipP(k0, keyW), keyW);
               // col 0 = key (VAR for overrides; env is FIXED for match — shown cyan, not focusable)
               const c0 = (!isMatch && rowOn && !editing && ci === 0) ? rev(` ${kP} `) : (isMatch ? ` \x1b[36m${kP}\x1b[39m ` : ` ${kP} `);
-              // col 1 = value/host (clips — full value is visible when you ⏎ to edit it)
-              const v1 = isMatch ? (row.host || '(host)') : (row.value || '(value)');
+              // col 1 = value/host (clips — full value is visible when you ⏎ to edit it; empty = gray (none))
+              const rawV = isMatch ? row.host : row.value;
               const wpLen = isMatch ? 0 : (row.peer ? `when ${row.peer} local`.length : 6);
-              const vDisp = clipP(v1, Math.max(4, iw - keyW - wpLen - 8));
+              const vDisp = rawV ? clipP(rawV, Math.max(4, iw - keyW - wpLen - 8)) : `${DIM}(none)${UNDIM}`;
               const c1 = (rowOn && !editing && ci === 1) ? rev(` ${vDisp} `) : ` ${vDisp} `;
               let content = `${rowOn && !editing ? '▸' : ' '}${c0}${DIM}=${UNDIM}${c1}`;
               if (!isMatch) { const wp = row.peer ? `when ${row.peer} local` : 'always'; content += (rowOn && !editing && ci === 2) ? rev(` ${wp} `) : (row.peer ? ` \x1b[36m${wp}\x1b[39m` : ` ${DIM}${wp}${UNDIM}`); }
@@ -3498,13 +3487,11 @@ export function cmdCheck(flags) {
         }
       if (p.type != null && typeof p.type !== 'string') E(`${at}: 'type' must be a string`);
       else if (typeof p.type === 'string' && !SERVICE_TYPES.includes(p.type)) W(`${at}: unusual type '${p.type}' (known: ${SERVICE_TYPES.join(', ')})`);
-      if (p.runner != null && typeof p.runner !== 'string') E(`${at}: 'runner' must be a string`);
       if (p.tasks != null) {
         if (!isObj(p.tasks)) E(`${at}: 'tasks' must be an object`);
         else for (const [t, cmd] of Object.entries(p.tasks)) if (typeof cmd !== 'string') E(`${at}: task '${t}' command must be a string`);
       }
       if (p.env != null && typeof p.env !== 'string') E(`${at}: 'env' must be a string`);
-      if (p.defaultBranch != null && typeof p.defaultBranch !== 'string') E(`${at}: 'defaultBranch' must be a string`);
       if (p.local != null) {
         if (typeof p.local !== 'string') E(`${at}: 'local' must be a string`);
         else if (!originOf(p.local)) E(`${at}: 'local' must be an http(s) URL (got '${p.local}')`);
@@ -3526,7 +3513,7 @@ export function cmdCheck(flags) {
         if (!isStrArr(p.guards)) E(`${at}: 'guards' must be an array of strings`);
         else for (const g of p.guards) if (!guards[g]) E(`${at}: references undefined guard '${g}'`);
       }
-      const usesEnvfile = [p.runner, ...Object.values(isObj(p.tasks) ? p.tasks : {})].some((s) => typeof s === 'string' && s.includes('{envfile}'));
+      const usesEnvfile = [...Object.values(isObj(p.tasks) ? p.tasks : {})].some((s) => typeof s === 'string' && s.includes('{envfile}'));
       if (usesEnvfile && !p.env) E(`${at}: uses {envfile} but has no 'env' field`);
       if (isObj(p.match) && !Array.isArray(p.match) && Object.keys(p.match).length && !p.local) W(`${at}: has 'match' (a wiring target) but no 'local' — peers can't wire to it locally`);
     }

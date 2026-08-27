@@ -6,7 +6,7 @@ must {config editor}
 sleep 1
 send "l"
 sleep 1
-# runner is field #4 (index 3): name path type runner
+# start is field #4 (index 3): name path type start
 send "jjj"
 sleep 1
 send "\r"
@@ -20,13 +20,13 @@ send "j"
 sleep 1
 send "k"
 sleep 1
-# re-enter api — the unsaved "make {task}Z" must still be there
+# re-enter api — the unsaved "make runZ" must still be there
 send "l"
 sleep 1
-must {make .task.Z}
+must {make runZ}
 send "\033"
 send "\033"
 must {Unsaved changes}
 send "s"
 want_exit 0
-config_has {"make {task}Z"}
+config_has {"make runZ"}

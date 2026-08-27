@@ -6,7 +6,7 @@ must {config editor}
 sleep 1
 send "l"
 sleep 1
-send "jjjjjjjjjjjj"
+send "jjjjjjjjjj"
 send "\r"
 must {Environment overrides}
 sleep 1

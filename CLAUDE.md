@@ -197,10 +197,8 @@ beyond `{placeholder}` substitution.
   `{env}` (captured consistently across every occurrence, so `.envs/{env}`, `.envs/{env}-slug.env`,
   `.envs/.env.{env}`, and nested `../.envs/<app>/{env}/{env}-foo.env` monorepo layouts all enumerate
   their variants). No `env` (or a static path with no `{env}`) → the default `<dir>/.envs` scan (`envFilesFor`).
-- `defaultBranch` (optional, per service): the branch new work is cut from (repos differ —
-  `main`/`master`/`develop`/`trunk`). Pure metadata crew records/displays (`crew list` shows a
-  `branch` line); crew runs no git with it. Set it in `crew config` (the `branch` field of a service).
-- Task resolution per service: `tasks[task]` -> `runner` with `{task}` -> skip. `crew start` (`cmdStart`)
+- Task resolution per service: `tasks[task]` -> skip (the `runner` fallback + the `defaultBranch` metadata
+  key were both retired — legacy values auto-strip on load; see `migrate`). `crew start` (`cmdStart`)
   is the ONLY core run command — task `start`, plus its per-node `debug` variant; a service's OTHER `tasks`
   are just data with no core command yet (a future generic runner will funnel them). In `crew config`,
   `start` AND `debug` are **dedicated text fields** (stored as `tasks.start` / `tasks.debug`); the `tasks`
@@ -270,7 +268,7 @@ beyond `{placeholder}` substitution.
   a **folder picker** (`openFolderPick` — the subfolders of `servicesDir` via `serviceDirs()`, single-select,
   plus a `✎ type a path…` escape that drops to the inline editor). Picking a folder (or committing a typed
   path) for a NEW service runs `detectService(abs)` and prefills only the still-EMPTY fields — `name`
-  (basename), `type`/`runner`/`env`/`local`/`start` — from package.json / lockfiles / manifests /
+  (basename), `type`/`env`/`local`/`start` — from package.json / lockfiles / manifests /
   `.envs` / dev scripts. `match` (the deployed host) is deliberately NOT derived — the guess was too weak,
   so it's always filled by hand. Path-driven,
   not a separate "auto" mode: works with no `servicesDir` (type an absolute/`~` path via the escape) and for
@@ -316,7 +314,7 @@ beyond `{placeholder}` substitution.
   edit` (the `cmdGuards`/`cmdOverrides`/`guardList`/`overrideList`/`makePrompter`/`confirm`/`collectService`/
   `detectDefaultBranch` code was all deleted). The
   v1 `checks` key auto-migrates to `guards` on load; `projects`->`services` and `projectsDir`->`servicesDir`
-  renames migrate too; a legacy `longRunning` is stripped.
+  renames migrate too; legacy `longRunning` (top-level) and per-service `runner`/`defaultBranch` are stripped.
 - `workspaceSettings` (optional top-level object): written verbatim into the generated
   `.code-workspace` `settings` (e.g. `{"jest.enable": false}` to stop the Jest extension
   auto-running per folder). crew injects nothing by default. Edited in `crew config` → Settings (a `json` map).

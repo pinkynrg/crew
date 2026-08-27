@@ -21,4 +21,4 @@ send "\033"
 want_exit 0
 config_has {"webby"}
 config_has {"frontend"}
-config_has {"npm run {task}"}
+config_has {"vite --port 5173"}

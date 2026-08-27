@@ -4,7 +4,7 @@ must {config editor}
 sleep 1
 send "l"
 sleep 1
-send "jjjjjjjjjjjj"
+send "jjjjjjjjjj"
 sleep 1
 send "\r"
 must {AWS_PROFILE}
