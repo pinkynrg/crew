@@ -2379,24 +2379,32 @@ async function graphSelect(flags, cfg, opts = {}) {
   let ePanel = null, eNode = null, eLabelKey = null; // overrides checklist (built per node when `e` is pressed)
   let cursor = [...nodes].find((n) => shown.has(n)) || nodes[0];
   const panel = makeFilterPanel(nodes, { paint, title: 'Show nodes' }); // `f` overlays this on the graph's right
-  const remoteEnv = selEnv != null ? resolveEnvs(cfg, nodes, selEnv).resolved : new Map(); // where each service is deployed (crew resolve) — shown for the ones NOT run locally
+  // The [env] each service shows is derived over the SHOWN (in-scope) set, recomputed when the `f` filter
+  // changes it: within that set the normal role rules apply — a source entry runs at selEnv, a dependency
+  // inherits the env its consumer points at. So filtering to only sdk-frontend makes it the entry (pre),
+  // while keeping bee-orchestra in scope keeps its sdk-api at qa whether or not orchestra is toggled
+  // local/off. Independent of the active (run) selection; box widths stay fixed via remoteEnvFull below.
+  const remoteEnvFull = selEnv != null ? resolveEnvs(cfg, nodes, selEnv).resolved : new Map(); // full-graph pass — only to size the [env] field
   // Keep box widths STABLE across select/deselect. 'local' and a node's remote env differ in length, and
   // toggling one would change that box's width and reflow the whole (now order-sensitive) layout — nodes
   // would jump. sublabelWidth = the widest env label; the renderer pads every [env] field to it (spaces
   // OUTSIDE the tight brackets), so CW is identical for any active set -> geometry never moves on toggle.
-  const envW = selEnv == null ? 0 : Math.max('local'.length, 'debug'.length, (selEnv || '').length, ...[...remoteEnv.values()].map((v) => (v || '').length));
-  const draw = () => renderAsciiGraph(nodes.filter((n) => shown.has(n)), edges.filter((e) => shown.has(e.from) && shown.has(e.to) && (showRef || !e.ref)), {
+  const envW = selEnv == null ? 0 : Math.max('local'.length, 'debug'.length, (selEnv || '').length, ...[...remoteEnvFull.values()].map((v) => (v || '').length));
+  let envSig = null, remoteEnv = remoteEnvFull;
+  const refreshEnv = () => { if (selEnv == null) return; const scope = [...shown].sort(); const sig = scope.join(String.fromCharCode(10)); if (sig === envSig) return; envSig = sig; remoteEnv = resolveEnvs(cfg, scope, selEnv).resolved; };
+  refreshEnv();
+  const draw = () => { refreshEnv(); return renderAsciiGraph(nodes.filter((n) => shown.has(n)), edges.filter((e) => shown.has(e.from) && shown.has(e.to) && (showRef || !e.ref)), {
     colorOf: (n) => (active.has(n) ? prefix(n) : GRAY),                                          // running set keeps per-source colours; the rest grayed
     sublabel: selEnv != null ? (n) => (active.has(n) ? (debug.has(n) ? 'debug' : 'local') : (remoteEnv.get(n) || selEnv)) : undefined, // [debug] = local under a debugger; [local] = plain local; else the resolved remote env
     sublabelWidth: envW,                                                                        // fixed [env] field width -> box width stays put when the sublabel changes
     cursor, withLayout: true,
-  });
+  }); };
   return new Promise((resolve) => {
     const w = (x) => stdout.write(x);
     const wasRaw = stdin.isRaw;
     let top = 0, vpad = 0, layout = draw(); // vpad = current vertical centring offset
     const body = () => Math.max(3, (stdout.rows || 24) - 1); // reserve 1 row: the footer bar
-    const cleanup = () => { stdin.removeListener('data', onData); stdout.removeListener('resize', repaint); w('\x1b[?7h\x1b[?25h\x1b[?1049l'); if (stdin.setRawMode) stdin.setRawMode(wasRaw); stdin.pause(); };
+    const cleanup = () => { stdin.removeListener('data', onData); stdout.removeListener('resize', repaint); w('\x1b[?1000l\x1b[?1006l\x1b[?7h\x1b[?25h\x1b[?1049l'); if (stdin.setRawMode) stdin.setRawMode(wasRaw); stdin.pause(); };
     const cpw = (s) => [...s.replace(/\x1b\[[0-9;]*m/g, '')].length; // display width, ANSI-stripped
     const repaint = () => {
       const R = body(), cols = stdout.columns || 80, lines = layout.text.split('\n');
@@ -2432,8 +2440,11 @@ async function graphSelect(flags, cfg, opts = {}) {
     // Handle ONE key. Returns true once the selector has resolved (so onData stops feeding the rest of a
     // coalesced chunk — e.g. Enter then esc arriving as one read must apply the filter AND still act).
     const handleKey = (key) => {
-      // Mouse is not used in the selector — reporting is never enabled (below), so no SGR sequences arrive.
-      // Node enable/disable + scrolling are keyboard-only (space / ↑↓←→).
+      // Mouse reporting is enabled (below) ONLY to CAPTURE wheel/clicks so the terminal's own scrollback
+      // doesn't move under the alt-screen view (exposing pre-run scrollback). We consume every mouse event:
+      // the wheel scrolls the GRAPH (not the terminal); clicks/motion are swallowed. No click-to-select.
+      const m = key.match(/\x1b\[<(\d+);\d+;\d+[Mm]/);
+      if (m) { const btn = +m[1]; if (btn === 64) { top -= 3; repaint(); } else if (btn === 65) { top += 3; repaint(); } return false; }
       if (panel.active) { // filter panel owns keys while open: space previews live, Enter confirms + persists, esc/q revert
         const r = panel.key(key);
         if (r === 'change') previewShown([...panel.selected]);                           // graph updates on every toggle (no persist yet)
@@ -2481,7 +2492,7 @@ async function graphSelect(flags, cfg, opts = {}) {
     const onData = (buf) => { for (const key of splitKeys(buf.toString())) if (handleKey(key)) return; };
     if (stdin.setRawMode) stdin.setRawMode(true);
     stdin.resume();
-    w('\x1b[?1049h\x1b[?25l\x1b[?7l'); // alt screen + hide cursor + no-wrap (no mouse reporting — selector is keyboard-only)
+    w('\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1006h'); // alt screen + hide cursor + no-wrap + SGR mouse reporting (captured to block terminal scrollback)
     stdin.on('data', onData); stdout.on('resize', repaint);
     repaint();
   });

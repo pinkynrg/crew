@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "services": {
+    "a": {
+      "path": "a",
+      "type": "frontend",
+      "env": ".envs/{env}.env",
+      "match": {
+        "pre": "a.pre.x"
+      }
+    },
+    "b": {
+      "path": "b",
+      "type": "frontend",
+      "env": ".envs/{env}.env",
+      "match": {
+        "qa": "b.qa.x",
+        "pre": "b.pre.x"
+      }
+    }
+  },
+  "workspaceName": "crew"
+}

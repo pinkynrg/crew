@@ -1,7 +1,11 @@
 # Shared expect helpers for crew's E2E. Sourced by each cases/*.exp.
 # Every case runs the crew BINARY ($CREW) in a real PTY against a throwaway fixture ($CONFIG), so the
 # suite is black-box + portable: a port to another language just sets CREW=./its-binary.
-set timeout 15
+set timeout 25
+# Give every case a consistent, ample PTY. CI runners often spawn with a tiny/zero default size, which
+# clips the alt-screen views (e.g. a config-editor sub-editor renders off-screen) and reads as a spurious
+# timeout. A case that needs a specific size just sets its own `stty_init` after sourcing this.
+set stty_init "rows 40 cols 120"
 set CREWBIN [split $env(CREW)]
 
 # spawn `crew --config <fixture> <args...>` in the PTY (global spawn_id so must/want_exit see it)
