@@ -36,7 +36,7 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
   const subField = (c) => { const s = sublabel(c); if (!s) return ''; const tok = '[' + s + ']', t = Math.max(0, (subW + 2) - tok.length), l = t >> 1; return ' ' + ' '.repeat(l) + tok + ' '.repeat(t - l); };
   const boxLabel = (c) => (sel ? (c === cursor ? '▸ ' : '  ') : '') + c + subField(c); // env is any string the caller gives; the [brackets] are ours
   const NODES = [...new Set(nodes)];
-  if (!NODES.length) return '';
+  if (!NODES.length) return opts.withLayout ? { text: '', layers: [], place: new Map(), height: 0 } : ''; // keep the {text,…} shape for interactive callers (empty filter -> blank graph, not a crash)
   const has = new Set(NODES);
   edges = (edges || []).filter((e) => has.has(e.from) && has.has(e.to) && e.from !== e.to);
 

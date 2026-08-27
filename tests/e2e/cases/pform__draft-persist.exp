@@ -25,6 +25,7 @@ send "l"
 sleep 1
 must {make .task.Z}
 send "\033"
+send "\033"
 must {Unsaved changes}
 send "s"
 want_exit 0

@@ -13,6 +13,7 @@ send "Z"
 send "\r"
 sleep 1
 send "\033"
+send "\033"
 must {Unsaved changes}
 sleep 1
 send "s"

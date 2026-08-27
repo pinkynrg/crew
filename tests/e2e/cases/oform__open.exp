@@ -8,4 +8,5 @@ sleep 1
 must {Environment Overrides}
 must {AWS_PROFILE}
 send "\033"
+send "\033"
 want_exit 0

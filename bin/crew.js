@@ -2414,8 +2414,8 @@ async function graphSelect(flags, cfg, opts = {}) {
       layout = draw();
     };
     const restoreSnap = () => { if (!snap) return; shown = new Set(snap.shown); active = new Set(snap.active); debug = new Set(snap.debug); cursor = snap.cursor; layout = draw(); };
-    const moveH = (d) => { const p = layout.place.get(cursor), list = layout.layers[p.layer], i = list.indexOf(cursor); cursor = list[Math.max(0, Math.min(list.length - 1, i + d))]; };
-    const moveV = (d) => { let l = layout.place.get(cursor).layer + d; while (l >= 0 && l < layout.layers.length && !layout.layers[l].length) l += d; if (l < 0 || l >= layout.layers.length || !layout.layers[l].length) return; const cx = layout.place.get(cursor).cx; let best = layout.layers[l][0], bd = Infinity; for (const n of layout.layers[l]) { const dd = Math.abs(layout.place.get(n).cx - cx); if (dd < bd) { bd = dd; best = n; } } cursor = best; };
+    const moveH = (d) => { const p = layout.place.get(cursor); if (!p) return; const list = layout.layers[p.layer], i = list.indexOf(cursor); cursor = list[Math.max(0, Math.min(list.length - 1, i + d))]; }; // no-op when the graph is empty (everything filtered out)
+    const moveV = (d) => { const p0 = layout.place.get(cursor); if (!p0) return; let l = p0.layer + d; while (l >= 0 && l < layout.layers.length && !layout.layers[l].length) l += d; if (l < 0 || l >= layout.layers.length || !layout.layers[l].length) return; const cx = p0.cx; let best = layout.layers[l][0], bd = Infinity; for (const n of layout.layers[l]) { const dd = Math.abs(layout.place.get(n).cx - cx); if (dd < bd) { bd = dd; best = n; } } cursor = best; };
     const hitTest = (col, row) => { // SGR 1-based screen (col,row) -> node whose box contains it, else null
       const gx = col - 1 - mxw, gy = top + (row - 1 - vpad);
       for (const n of nodes) { const p = layout.place.get(n); if (p && gx >= p.x0 && gx < p.x0 + p.w && gy >= p.y0 && gy < p.y0 + p.h) return n; }
@@ -2803,6 +2803,10 @@ async function configForm(flags, opts = {}) {
   const setOrDel = (o, key, v, keep) => { if (keep == null ? !!v : keep) o[key] = v; else delete o[key]; };
   const usersOf = (n) => Object.entries(cfg.projects).filter(([, p]) => (p.guards || []).includes(n)).map(([pn]) => pn);
   const machine = loadMachine(flags);              // projectsDir + UI prefs still live in local.json
+  // Apply a projectsDir edit to the WHOLE session immediately (working-copy model): update the in-memory
+  // machine + the module-global PROJECTS_DIR so every project's path check / folder picker / match-labels
+  // reflects it right away. Disk (local.json) is still only written on save.
+  const syncProjectsDir = (v) => { const pd = String(v).trim(); if (pd) machine.projectsDir = pd; else delete machine.projectsDir; PROJECTS_DIR = pd ? resolvePath(pd) : null; };
   // Env overrides now live in the committable config.json (no secrets) — edited as the per-project block.
   cfg.overrides = isObj(cfg.overrides) ? cfg.overrides : {};
   const overrides = cfg.overrides;
@@ -2915,8 +2919,7 @@ async function configForm(flags, opts = {}) {
       setOrDel(cfg, 'longRunning', f.longRunning, Array.isArray(f.longRunning) && f.longRunning.length > 0);
       setOrDel(cfg, 'workspaceSettings', jsonParseVals(f.workspaceSettings), f.workspaceSettings && Object.keys(f.workspaceSettings).length > 0);
       persist();
-      const pd = String(f.projectsDir).trim();
-      if (pd) machine.projectsDir = pd; else delete machine.projectsDir;
+      syncProjectsDir(f.projectsDir);   // in-memory + PROJECTS_DIR (idempotent with the live edit)
       writeMachine(flags, machine);
       return null;
     },
@@ -3095,19 +3098,23 @@ async function configForm(flags, opts = {}) {
             const title = isMatch ? `match  ${DIM}· env-labeled hosts (keys from env files)${UNDIM}` : fld.groupTitle;
             const titleFocused = on && !editingRows && !editing;
             Rn.push(titleFocused ? rev(`  ${title.replace(/\x1b\[[0-9;]*m/g, '')}  ⏎ edit `) : `  ${DIM}${title}${UNDIM}`);
-            const keyW = Math.min(20, Math.max(3, ...rows.map((r) => [...String((isMatch ? r.env : r.var) || '(VAR)')].length)));
+            // Key column shows the FULL key (env vars are long) — sized to the actual pane width, capped only
+            // enough to leave the value some room. Value clips (full value is visible when you ⏎ to edit it).
+            const keyW = Math.min(Math.max(3, RW - 14), Math.max(3, ...rows.map((r) => [...String((isMatch ? r.env : r.var) || '(VAR)')].length)));
             if (!rows.length) Rn.push(isMatch ? `    ${DIM}(no env files found — set env / create them)${UNDIM}` : `    ${DIM}(none)${UNDIM}`);
             rows.forEach((row, ri) => {
               const rowOn = editingRows && ovEdit.ri === ri, ci = editingRows ? ovEdit.ci : -1;
+              // While editing a cell, give it the WHOLE row (no cramped column) so a long VAR/value stays visible as you type.
+              if (editing && rowOn && editTarget === 'ovVar') { Rn.push(`  ▸ ${DIM}VAR${UNDIM} ${editCell(Math.max(8, RW - 8))}`); return; }
+              if (editing && rowOn && (editTarget === 'ovVal' || editTarget === 'meHost')) { Rn.push(`  ▸ ${DIM}${isMatch ? 'host' : 'value'}${UNDIM} ${editCell(Math.max(8, RW - 10))}`); return; }
               const k0 = isMatch ? (row.env || '') : (row.var || '(VAR)');
               const kP = padP(clipP(k0, keyW), keyW);
-              // col 0 = key (VAR editable for overrides; env is FIXED for match — shown cyan, not focusable)
-              const c0 = (!isMatch && editing && rowOn && editTarget === 'ovVar') ? padP(editCell(keyW), keyW)
-                : (!isMatch && rowOn && !editing && ci === 0) ? rev(` ${kP} `)
-                : isMatch ? ` \x1b[36m${kP}\x1b[39m ` : ` ${kP} `;
-              // col 1 = value/host
+              // col 0 = key (VAR for overrides; env is FIXED for match — shown cyan, not focusable)
+              const c0 = (!isMatch && rowOn && !editing && ci === 0) ? rev(` ${kP} `) : (isMatch ? ` \x1b[36m${kP}\x1b[39m ` : ` ${kP} `);
+              // col 1 = value/host (clips — full value is visible when you ⏎ to edit it)
               const v1 = isMatch ? (row.host || '(host)') : (row.value || '(value)');
-              const vDisp = (editing && rowOn && (editTarget === 'ovVal' || editTarget === 'meHost')) ? editCell(Math.max(8, vW - keyW - 8)) : clipP(v1, Math.max(8, vW - keyW - 20));
+              const wpLen = isMatch ? 0 : (row.peer ? `when ${row.peer} local`.length : 6);
+              const vDisp = clipP(v1, Math.max(4, RW - keyW - wpLen - 10));
               const c1 = (rowOn && !editing && ci === 1) ? rev(` ${vDisp} `) : ` ${vDisp} `;
               let line = `  ${rowOn && !editing ? '▸' : ' '}${c0}${DIM}=${UNDIM}${c1}`;
               if (!isMatch) { const wp = row.peer ? `when ${row.peer} local` : 'always'; line += (rowOn && !editing && ci === 2) ? rev(` ${wp} `) : (row.peer ? ` \x1b[36m${wp}\x1b[39m` : ` ${DIM}${wp}${UNDIM}`); }
@@ -3142,8 +3149,8 @@ async function configForm(flags, opts = {}) {
       else if (editing) parts = ['type', '←→ move', '⌥← word', '⏎ commit', 'esc cancel'];
       else if (mapEdit) parts = ['↑↓ row', '⏎ edit', 'd remove', 'esc done'];
       else if (ovEdit) parts = ovEdit.field.kind === 'match' ? ['↑↓ row', '⏎ edit host', 'esc done'] : ['↑↓ row', '←→ col', '⏎ edit', 'd remove', 'esc done'];
-      else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', '→ fields', 'esc quit'];
-      else { const fld = s.fields[fi]; const eh = (fld.key === 'path' && s.key === 'projects') ? '⏎ pick folder' : fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'list' || fld.kind === 'map' ? '⏎ rows' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew || s.fixed ? [] : ['d delete']), '← list', 'esc quit'].filter(Boolean); }
+      else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', 'esc quit'];
+      else { const fld = s.fields[fi]; const eh = (fld.key === 'path' && s.key === 'projects') ? '⏎ pick folder' : fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'list' || fld.kind === 'map' ? '⏎ rows' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew || s.fixed ? [] : ['d delete']), 'esc ← list'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
       out += '\x1b[K' + footerBar(footerText(parts), C);
       // ---- modal overlay (roomy, perfectly-centered box; captures all keys until a choice runs) ----
@@ -3196,7 +3203,7 @@ async function configForm(flags, opts = {}) {
           else if (editTarget === 'ovVar') { ovEdit.rows[ovEdit.ri].var = buf.trim(); editing = false; editTarget = null; dirty = true; } // override VAR cell
           else if (editTarget === 'ovVal') { ovEdit.rows[ovEdit.ri].value = buf; editing = false; editTarget = null; dirty = true; } // override value cell
           else if (editTarget === 'meHost') { ovEdit.rows[ovEdit.ri].host = buf; editing = false; editTarget = null; dirty = true; } // match host cell
-          else { const fk = secOf().fields[fi].key; form[fk] = buf; editing = false; dirty = true; if (fk === 'path') maybeDetect(); } // committing a new project's path auto-fills the blanks
+          else { const fk = secOf().fields[fi].key; form[fk] = buf; editing = false; dirty = true; if (fk === 'path') maybeDetect(); else if (fk === 'projectsDir') syncProjectsDir(buf); } // path -> auto-fill; projectsDir -> live-apply in-session (see syncProjectsDir)
         }
         else if (k === '\x1b') { editing = false; editTarget = null; }                                       // bare esc cancels the edit
         else if (k === '\x1b[D') caret = Math.max(0, caret - 1);                                             // ← left
@@ -3256,11 +3263,14 @@ async function configForm(flags, opts = {}) {
         repaint(); return false;
       }
       if (k === '\x03') return quit();                                          // Ctrl-C force-quits (even with unsaved edits)
-      if (k === '\x1b') { stashDraft(); if (drafts.size) { openUnsaved(); repaint(); return false; } return quit(); } // esc: prompt if ANY item has unsaved edits
+      if (k === '\x1b') { // esc is level-by-level: right pane -> back to the list; list -> quit (prompt if unsaved)
+        if (focus === 'right') { focus = 'left'; repaint(); return false; } // form field -> the item list (edits stay in memory)
+        stashDraft(); if (drafts.size) { openUnsaved(); repaint(); return false; } return quit();
+      }
       if (focus === 'left') {
         if (k === 'k' || k === '\x1b[A') { stashDraft(); li = Math.max(0, li - 1); loadForm(); }
         else if (k === 'j' || k === '\x1b[B') { stashDraft(); li = Math.min(sel.length - 1, li + 1); loadForm(); }
-        else if (k === '\r' || k === '\n' || k === 'l' || k === '\x1b[C' || k === '\t') openItem();
+        else if (k === '\r' || k === '\n' || k === 'l' || k === '\t') openItem();       // enter/l/tab open the item; ←/→ are reserved for caret + overrides-column nav (no pane jump)
         else if (k === 'n') { const si = sel[li].si; if (!sections[si].fixed) { stashDraft(); const at = sel.findIndex((x) => x.si === si && x.name == null); li = at >= 0 ? at : li; loadForm(); focus = 'right'; fi = 0; } } // fixed sections (Settings) have no create
         else if (k === 'd') { if (sel[li].name != null && !secOf().fixed) openDelete(sel[li].name); } // ...and no delete
         else return false;
@@ -3282,7 +3292,7 @@ async function configForm(flags, opts = {}) {
       }
       else if (k === 's') doSave();
       else if (k === 'd') { if (!form.isNew && !secOf().fixed) openDelete(form.orig); }
-      else if (k === 'h' || k === '\x1b[D' || k === '\t') focus = 'left';       // back to the list (esc quits the whole form)
+      else if (k === 'h' || k === '\t') focus = 'left';       // h/tab (or esc) go back to the list; ←/→ stay reserved for caret + overrides columns
       else return false;
       repaint(); return false;
     };

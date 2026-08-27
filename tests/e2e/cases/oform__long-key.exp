@@ -1,25 +1,24 @@
+# a long VAR must be fully visible both while typing (full-width edit) and after confirm (not clipped)
 source tests/e2e/lib.exp
+set stty_init "rows 24 cols 110"
 crun config
 must {config editor}
 sleep 1
 send "l"
 sleep 1
 send "jjjjjjjjjj"
-sleep 1
 send "\r"
 must {Environment Overrides}
 sleep 1
-# to the "+ add override" row (2 existing rows), append + type the VAR
 send "jj"
-sleep 1
 send "\r"
-send "DEBUG"
+send "REACT_APP_BEEPLUGIN_LOADER_URL"
 send "\r"
 sleep 1
-# move to the value column, edit it
+must {REACT_APP_BEEPLUGIN_LOADER_URL}
 send "l"
 send "\r"
-send "1"
+send "localhost8088"
 send "\r"
 sleep 1
 send "\033"
@@ -29,5 +28,4 @@ must {saved}
 send "\033"
 send "\033"
 want_exit 0
-config_has {"DEBUG"}
-config_has {"QUEUE"}
+config_has {"REACT_APP_BEEPLUGIN_LOADER_URL"}

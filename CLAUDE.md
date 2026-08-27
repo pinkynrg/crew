@@ -258,7 +258,10 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `drafts` Map (keyed by section+item, a NEW item uses a sentinel slot) holds every edited-but-unsaved form —
   `stashDraft` parks the current form before any navigation and `loadForm` returns the SAME draft ref if one
   exists, so edits to ANY item survive leaving and returning (nothing rolls back until you save or discard).
-  Nothing is written to disk until `s` (that item) or **save all** on exit. `esc` `stashDraft`s then, if
+  Nothing is written to disk until `s` (that item) or **save all** on exit. **`esc` is level-by-level**: in
+  the RIGHT pane (a field / editing a cell / a sub-editor) it steps back one level — cell-edit → field →
+  the item LIST — never quitting the editor from the right; only from the LEFT list does `esc` quit. So the
+  full climb out is edit → `esc` field → `esc` list → `esc` quit. When it does quit, `esc` `stashDraft`s then, if
   `drafts.size`, opens the **`modal`** — a reusable centered-box prompt
   (`{title, lines, choices:[{keys, label, run()->doneBool}]}`) that captures every key until a choice runs:
   here `s` **save all** & exit (`saveAll` validates each draft, jumping to the first offender) / `d` **discard

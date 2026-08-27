@@ -12,4 +12,5 @@ sleep 1
 send "\033"
 sleep 1
 send "\033"
+send "\033"
 want_exit 0

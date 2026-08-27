@@ -20,6 +20,7 @@ send "s"
 must {saved}
 sleep 1
 send "\033"
+send "\033"
 want_exit 0
 config_has {"apix"}
 config_hasnt {"api":}

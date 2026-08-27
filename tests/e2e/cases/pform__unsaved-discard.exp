@@ -13,6 +13,7 @@ send "Z"
 send "\r"
 sleep 1
 send "\033"
+send "\033"
 must {discard all & exit}
 sleep 1
 send "d"

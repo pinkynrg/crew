@@ -1,0 +1,13 @@
+# esc is level-by-level: right pane -> back to the list (NOT quit); list -> quit.
+source tests/e2e/lib.exp
+crun config
+must {config editor}
+sleep 1
+send "l"
+sleep 1
+must {esc ← list}
+send "\033"
+sleep 1
+must {n new}
+send "\033"
+want_exit 0
