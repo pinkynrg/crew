@@ -550,14 +550,14 @@ export function saveGraphShown(flags, names) {
 // Order: state -> how to move -> what to toggle (f/r together) -> action -> exit. Count turns RED when
 // not all nodes are shown/selected. `scroll` (pager, only when the graph overflows) and `warn` (select,
 // e.g. "not connected") are optional. Returns the inner bar text; the caller adds the reverse-video + pad.
-function graphFooter({ mode, total, sel, vis, shown, hasRef, showRef, warn = '', scroll = '', dbg = false, env = false }) {
+function graphFooter({ mode, total, sel, vis, shown, hasRef, showRef, scroll = '', dbg = false, env = false }) {
   const red = (n, d) => (n < d ? `\x1b[31m${n}/${d}\x1b[39m` : `${n}/${d}`); // red when partial; 39m keeps the reverse bar (not a full reset)
   const parts = [];
   if (mode === 'select') { // selector shows TWO counts: `sel` = picked-to-run, `shown` = visible after the f-filter
-    parts.push(`${sel}/${total} sel · ${red(vis, total)} shown${warn ? ` ${warn}` : ''}`);
+    parts.push(`${sel}/${total} sel · ${red(vis, total)} shown`); // the "not connected" warning is a top-right badge, not here
     parts.push('↑↓←→ move', 'space pick', ...(dbg ? ['d debug'] : []), ...(env ? ['e env'] : []), 'a all'); // d/e only when the focused node is local + has a debug task / overrides
   } else {
-    parts.push(red(shown, total) + ' shown' + (warn ? ` ${warn}` : ''));
+    parts.push(red(shown, total) + ' shown');
     if (scroll) parts.push(scroll);
   }
   parts.push('f filter');
@@ -2418,8 +2418,16 @@ async function graphSelect(flags, cfg, opts = {}) {
       let out = '\x1b[H';
       for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + shade(li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
       const split = cpw(connectivityStatus(cfg, depEdges, [...active], false)) > 0; // non-verbose returns islands text only when disconnected
-      const bar = graphFooter({ mode: 'select', total: nodes.length, sel: active.size, vis: shown.size, hasRef, showRef, warn: split ? '⚠ not connected' : '', dbg: active.has(cursor) && canDebug(cursor), env: canEnv(cursor) });
+      const bar = graphFooter({ mode: 'select', total: nodes.length, sel: active.size, vis: shown.size, hasRef, showRef, dbg: active.has(cursor) && canDebug(cursor), env: canEnv(cursor) });
       out += '\x1b[K' + shade(footerBar(bar, cols)); // one full-width reverse-video footer (shared with the pager + guards editor)
+      // "not connected" as a YELLOW badge pinned top-right (not the bottom bar; yellow, not red). Hidden under a modal.
+      if (split && !modal) {
+        const YL = '\x1b[33m', RS = '\x1b[39m', txt = ' ⚠ not all local nodes are connected ', bw = [...txt].length;
+        const col = Math.max(1, cols - bw - 1);
+        out += `\x1b[1;${col}H${YL}┌${'─'.repeat(bw)}┐${RS}`;
+        out += `\x1b[2;${col}H${YL}│${RS}${txt}${YL}│${RS}`;
+        out += `\x1b[3;${col}H${YL}└${'─'.repeat(bw)}┘${RS}`;
+      }
       if (modal) { // centered box over the dimmed backdrop (bright)
         const pr = modal.rows(R), w = modal.width, mtop = Math.max(1, ((R - pr.length) >> 1) + 1), col = Math.max(1, ((cols - w) >> 1) + 1);
         for (let i = 0; i < pr.length && mtop + i <= R; i++) out += `\x1b[${mtop + i};${col}H` + pr[i];
