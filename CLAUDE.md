@@ -73,7 +73,8 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   (projects/guards, relative paths) is directly committable; a legacy `projectsDir`
   in `config.json` auto-migrates to `local.json` on load. `local.json` reads from beside
   the resolved config (works with `--config`); gitignore it when committing. `local.json`
-  also holds `lastSelection` (the remembered picker selection) + UI prefs (`graphRefs`/`graphShown`/
+  also holds `lastSelection` (the remembered picker selection) + `lastDebug` (the remembered debug set,
+  below) + UI prefs (`graphRefs`/`graphShown`/
   `logWrap`/`hiddenLog`). (`overrides` USED to live here; it moved into the committable `config.json` —
   a legacy `local.json.overrides` auto-migrates up on load, see below.)
 - **Missing-folder gate** (NON-blocking): the folder-consuming commands (`start`/`workspace`/`claude`/
@@ -185,6 +186,18 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `main`/`master`/`develop`/`trunk`). Pure metadata crew records/displays (`crew list` shows a
   `branch` line); crew runs no git with it. Set it in `crew config` (the `branch` field of a project).
 - Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip.
+- **Per-node debug toggle** (`crew start` only): in the graph selector, `d` flips the focused node into
+  debug mode — it launches `tasks.debug` instead of `tasks.start`. Only offered when the node is running
+  locally (ON) AND has a `tasks.debug` (`canDebug`); the `d` hint + `[debug]` box sublabel appear only
+  then. It's a per-member override: `membersFor(cfg, picked, debug)` tags those members `task:'debug'`,
+  and `resolveRun` uses each member's own task (`m.task || task`), so a mixed slice runs some `start` and
+  some `debug` in one `crew start` (same viewer/wiring/guards — debug is NOT a separate command). debug ⊂
+  the run selection (deselecting/hiding a node clears its debug flag); the set is remembered in
+  `local.json.lastDebug`. Gated by `opts.debugToggle` so it's start-only — the shared selector shows
+  nothing debug-related for `workspace`/`claude` (which don't run tasks) and never clobbers `lastDebug`.
+  Each project owns its debugger command + port (`node --inspect=:9230 …`, `python -m debugpy …`, `next
+  dev`), so it's language-agnostic. NOTE: the toggle is graph-only — the `--list` flat picker runs plain
+  `start` (a reason to consider retiring `--list`).
 - `guards`: top-level `guards: {name: {comment, command, message}}` registry; a project lists
   names in `project.guards` (many-to-many). `comment` is required and states what the check
   verifies — it's printed in faint gray beside each result when guards run. Before a run, the
@@ -299,6 +312,14 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   the region + leaves the alternate screen. No-op when piped/CI (`viewer` stays null).
 
 ## Testing
+
+**New behavior ⇒ new test — always, unprompted.** Every new command/flag/config field/interactive
+affordance (a selector key, a picker, a footer state) SHIPS WITH a `tests/e2e` case in the same change,
+and a `tests/snapshots` golden if it alters a graph render. A feature without a test is not done — add a
+fixture under `tests/e2e/fixtures/<fx>/` + a `cases/<fx>__<scenario>.exp` that drives it in the PTY and
+asserts the observable result (not internals). Adding a config field also means updating
+`TOP_KEYS`/`PROJECT_KEYS`/`GUARD_KEYS` + `cmdCheck` + `pruneConfig`. Run the full suite (`npm test`) and
+keep it green before calling anything finished.
 
 No unit-test framework. Two suites, both run by `npm test`:
 - `tests/snapshot.mjs` — the graph renderer (imports `bin/graph.js`; golden mono renders).

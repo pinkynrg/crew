@@ -1,0 +1,4 @@
+{ "version": 2, "longRunning": ["start"],
+  "projects": {
+    "svc": { "path": "svc", "type": "backend",
+             "tasks": { "start": "echo NORMALMODE; sleep 2", "debug": "echo DEBUGMODE; sleep 2" } } } }

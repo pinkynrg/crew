@@ -437,15 +437,22 @@ export function loadMerged(flags) {
 // ---------------------------------------------------------------------------
 // Selection helpers — resolve names to members, remember the last picked set.
 // ---------------------------------------------------------------------------
-export function membersFor(cfg, names) {
+export function membersFor(cfg, names, debug = []) {
   const known = Object.keys(cfg.projects || {});
   const missing = names.filter((n) => !cfg.projects[n]);
   if (missing.length)
     fail(
       `unknown project(s): ${missing.join(', ')}.\n` +
-        `  projects: ${known.join(', ') || '(none) — run: crew add'}`
+        `  projects: ${known.join(', ') || '(none) — run: crew config'}`
     );
-  return names.map((n) => ({ name: n, project: cfg.projects[n] }));
+  const dbg = new Set(debug);
+  // A member launches `tasks.debug` (not `tasks.start`) only when it was debug-toggled AND actually has a
+  // debug task. `task` is left UNSET otherwise, so resolveRun falls back to the command's own task (start/install).
+  return names.map((n) => {
+    const project = cfg.projects[n];
+    const useDebug = dbg.has(n) && project.tasks && project.tasks.debug != null;
+    return useDebug ? { name: n, project, task: 'debug' } : { name: n, project };
+  });
 }
 
 // The remembered selection is global (shared by start/workspace/claude/run) and machine-
@@ -459,6 +466,19 @@ export function saveLastSelection(flags, names) {
     writeMachine(flags, { ...loadMachine(flags), lastSelection: names });
   } catch {
     /* read-only fs — selection just won't persist */
+  }
+}
+// Remembered per-project DEBUG set (machine-local) — which picked projects launch their `tasks.debug`
+// instead of `tasks.start`. Toggled with `d` in the graph selector; a subset of the run selection.
+export function loadLastDebug(flags) {
+  const d = loadMachine(flags).lastDebug;
+  return Array.isArray(d) ? d : [];
+}
+export function saveLastDebug(flags, names) {
+  try {
+    writeMachine(flags, { ...loadMachine(flags), lastDebug: names });
+  } catch {
+    /* read-only fs — preference just won't persist */
   }
 }
 
@@ -509,12 +529,12 @@ export function saveGraphShown(flags, names) {
 // Order: state -> how to move -> what to toggle (f/r together) -> action -> exit. Count turns RED when
 // not all nodes are shown/selected. `scroll` (pager, only when the graph overflows) and `warn` (select,
 // e.g. "not connected") are optional. Returns the inner bar text; the caller adds the reverse-video + pad.
-function graphFooter({ mode, total, sel, vis, shown, hasRef, showRef, warn = '', scroll = '' }) {
+function graphFooter({ mode, total, sel, vis, shown, hasRef, showRef, warn = '', scroll = '', dbg = false }) {
   const red = (n, d) => (n < d ? `\x1b[31m${n}/${d}\x1b[39m` : `${n}/${d}`); // red when partial; 39m keeps the reverse bar (not a full reset)
   const parts = [];
   if (mode === 'select') { // selector shows TWO counts: `sel` = picked-to-run, `shown` = visible after the f-filter
     parts.push(`${sel}/${total} sel · ${red(vis, total)} shown${warn ? ` ${warn}` : ''}`);
-    parts.push('↑↓←→ move', 'space pick', 'a all');
+    parts.push('↑↓←→ move', 'space pick', ...(dbg ? ['d debug'] : []), 'a all'); // `d` only when the focused node is local + has a debug task
   } else {
     parts.push(red(shown, total) + ' shown' + (warn ? ` ${warn}` : ''));
     if (scroll) parts.push(scroll);
@@ -763,14 +783,15 @@ export function resolveRun(cfg, task, members, args) {
   const runnable = [];
   const skipped = [];
   for (const m of members) {
+    const t = m.task || task; // a member can override the task (e.g. 'debug' from the selector); else the command's task
     let template;
-    if (m.project.tasks && m.project.tasks[task] != null) template = m.project.tasks[task];
+    if (m.project.tasks && m.project.tasks[t] != null) template = m.project.tasks[t];
     else if (m.project.runner) template = m.project.runner;
     else {
       skipped.push(m.name);
       continue;
     }
-    runnable.push({ name: m.name, project: m.project, template });
+    runnable.push({ name: m.name, project: m.project, template, task: t });
   }
   if (runnable.length === 0)
     fail(`no project in target can run task '${task}' (all run-less for this task)`);
@@ -822,7 +843,7 @@ export function resolveRun(cfg, task, members, args) {
   const unresolved = new Set();
   for (const r of runnable) {
     const env = derived.resolved.get(r.name);
-    r._values = env == null ? { ...values } : { ...values, env };
+    r._values = env == null ? { ...values, task: r.task } : { ...values, env, task: r.task }; // {task} resolves per-member (start/debug)
     for (const p of placeholdersIn(r.template))
       if (!RESERVED.has(p) && !(p in r._values)) unresolved.add(p);
     // Only the env-file path needs its placeholders resolved when the command actually sources
@@ -1995,12 +2016,15 @@ export async function selectMembers(flags, cfg, opts = {}) {
   if (!known.length) fail('no projects configured yet — run: crew config');
   if (!canInteractive()) fail('crew needs an interactive terminal to pick projects');
   // Default: pick on the dependency graph itself. `--list` forces the flat multiselect below.
+  // NOTE: the per-node `d` debug toggle is graph-only; `--list` runs everything on `start`.
+  // TODO: consider dropping `--list` entirely — the graph selector is the one true picker now.
   if (!flags.list) {
-    const picked = await graphSelect(flags, cfg, { selEnv: opts.selEnv });
-    if (picked !== undefined) { // ran (confirm or cancel); undefined only if it couldn't (non-TTY) -> fall through
-      if (!picked || !picked.length) { console.log(c.dim('nothing selected')); return null; }
-      saveLastSelection(flags, picked);
-      return membersFor(cfg, picked);
+    const res = await graphSelect(flags, cfg, { selEnv: opts.selEnv, debugToggle: opts.debugToggle });
+    if (res !== undefined) { // ran (confirm or cancel); undefined only if it couldn't (non-TTY) -> fall through
+      if (!res || !res.picked || !res.picked.length) { console.log(c.dim('nothing selected')); return null; }
+      saveLastSelection(flags, res.picked);
+      if (opts.debugToggle) saveLastDebug(flags, res.debug || []); // don't clobber the remembered debug set from workspace/claude runs
+      return membersFor(cfg, res.picked, res.debug || []);
     }
   }
   const paint = projectColors(cfg);
@@ -2058,7 +2082,7 @@ export async function cmdRun(flags, task, rest) {
     // start must know the base env unselected projects point at (drives the {env} chain + wiring);
     // require it up front and fail fast, rather than prompting after the picker.
     if (task === 'start' && !envArg) fail('crew start needs an environment (what unselected projects point at) — e.g. crew start env=pre');
-    members = await selectMembers(flags, cfg, { connectivity: isLong, selEnv: envArg ? envArg.slice(4) : undefined });
+    members = await selectMembers(flags, cfg, { connectivity: isLong, selEnv: envArg ? envArg.slice(4) : undefined, debugToggle: task === 'start' }); // per-node `d` debug toggle: start only
   }
   if (!members) return;
   validateMemberPaths(members);
@@ -2339,6 +2363,10 @@ async function graphSelect(flags, cfg, opts = {}) {
   let shown = new Set((loadGraphShown(flags) || nodes).filter((n) => nodes.includes(n))); // visible set (f-filter), persisted + shared with `crew graph`
   if (!shown.size) shown = new Set(nodes);
   for (const n of [...active]) if (!shown.has(n)) active.delete(n); // a hidden node can't be run
+  const debugToggle = !!opts.debugToggle; // per-node debug is a `start` concept only (workspace/claude share this picker)
+  const canDebug = (n) => { const t = cfg.projects[n] && cfg.projects[n].tasks; return debugToggle && !!(t && t.debug != null); }; // running node has a `tasks.debug`
+  // debug ⊂ active: which local projects launch `tasks.debug`. Only eligible + running nodes qualify.
+  let debug = new Set(debugToggle ? loadLastDebug(flags).filter((n) => active.has(n) && canDebug(n)) : []);
   let cursor = [...nodes].find((n) => shown.has(n)) || nodes[0];
   const panel = makeFilterPanel(nodes, { paint, title: 'Show nodes' }); // `f` overlays this on the graph's right
   const remoteEnv = selEnv != null ? resolveEnvs(cfg, nodes, selEnv).resolved : new Map(); // where each service is deployed (crew resolve) — shown for the ones NOT run locally
@@ -2346,10 +2374,10 @@ async function graphSelect(flags, cfg, opts = {}) {
   // toggling one would change that box's width and reflow the whole (now order-sensitive) layout — nodes
   // would jump. sublabelWidth = the widest env label; the renderer pads every [env] field to it (spaces
   // OUTSIDE the tight brackets), so CW is identical for any active set -> geometry never moves on toggle.
-  const envW = selEnv == null ? 0 : Math.max('local'.length, (selEnv || '').length, ...[...remoteEnv.values()].map((v) => (v || '').length));
+  const envW = selEnv == null ? 0 : Math.max('local'.length, 'debug'.length, (selEnv || '').length, ...[...remoteEnv.values()].map((v) => (v || '').length));
   const draw = () => renderAsciiGraph(nodes.filter((n) => shown.has(n)), edges.filter((e) => shown.has(e.from) && shown.has(e.to) && (showRef || !e.ref)), {
     colorOf: (n) => (active.has(n) ? prefix(n) : GRAY),                                          // running set keeps per-source colours; the rest grayed
-    sublabel: selEnv != null ? (n) => (active.has(n) ? 'local' : (remoteEnv.get(n) || selEnv)) : undefined, // selected run local; the rest show their resolved remote env
+    sublabel: selEnv != null ? (n) => (active.has(n) ? (debug.has(n) ? 'debug' : 'local') : (remoteEnv.get(n) || selEnv)) : undefined, // [debug] = local under a debugger; [local] = plain local; else the resolved remote env
     sublabelWidth: envW,                                                                        // fixed [env] field width -> box width stays put when the sublabel changes
     cursor, withLayout: true,
   });
@@ -2369,7 +2397,7 @@ async function graphSelect(flags, cfg, opts = {}) {
       let out = '\x1b[H';
       for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + (li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
       const split = cpw(connectivityStatus(cfg, depEdges, [...active], false)) > 0; // non-verbose returns islands text only when disconnected
-      const bar = graphFooter({ mode: 'select', total: nodes.length, sel: active.size, vis: shown.size, hasRef, showRef, warn: split ? '⚠ not connected' : '' });
+      const bar = graphFooter({ mode: 'select', total: nodes.length, sel: active.size, vis: shown.size, hasRef, showRef, warn: split ? '⚠ not connected' : '', dbg: active.has(cursor) && canDebug(cursor) });
       out += '\x1b[K' + footerBar(bar, cols); // one full-width reverse-video footer (shared with the pager + guards editor)
       if (panel.active) {                                                                 // filter panel overlays the graph's right columns (graph stays visible)
         const pr = panel.rows(R), col = Math.max(1, cols - panel.width + 1);
@@ -2381,11 +2409,11 @@ async function graphSelect(flags, cfg, opts = {}) {
     let snap = null; // pre-open state captured when `f` opens the panel, so esc can revert
     const previewShown = (list) => { // live preview while toggling: update the graph now, DON'T persist (that waits for Enter)
       shown = new Set(list);
-      for (const n of [...active]) if (!shown.has(n)) active.delete(n); // a hidden node can't be run
+      for (const n of [...active]) if (!shown.has(n)) { active.delete(n); debug.delete(n); } // a hidden node can't be run (or debugged)
       if (!shown.has(cursor)) cursor = nodes.find((n) => shown.has(n)) || cursor;
       layout = draw();
     };
-    const restoreSnap = () => { if (!snap) return; shown = new Set(snap.shown); active = new Set(snap.active); cursor = snap.cursor; layout = draw(); };
+    const restoreSnap = () => { if (!snap) return; shown = new Set(snap.shown); active = new Set(snap.active); debug = new Set(snap.debug); cursor = snap.cursor; layout = draw(); };
     const moveH = (d) => { const p = layout.place.get(cursor), list = layout.layers[p.layer], i = list.indexOf(cursor); cursor = list[Math.max(0, Math.min(list.length - 1, i + d))]; };
     const moveV = (d) => { let l = layout.place.get(cursor).layer + d; while (l >= 0 && l < layout.layers.length && !layout.layers[l].length) l += d; if (l < 0 || l >= layout.layers.length || !layout.layers[l].length) return; const cx = layout.place.get(cursor).cx; let best = layout.layers[l][0], bd = Infinity; for (const n of layout.layers[l]) { const dd = Math.abs(layout.place.get(n).cx - cx); if (dd < bd) { bd = dd; best = n; } } cursor = best; };
     const hitTest = (col, row) => { // SGR 1-based screen (col,row) -> node whose box contains it, else null
@@ -2404,7 +2432,7 @@ async function graphSelect(flags, cfg, opts = {}) {
         if (m[4] === 'M' && btn === 65) { top += 3; repaint(); return false; }            // wheel down
         if (m[4] === 'M' && (btn & 0b11) === 0 && !(btn & 0b1100000)) {                   // left-button press (not motion/wheel)
           const hit = hitTest(+m[2], +m[3]);
-          if (hit) { cursor = hit; active.has(hit) ? active.delete(hit) : active.add(hit); layout = draw(); repaint(); }
+          if (hit) { cursor = hit; if (active.has(hit)) { active.delete(hit); debug.delete(hit); } else active.add(hit); layout = draw(); repaint(); }
         }
         return false;
       }
@@ -2417,11 +2445,12 @@ async function graphSelect(flags, cfg, opts = {}) {
         return false;
       }
       if (key === '\x03' || key === '\x1b') { cleanup(); resolve(null); return true; }
-      if (key === '\r' || key === '\n') { cleanup(); resolve([...active]); return true; }
+      if (key === '\r' || key === '\n') { cleanup(); resolve({ picked: [...active], debug: [...debug] }); return true; }
       if (key === 'r' && hasRef) { showRef = !showRef; saveGraphRefs(flags, showRef); layout = draw(); repaint(); return false; }
-      if (key === 'f') { snap = { shown: new Set(shown), active: new Set(active), cursor }; panel.open([...shown]); repaint(); return false; }
-      if (key === ' ') { active.has(cursor) ? active.delete(cursor) : active.add(cursor); }
-      else if (key === 'a') { active = [...shown].every((n) => active.has(n)) ? new Set() : new Set(shown); } // all/none among the VISIBLE nodes
+      if (key === 'f') { snap = { shown: new Set(shown), active: new Set(active), debug: new Set(debug), cursor }; panel.open([...shown]); repaint(); return false; }
+      if (key === 'd') { if (active.has(cursor) && canDebug(cursor)) { debug.has(cursor) ? debug.delete(cursor) : debug.add(cursor); layout = draw(); repaint(); } return false; } // toggle debug — only for a running node that has a `tasks.debug`
+      if (key === ' ') { if (active.has(cursor)) { active.delete(cursor); debug.delete(cursor); } else active.add(cursor); }
+      else if (key === 'a') { active = [...shown].every((n) => active.has(n)) ? new Set() : new Set(shown); for (const n of [...debug]) if (!active.has(n)) debug.delete(n); } // all/none among VISIBLE nodes; debug ⊂ active
       else if (key === '\x1b[C' || key === 'l') moveH(1);
       else if (key === '\x1b[D' || key === 'h') moveH(-1);
       else if (key === '\x1b[B' || key === 'j') moveV(1);
@@ -3409,6 +3438,7 @@ export function cmdCheck(flags) {
   // Machine-local local.json (remembered selection + prefs).
   const machine = loadMachine(flags);
   if (Array.isArray(machine.lastSelection)) for (const n of machine.lastSelection) if (!projNames.has(n)) W(`local.json lastSelection: unknown project '${n}'`);
+  if (Array.isArray(machine.lastDebug)) for (const n of machine.lastDebug) if (!projNames.has(n)) W(`local.json lastDebug: unknown project '${n}'`);
 
   // Report.
   console.log(c.bold(`Checking ${tildify(userPath)}`) + (localPath ? c.dim(`  (+ ${tildify(localPath)})`) : ''));

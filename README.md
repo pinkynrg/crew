@@ -55,6 +55,13 @@ The picked set is remembered, so the other two surfaces open the same thing:
 They're separate commands on purpose - each wants its own terminal tab and lifecycle. crew never
 spawns terminals for you.
 
+**Debug a service in the slice.** Give a project a `tasks.debug` (its debugger command - e.g.
+`node --inspect=:9230 server.js`, `python -m debugpy --listen :5678 -m app`, `next dev`). Then in the
+`crew start` picker, press **`d`** on a running node to flip it into debug mode - its box shows
+`[debug]` and crew launches `tasks.debug` instead of `tasks.start` for that one. Mix freely: run the
+whole slice, only the service you're stepping through under a debugger. `d` only appears for a node
+that's on (local) *and* has a `tasks.debug`; each project owns its own debugger + port.
+
 ### Install
 
 ```sh
