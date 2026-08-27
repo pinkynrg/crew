@@ -4,4 +4,6 @@ must {enter run}
 send "\r"
 must {A-started}
 must {B-started}
-want_exit 0
+sleep 1
+send "\033"
+want_done

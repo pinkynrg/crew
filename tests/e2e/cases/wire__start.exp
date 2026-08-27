@@ -4,4 +4,6 @@ must {enter run}
 send "\r"
 must {web-up}
 must {api-up}
-want_exit 0
+sleep 1
+send "\033"
+want_done

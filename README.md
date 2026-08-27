@@ -175,7 +175,6 @@ loop of flipping a couple of services on and letting everything else stay remote
 
 ```
 crew list                       list projects (remembered selection, per-folder status)
-crew install                    pick one project, install it (single-select)
 crew start [env=…] [k=v …]      pick projects, run their start task (local wiring)
 crew workspace                  pick projects, open one VS Code window
 crew claude [name]              pick projects, launch one Claude Code session (--add-dir)
@@ -189,16 +188,19 @@ crew upgrade                    self-update (npm i -g @pinkynrg/crew@latest)
 
 `start` / `workspace` / `claude` always open the interactive multiselect (preselected with your
 last pick) and the selection is remembered globally; projects are never named on the CLI there.
-`install` is the exception - single-project, and it doesn't touch the remembered set. Global flags:
-`--config <path>`, `-v/--version`.
+`crew start` is the only command that runs anything. Global flags: `--config <path>`, `-v/--version`.
 
 ### The runner & tasks model
 
-A task name becomes a command per project, with no duplication:
+`start` is the one core task crew runs. Its command per project, with no duplication:
 
-1. `project.tasks[<task>]` if present - an explicit override;
-2. else `project.runner` with `{task}` substituted (e.g. `make {task}` → `make build`);
-3. else the project is **run-less** for that task and skipped (it still shows up in `workspace` / `claude`).
+1. `project.tasks.start` if present - an explicit command (in `crew config`, the **start** field);
+2. else `project.runner` with `{task}` substituted (e.g. `make {task}` → `make start`);
+3. else the project is **run-less** and skipped (it still shows up in `workspace` / `claude`).
+
+A project's `tasks` map can hold **other** tasks too (e.g. `debug`, `install`), but they're just data
+for now — only `start` (and its per-node `debug` variant, below) has a command. `debug` runs under
+`crew start` via the selector's `d` toggle.
 
 Resolved commands may contain `{name}` placeholders. `{task}` is filled from the task name,
 `{envfile}` by crew (the wired env file), and everything else from your `key=value` args. Every
@@ -206,13 +208,9 @@ placeholder must resolve or crew errors and runs nothing; an unused `key=value` 
 substituted values are shell-quoted. `crew start` **requires** `env=<name>` - the base env the
 unselected projects point at.
 
-**Two execution modes**, decided by whether the task is in `config.longRunning`:
-
-- **Long-running** (`start`, `dev`, `watch`): parallel, streamed, per-project-colored output.
-  Ctrl-C - or any one process exiting - tears the whole group down. On a TTY this is a full-screen
-  log viewer (`f` to filter which projects are shown, `Ctrl-C` to stop).
-- **Run-to-completion** (`install`, `build`, `test`): parallel, but crew waits for **all** to
-  finish, prints a pass/fail summary, and exits non-zero if any failed.
+`crew start` **always streams**: projects run in parallel with per-project-colored output, and
+Ctrl-C - or any one process exiting - tears the whole group down. On a TTY this is a full-screen
+log viewer (`f` to filter which projects are shown, `esc`/`Ctrl-C` to stop).
 
 Teardown is reliable because each command runs via `/bin/sh -c` in **its own process group**
 (`spawn` detached); crew signals the whole group by pgid - SIGTERM, then SIGKILL after a grace

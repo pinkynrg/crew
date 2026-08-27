@@ -1,6 +1,7 @@
 # projectsDir is part of the whole-session working copy: editing it (unsaved) immediately re-resolves
 # every project's path in-session. Disk (local.json) only changes on save.
 source tests/e2e/lib.exp
+set stty_init "rows 40 cols 110"
 crun config
 must {config editor}
 sleep 1
@@ -8,7 +9,8 @@ send "k"
 sleep 1
 send "l"
 sleep 1
-send "jjjj"
+# Settings fields: workspaceName(0) workspaceSettings(1) projectsDir(2)
+send "jj"
 sleep 1
 send "\r"
 send "\025"

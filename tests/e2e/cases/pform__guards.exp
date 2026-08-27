@@ -4,7 +4,7 @@ must {api}
 sleep 1
 send "l"
 sleep 1
-send "jjjjjjj"
+send "jjjjjjjj"
 sleep 1
 send "\r"
 must {space toggle}

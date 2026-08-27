@@ -227,7 +227,7 @@ export function missingProjectFolders(cfg, dir) {
   return out;
 }
 
-// Shared NON-blocking gate for the folder-consuming commands (start/workspace/claude/install/graph/
+// Shared NON-blocking gate for the folder-consuming commands (start/workspace/claude/graph/
 // resolve). A project whose `path` folder is absent is treated as if it didn't exist: excluded from the
 // graph AND the selector (so you can't pick or draw a phantom), while the SHARED config is never touched.
 // `warnMissing` surfaces the misses with direction-aware advice; the caller shows `emptyProjectsState`
@@ -262,13 +262,15 @@ function emptyProjectsState(headline) {
 // Config — user-level at ~/.config/crew/config.json, project-local ./.crew.json
 // merges on top. v1 configs migrate to v2 in memory and are written back.
 // ---------------------------------------------------------------------------
-export const DEFAULT_LONG_RUNNING = ['start', 'dev', 'watch'];
+// `start` is crew's one core task — the streamed command (kill-others + interactive viewer). `debug` runs
+// under it (the per-node toggle), so it streams too. Everything else in a project's `tasks` map is optional
+// data with no core command yet (a future generic runner will funnel it). This set drives display only.
+export const STREAMED_TASKS = new Set(['start', 'debug']);
 
 export function defaultConfig() {
   return {
     version: 2,
     workspaceName: 'crew',
-    longRunning: [...DEFAULT_LONG_RUNNING],
     projects: {},
   };
 }
@@ -317,8 +319,8 @@ export function migrate(cfg) {
     cfg.version = 2;
     changed = true;
   }
-  if (!Array.isArray(cfg.longRunning)) {
-    cfg.longRunning = [...DEFAULT_LONG_RUNNING];
+  if ('longRunning' in cfg) { // retired: `start` is always streamed, so the switch no longer exists
+    delete cfg.longRunning;
     changed = true;
   }
   if (!cfg.projects) {
@@ -421,7 +423,6 @@ export function loadMerged(flags) {
       fail(`project-local config is not valid JSON: ${localPath}`);
     }
     if (local.workspaceName) merged.workspaceName = local.workspaceName;
-    if (Array.isArray(local.longRunning)) merged.longRunning = local.longRunning;
     Object.assign(merged.projects, local.projects || {});
     merged.guards = { ...(merged.guards || {}), ...(local.guards || {}) };
     localUsed = localPath;
@@ -442,7 +443,7 @@ export function membersFor(cfg, names, debug = []) {
     );
   const dbg = new Set(debug);
   // A member launches `tasks.debug` (not `tasks.start`) only when it was debug-toggled AND actually has a
-  // debug task. `task` is left UNSET otherwise, so resolveRun falls back to the command's own task (start/install).
+  // debug task. `task` is left UNSET otherwise, so resolveRun falls back to the command's own task (start).
   return names.map((n) => {
     const project = cfg.projects[n];
     const useDebug = dbg.has(n) && project.tasks && project.tasks.debug != null;
@@ -671,7 +672,7 @@ export const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 // ---------------------------------------------------------------------------
 // Config-validation key sets (used by `crew check`).
 // ---------------------------------------------------------------------------
-export const TOP_KEYS = new Set(['version', 'workspaceName', 'longRunning', 'workspaceSettings', 'projects', 'guards', 'overrides']);
+export const TOP_KEYS = new Set(['version', 'workspaceName', 'workspaceSettings', 'projects', 'guards', 'overrides']);
 export const PROJECT_KEYS = new Set(['path', 'type', 'runner', 'env', 'local', 'match', 'tasks', 'guards', 'defaultBranch']);
 export const GUARD_KEYS = new Set(['comment', 'command', 'message']);
 export const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -817,7 +818,7 @@ export function resolveRun(cfg, task, members, args) {
     fail(`no project in target can run task '${task}' (all run-less for this task)`);
 
   // Reserved placeholders crew fills itself (not from user args): {task} = the task name;
-  // {envfile} = the per-project wired env file crew materializes at start (see cmdRun).
+  // {envfile} = the per-project wired env file crew materializes at start (see cmdStart).
   const RESERVED = new Set(['task', 'envfile']);
   // Union of placeholders across all runnable commands, excluding the reserved ones.
   const union = new Set();
@@ -867,7 +868,7 @@ export function resolveRun(cfg, task, members, args) {
     for (const p of placeholdersIn(r.template))
       if (!RESERVED.has(p) && !(p in r._values)) unresolved.add(p);
     // Only the env-file path needs its placeholders resolved when the command actually sources
-    // it via {envfile}; tasks like `install` don't touch the env file, so don't demand {env}.
+    // it via {envfile}; a task that doesn't reference {envfile} doesn't touch the env file, so don't demand {env}.
     if (r.project.env && r.template.includes('{envfile}'))
       for (const p of placeholdersIn(r.project.env))
         if (!RESERVED.has(p) && !(p in r._values)) unresolved.add(p);
@@ -879,7 +880,7 @@ export function resolveRun(cfg, task, members, args) {
     );
 
   for (const r of runnable) {
-    r.resolved = substitute(r.template, r._values); // {envfile} left intact for cmdRun
+    r.resolved = substitute(r.template, r._values); // {envfile} left intact for cmdStart
     // Resolve the base env-file path (if declared) with the same values — raw (no shell
     // quoting): it's a filesystem path crew reads, not a shell token.
     r.envFile = r.project.env
@@ -1939,7 +1940,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
 
     // Guard phase then spawn. Interactive: the viewer is already up; run guards as live rows and
     // only spawn once they pass (holding the viewer open on failure). Non-interactive / no guards:
-    // spawn straight away (non-interactive guards already ran + gated in cmdRun).
+    // spawn straight away (non-interactive guards already ran + gated in cmdStart).
     if (viewerRunGuards && guards.length) {
       viewerRunGuards().then((ok) => {
         if (settled || stopRequested) return; // user quit during the guard phase
@@ -2102,43 +2103,27 @@ export async function selectMembers(flags, cfg, opts = {}) {
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
-export async function cmdRun(flags, task, rest) {
+// `crew start` — crew's one core run command. Picks a co-running set (multiselect graph selector), wires
+// their env, gates on guards, then STREAMS them (kill-others on first exit / Ctrl-C, interactive log viewer
+// on a TTY). Per-node `d` debug toggle swaps a member to its `tasks.debug`. There is no run-to-completion
+// mode and no other core task — optional tasks in a project's `tasks` map have no core command yet.
+export async function cmdStart(flags, rest) {
   let { cfg, userPath } = loadMerged(flags);
   warnMissing(cfg);                 // heads-up about broken paths...
   cfg = presentCfg(cfg);            // ...then run on only the projects whose folder exists
-  if (!Object.keys(cfg.projects).length) { emptyProjectsState(`Nothing to ${task} — no project folders found.`); process.exit(1); }
+  if (!Object.keys(cfg.projects).length) { emptyProjectsState('Nothing to start — no project folders found.'); process.exit(1); }
   const args = rest.filter((a) => a.includes('='));
   const bare = rest.filter((a) => !a.includes('='));
-  const isLong = (cfg.longRunning || []).includes(task);
-  // `install` always picks ONE project from a single-select picker (doesn't touch the remembered
-  // co-running selection). start/etc use the multi-select remembered set.
-  let members;
-  if (task === 'install') {
-    if (bare.length) warn(`ignoring '${bare.join(' ')}' — pick the project in the picker`);
-    if (!canInteractive()) fail('crew needs an interactive terminal to pick a project');
-    const known = Object.keys(cfg.projects || {});
-    if (!known.length) fail('no projects configured yet — run: crew config');
-    const paint = projectColors(cfg);
-    const picked = await menu({
-      title: 'Install which project?',
-      items: known,
-      label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)),
-      erase: true,
-    });
-    if (picked == null) return void console.log(c.dim('nothing selected'));
-    members = membersFor(cfg, [picked]);
-  } else {
-    if (bare.length) warn(`ignoring '${bare.join(' ')}' — projects are chosen in the picker`);
-    const envArg = args.find((a) => a.startsWith('env='));
-    // start must know the base env unselected projects point at (drives the {env} chain + wiring);
-    // require it up front and fail fast, rather than prompting after the picker.
-    if (task === 'start' && !envArg) fail('crew start needs an environment (what unselected projects point at) — e.g. crew start env=pre');
-    members = await selectMembers(flags, cfg, { connectivity: isLong, selEnv: envArg ? envArg.slice(4) : undefined, debugToggle: task === 'start' }); // per-node `d` debug toggle: start only
-  }
+  if (bare.length) warn(`ignoring '${bare.join(' ')}' — projects are chosen in the picker`);
+  const envArg = args.find((a) => a.startsWith('env='));
+  // start must know the base env unselected projects point at (drives the {env} chain + wiring);
+  // require it up front and fail fast, rather than prompting after the picker.
+  if (!envArg) fail('crew start needs an environment (what unselected projects point at) — e.g. crew start env=pre');
+  const members = await selectMembers(flags, cfg, { connectivity: true, selEnv: envArg.slice(4), debugToggle: true });
   if (!members) return;
   validateMemberPaths(members);
 
-  const { runnable, skipped, warnings } = resolveRun(cfg, task, members, args);
+  const { runnable, skipped, warnings } = resolveRun(cfg, 'start', members, args);
 
   // Materialize wired env files (fills {envfile}); fresh per run, cleaned up after.
   // Env overrides live in the config (committable — no secrets); applied to each project's wired env.
@@ -2148,22 +2133,20 @@ export async function cmdRun(flags, task, rest) {
 
   const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
 
-  const interactive = isLong && process.stdin.isTTY && process.stdout.isTTY;
+  const interactive = process.stdin.isTTY && process.stdout.isTTY;
   // Skips + warnings (from resolveRun AND wireRun's env overrides). When the interactive viewer owns
   // an alternate screen, printing these to the MAIN screen would leave them as scrollback residue
   // once the viewer exits (the "spirit" of the run). So in interactive mode feed them INTO the viewer
-  // as notice rows; otherwise (piped / run-to-completion — no alt screen) print inline as before.
+  // as notice rows; otherwise (piped — no alt screen) print inline as before.
   const allWarnings = [...(warnings || []), ...(wireWarnings || [])];
-  const notices = [...skipped.map((s) => `skipping ${s} (no task '${task}')`), ...allWarnings];
-  if (!interactive) { for (const s of skipped) console.log(`skipping ${s} (no task '${task}')`); for (const wn of allWarnings) warn(wn); }
-  // Guards gate `start`. Interactive: pass the specs to runFanout, which runs them as live rows
+  const notices = [...skipped.map((s) => `skipping ${s} (no task 'start')`), ...allWarnings];
+  if (!interactive) { for (const s of skipped) console.log(`skipping ${s} (no task 'start')`); for (const wn of allWarnings) warn(wn); }
+  // Guards gate the run. Interactive: pass the specs to runFanout, which runs them as live rows
   // inside the viewer (so the screen appears immediately) and gates the spawn. Non-interactive:
   // run them here (prints the ✓/✗ block, aborts on failure) before anything starts.
   let guardSpecs = [];
-  if (task === 'start') {
-    if (interactive) guardSpecs = collectGuards(cfg, runnable);
-    else await runGuards(cfg, runnable);
-  }
+  if (interactive) guardSpecs = collectGuards(cfg, runnable);
+  else await runGuards(cfg, runnable);
 
   const paint = projectColors(cfg); // same per-project colors as `crew list`
   const commands = runnable.map((r, i) => ({
@@ -2172,38 +2155,22 @@ export async function cmdRun(flags, task, rest) {
     color: paint.get(r.name) || ((s) => s),
   }));
 
-  if (isLong) {
-    // LONG-RUNNING: stream; the first exit (any) tears the whole group down; Ctrl-C too.
-    // On a TTY, enable the interactive scrollable log viewer (no-op when piped/CI). Guards are
-    // seeded as [name] rows; the hidden-log filter is remembered globally in local.json.
-    const results = await runFanout(commands, {
-      killOthers: true,
-      announceExits: true,
-      interactive,
-      notices,
-      guards: guardSpecs,
-      hidden: loadHiddenLog(flags),
-      saveHidden: (h) => saveHiddenLog(flags, h),
-      logWrap: loadLogWrap(flags),
-      saveWrap: (w) => saveLogWrap(flags, w),
-    });
-    cleanup(); // remove the wired temp env files
-    process.exit(exitCodeFromEvents(results));
-  } else {
-    // RUN-TO-COMPLETION: wait for all (no kill-others), then a pass/fail summary.
-    const results = await runFanout(commands, { killOthers: false, announceExits: false });
-    cleanup();
-    console.log(`\ncrew: task '${task}' results`);
-    const byName = new Map(results.map((e) => [e.name, e.exitCode]));
-    let anyFailed = false;
-    for (const r of runnable) {
-      const code = byName.has(r.name) ? byName.get(r.name) : '?';
-      const passed = code === 0;
-      if (!passed) anyFailed = true;
-      console.log(`  ${passed ? c.green('✓') : c.red('✗')} ${r.name} (exit ${code})`);
-    }
-    process.exit(anyFailed ? 1 : 0);
-  }
+  // STREAM: the first exit (any) tears the whole group down; Ctrl-C too. On a TTY, enable the interactive
+  // scrollable log viewer (no-op when piped/CI). Guards are seeded as [name] rows; the hidden-log filter is
+  // remembered globally in local.json.
+  const results = await runFanout(commands, {
+    killOthers: true,
+    announceExits: true,
+    interactive,
+    notices,
+    guards: guardSpecs,
+    hidden: loadHiddenLog(flags),
+    saveHidden: (h) => saveHiddenLog(flags, h),
+    logWrap: loadLogWrap(flags),
+    saveWrap: (w) => saveLogWrap(flags, w),
+  });
+  cleanup(); // remove the wired temp env files
+  process.exit(exitCodeFromEvents(results));
 }
 
 // A stable id for a selection: sorted member names joined — same set => same id regardless
@@ -2261,7 +2228,6 @@ export async function cmdClaude(flags, rest) {
 export function cmdList(flags) {
   const { cfg, localPath } = loadMerged(flags);
   const projects = Object.entries(cfg.projects || {});
-  const longRunning = new Set(cfg.longRunning || []);
   const paint = projectColors(cfg);
   if (projects.length === 0) {
     console.log(c.dim('No projects configured yet.'));
@@ -2297,7 +2263,7 @@ export function cmdList(flags) {
     console.log(`      ${lab('path')}${pathCell}`);
     if (p.runner) console.log(`      ${lab('runner')}${p.runner}`);
     for (const [t, cmd] of taskEntries) {
-      const kind = longRunning.has(t) ? c.yellow('service') : c.green('task');
+      const kind = STREAMED_TASKS.has(t) ? c.yellow('service') : c.green('task');
       console.log(`      ${lab(t)}${cmd}  ${c.dim('[')}${kind}${c.dim(']')}`);
     }
     if (!p.runner && taskEntries.length === 0) console.log(`      ${c.dim('(run-less)')}`);
@@ -2309,10 +2275,9 @@ export function cmdList(flags) {
   const last = loadLastSelection(flags).filter((n) => cfg.projects[n]);
   if (last.length)
     console.log('\n' + c.dim('last selection  ') + last.map((n) => paint.get(n)(n)).join(c.dim(', ')));
-  const lr = (cfg.longRunning || []).map((t) => c.yellow(t)).join(c.dim(', ')) || c.dim('(none)');
-  console.log((last.length ? '' : '\n') + c.dim('long-running  ') + lr);
   console.log(
-    c.dim('config        ') +
+    (last.length ? '' : '\n') +
+      c.dim('config        ') +
       c.dim(tildify(userConfigPath(flags))) +
       (localPath ? c.dim(`  (+ ${tildify(localPath)})`) : '')
   );
@@ -2892,9 +2857,12 @@ async function configForm(flags, opts = {}) {
       { key: 'path', label: 'path', kind: 'text', req: true },
       { key: 'type', label: 'type', kind: 'choice', options: PROJECT_TYPES },
       { key: 'runner', label: 'runner', kind: 'text' },
+      // start: the core command, entered as a plain string (stored as tasks.start). The `tasks` map below
+      // holds only the OTHER, optional tasks (e.g. debug) — start is edited here, not as a map row.
+      { key: 'start', label: 'start', kind: 'text' },
       { key: 'env', label: 'env', kind: 'text' },
       { key: 'defaultBranch', label: 'branch', kind: 'text' },
-      { key: 'tasks', label: 'tasks', kind: 'map', kLabel: 'task', vLabel: 'command' },
+      { key: 'tasks', label: 'tasks (other)', kind: 'map', kLabel: 'task', vLabel: 'command' },
       { key: 'guards', label: 'guards', kind: 'multiselect', options: () => Object.keys(cfg.guards) },
       { key: 'local', label: 'local', kind: 'text' },
       // match: env-labeled hosts, rendered INLINE (one line per env, like Environment Overrides). Keys are
@@ -2909,9 +2877,10 @@ async function configForm(flags, opts = {}) {
     ],
     load: (n) => {
       const p = cfg.projects[n] || {};
-      return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', env: p.env || '', local: p.local || '', match: (p.match && typeof p.match === 'object' && !Array.isArray(p.match)) ? { ...p.match } : {}, guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: { ...(p.tasks || {}) }, overrides: overridesToRows(overrides[n]), localOverrides: overridesToRows(localOverrides[n]), isNew: false, orig: n };
+      const { start = '', ...otherTasks } = { ...(p.tasks || {}) }; // start is edited in its own field; the map shows the rest
+      return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', start, env: p.env || '', local: p.local || '', match: (p.match && typeof p.match === 'object' && !Array.isArray(p.match)) ? { ...p.match } : {}, guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: otherTasks, overrides: overridesToRows(overrides[n]), localOverrides: overridesToRows(localOverrides[n]), isNew: false, orig: n };
     },
-    blank: () => ({ name: '', path: '', type: 'other', runner: '', env: '', local: '', match: {}, guards: [], defaultBranch: '', tasks: {}, overrides: [], localOverrides: [], isNew: true, orig: null }),
+    blank: () => ({ name: '', path: '', type: 'other', runner: '', start: '', env: '', local: '', match: {}, guards: [], defaultBranch: '', tasks: {}, overrides: [], localOverrides: [], isNew: true, orig: null }),
     save: (f) => {
       const name = String(f.name).trim();
       if (!name) return 'name is required';
@@ -2926,7 +2895,11 @@ async function configForm(flags, opts = {}) {
       setOrDel(proj, 'local', String(f.local).trim());
       setOrDel(proj, 'defaultBranch', String(f.defaultBranch).trim());
       setOrDel(proj, 'match', f.match, f.match && Object.keys(f.match).length > 0);
-      setOrDel(proj, 'tasks', f.tasks, f.tasks && Object.keys(f.tasks).length > 0);
+      // the dedicated `start` field folds back into tasks.start; the map holds the other tasks
+      const tasks = { ...(f.tasks || {}) };
+      const startCmd = String(f.start || '').trim();
+      if (startCmd) tasks.start = startCmd; else delete tasks.start;
+      setOrDel(proj, 'tasks', tasks, Object.keys(tasks).length > 0);
       setOrDel(proj, 'guards', f.guards, Array.isArray(f.guards) && f.guards.length > 0);
       cfg.projects[name] = proj;
       // env overrides: shared -> cfg.overrides (persist), local -> machine.overrides (writeMachine). Both move
@@ -2978,7 +2951,6 @@ async function configForm(flags, opts = {}) {
   const jsonParseVals = (o) => { const r = {}; for (const [k, v] of Object.entries(o || {})) { let val = v; try { val = JSON.parse(v); } catch {} r[k] = val; } return r; };
   const loadSettings = () => ({
     workspaceName: cfg.workspaceName || '',
-    longRunning: [...(Array.isArray(cfg.longRunning) ? cfg.longRunning : [])],
     workspaceSettings: mapStringify(cfg.workspaceSettings),
     projectsDir: machine.projectsDir || '',
     isNew: false, orig: 'config',
@@ -2988,7 +2960,6 @@ async function configForm(flags, opts = {}) {
     names: () => ['config'],
     fields: [
       { key: 'workspaceName', label: 'workspaceName', kind: 'text' },
-      { key: 'longRunning', label: 'longRunning', kind: 'list' },
       { key: 'workspaceSettings', label: 'wsSettings', kind: 'map', json: true, kLabel: 'setting', vLabel: 'value' },
       { key: 'projectsDir', label: 'projectsDir', kind: 'text' },
     ],
@@ -2996,14 +2967,13 @@ async function configForm(flags, opts = {}) {
     blank: loadSettings,
     save: (f) => {
       setOrDel(cfg, 'workspaceName', String(f.workspaceName).trim());
-      setOrDel(cfg, 'longRunning', f.longRunning, Array.isArray(f.longRunning) && f.longRunning.length > 0);
       setOrDel(cfg, 'workspaceSettings', jsonParseVals(f.workspaceSettings), f.workspaceSettings && Object.keys(f.workspaceSettings).length > 0);
       persist();
       syncProjectsDir(f.projectsDir);   // in-memory + PROJECTS_DIR (idempotent with the live edit)
       writeMachine(flags, machine);
       return null;
     },
-    info: (f) => { const miss = missingProjectFolders(cfg, String(f.projectsDir).trim()); const total = Object.keys(cfg.projects).length; return miss.length ? `\x1b[33m⚠ ${miss.length}/${total} project folder(s) not found under projectsDir\x1b[39m` : `${DIM}longRunning = tasks that stream until Ctrl-C${UNDIM}`; },
+    info: (f) => { const miss = missingProjectFolders(cfg, String(f.projectsDir).trim()); const total = Object.keys(cfg.projects).length; return miss.length ? `\x1b[33m⚠ ${miss.length}/${total} project folder(s) not found under projectsDir\x1b[39m` : `${DIM}projectsDir = where relative project paths resolve${UNDIM}`; },
   };
 
   const sections = [settingsSection, projectsSection, guardsSection];
@@ -3070,7 +3040,7 @@ async function configForm(flags, opts = {}) {
     if (!form.runner && d.runner) { form.runner = d.runner; got.push('runner'); }
     if (!form.env && d.env) { form.env = d.env; got.push('env'); }
     if (!form.local && d.local) { form.local = d.local; got.push('local'); }
-    if (d.start && !(form.tasks && form.tasks.start)) { form.tasks = { ...(form.tasks || {}), start: d.start }; got.push('tasks.start'); }
+    if (d.start && !form.start) { form.start = d.start; got.push('start'); }
     if (got.length) { dirty = true; msg = `${DIM}auto-filled from folder: ${got.join(', ')}${UNDIM}`; }
   };
   // Folder picker for the project `path` field: the subfolders of projectsDir + a "type a path…" escape
@@ -3127,7 +3097,7 @@ async function configForm(flags, opts = {}) {
         const F = mapEdit, fld = F.field;
         Rn.push(`\x1b[1m${fld.label}\x1b[22m ${DIM}· ${s.noun} ${form.name || form.orig}${UNDIM}`);
         Rn.push('');
-        if (F.list) { // single-column list (e.g. longRunning)
+        if (F.list) { // single-column list (one value per row; no field uses this kind right now)
           F.rows.forEach((v, i) => {
             const on = F.ri === i;
             const vc = (editing && editTarget === 'listval' && on) ? editCell(RW - 6) : clipP(String(v), RW - 6);
@@ -3417,7 +3387,6 @@ export function cmdCheck(flags) {
   for (const k of Object.keys(cfg)) if (!TOP_KEYS.has(k)) W(`top-level: unknown key '${k}'`);
   if (cfg.version != null && typeof cfg.version !== 'number') E(`version must be a number`);
   if (cfg.workspaceName != null && typeof cfg.workspaceName !== 'string') E(`workspaceName must be a string`);
-  if (cfg.longRunning != null && !isStrArr(cfg.longRunning)) E(`longRunning must be an array of strings`);
   if (cfg.workspaceSettings != null && !isObj(cfg.workspaceSettings)) E(`workspaceSettings must be an object`);
   if (cfg.guards != null && !isObj(cfg.guards)) E(`guards must be an object`);
   const guards = isObj(cfg.guards) ? cfg.guards : {};
@@ -3612,7 +3581,6 @@ export function help() {
   const ACTIONS = [
     ['help', '', 'Show this help'],
     ['list', '', 'List projects'],
-    ['install', '', 'Pick a project, run its install task'],
     ['start', '[args]', 'Pick projects, run their start task'],
     ['workspace', '', 'Pick projects, open one VSCode window'],
     ['claude', '[session]', 'Pick projects, launch Claude Code'],
@@ -3699,10 +3667,10 @@ async function main() {
       cmdList(flags);
       return;
     case 'start':
-      await cmdRun(flags, 'start', rest);
+      await cmdStart(flags, rest);
       return;
     case 'install':
-      await cmdRun(flags, 'install', rest);
+      fail("crew install was removed — `crew start` is the only run command; a project's other tasks aren't wired to a command yet");
       return;
     case 'workspace':
       await cmdWorkspace(flags, rest);

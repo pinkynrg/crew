@@ -3,4 +3,6 @@ crun start env=x
 must {enter run}
 send "\r"
 must {GUARD-BLOCKED}
+sleep 1
+send "\033"
 want_done

@@ -7,9 +7,9 @@ must {config editor}
 sleep 1
 send "l"
 sleep 1
-# fields: name path type runner env branch tasks guards local match overrides(shared) localOverrides
-# --- SHARED block (field #10): 10 j's from name ---
-send "jjjjjjjjjj"
+# fields: name path type runner start env branch tasks guards local match overrides(shared) localOverrides
+# --- SHARED block (field #11): 11 j's from name ---
+send "jjjjjjjjjjj"
 sleep 1
 must {shared}
 send "\r"
@@ -28,7 +28,7 @@ send "\r"
 sleep 1
 send "\033"
 sleep 1
-# --- LOCAL block (field #11): one more j ---
+# --- LOCAL block (field #12): one more j ---
 send "j"
 sleep 1
 must {machine-only}

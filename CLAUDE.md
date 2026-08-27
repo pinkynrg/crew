@@ -55,8 +55,8 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   absolute path.
 - Placeholders: every `{name}` must resolve (else red error, nothing runs); an unknown
   `key=value` is skipped with a yellow warning;
-  shell-quote every substituted value. Hardcode no task names/values beyond
-  `config.longRunning`.
+  shell-quote every substituted value. Hardcode no task names/values beyond the one core task
+  `start` (always streamed) and its per-node `debug` variant (`STREAMED_TASKS`).
 
 ## Config
 
@@ -78,7 +78,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `logWrap`/`hiddenLog`). (`overrides` USED to live here; it moved into the committable `config.json` —
   a legacy `local.json.overrides` auto-migrates up on load, see below.)
 - **Missing-folder gate** (NON-blocking): the folder-consuming commands (`start`/`workspace`/`claude`/
-  `install`/`graph`/`resolve`) run `warnMissing(cfg)` then `presentCfg(cfg)` — a project whose `path`
+  `graph`/`resolve`) run `warnMissing(cfg)` then `presentCfg(cfg)` — a project whose `path`
   folder is absent is EXCLUDED (as if it didn't exist) from the graph AND the selector, so you can't draw
   or pick a phantom, and the SHARED config is never mutated. `warnMissing` is **direction-aware**: no
   projects dir or a MAJORITY missing → "check your projects dir: crew config › Settings › config
@@ -124,9 +124,9 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 - No groups, no `run` command. `start`/`workspace`/`claude` act on a **multiselect selection**
   (`selectMembers`, preselected with `lastSelection`); projects are never named on the CLI there
   (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
-  `lastSelection` (global, machine-local) and reused across the three. `install` is the exception:
-  it acts on a **single** project chosen from a single-select picker (no CLI name; bare tokens ignored
-  with a warning; doesn't touch `lastSelection`). A legacy `groups` key is dropped on load.
+  `lastSelection` (global, machine-local) and reused across the three. There is NO `install` (or any
+  other) run command — `start` is the sole core task (see Task resolution below); `crew install` now
+  errors as a retired command. A legacy `groups` key is dropped on load.
 - Env derivation (replaces the old `envMap`): `{env}` is NOT a static per-project map — it's
   **derived from the chain** by `resolveEnvs(cfg, selection, selEnv)`. The **entry clusters**
   (source SCCs of the dependency graph — projects nothing else in the selection depends on) run
@@ -195,7 +195,10 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 - `defaultBranch` (optional, per project): the branch new work is cut from (repos differ —
   `main`/`master`/`develop`/`trunk`). Pure metadata crew records/displays (`crew list` shows a
   `branch` line); crew runs no git with it. Set it in `crew config` (the `branch` field of a project).
-- Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip.
+- Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip. `crew start` (`cmdStart`)
+  is the ONLY core run command — task `start`, plus its per-node `debug` variant; a project's OTHER `tasks`
+  are just data with no core command yet (a future generic runner will funnel them). In `crew config`,
+  `start` is a **dedicated text field** (stored as `tasks.start`); the `tasks` map holds only the OTHER tasks.
 - **Per-node debug toggle** (`crew start` only): in the graph selector, `d` flips the focused node into
   debug mode — it launches `tasks.debug` instead of `tasks.start`. Only offered when the node is running
   locally (ON) AND has a `tasks.debug` (`canDebug`); the `d` hint + `[debug]` box sublabel appear only
@@ -220,7 +223,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   column is the highlighted item's form. The three actions fall out of
   position + key — CREATE = a `+ New` row (blank form), UPDATE = edit fields then `s` save, DELETE = `d` +
   confirm. **Settings** is a `fixed` section (one synthetic `config` item, NO `+ New`/`d` — you only edit
-  values): the top-level config keys (`workspaceName`/`longRunning`/`workspaceSettings`) +
+  values): the top-level config keys (`workspaceName`/`workspaceSettings`) +
   machine-local `projectsDir`, so `crew config` covers EVERY key (and editing `projectsDir` shows a live
   `⚠ N/M project folders not found` warning via `missingProjectFolders`, never auto-deleting anything).
   Field KINDS: `text` (a real inline line-editor with a block caret — `←/→` move, Option/Ctrl+arrow
@@ -232,7 +235,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   line-editor, `+ add` chains key→value, `d` removes; e.g. project `tasks` (task→cmd); the form carries these
   as objects, serialized on `save`; a `json`
   map (`workspaceSettings`) parses each value so `false`/`3` keep their type), `list` (the same row editor
-  minus the key column — one value per row, e.g. `longRunning`, carried as a string array),
+  minus the key column — one value per row, carried as a string array; no field currently uses this kind),
   `overrides` + `match` (two INLINE row editors — rendered in the form, NOT a full-pane takeover, and edited
   in place via the shared `ovEdit` mode; `⏎` enters row-edit, `↑↓` rows). `overrides` = a project's Environment
   Overrides, 3 columns `VAR / value / when <peer> local` (`←→` between columns, `+ add`, `d` removes; the
@@ -258,7 +261,7 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   a **folder picker** (`openFolderPick` — the subfolders of `projectsDir` via `projectDirs()`, single-select,
   plus a `✎ type a path…` escape that drops to the inline editor). Picking a folder (or committing a typed
   path) for a NEW project runs `detectProject(abs)` and prefills only the still-EMPTY fields — `name`
-  (basename), `type`/`runner`/`env`/`local`/`tasks.start` — from package.json / lockfiles / manifests /
+  (basename), `type`/`runner`/`env`/`local`/`start` — from package.json / lockfiles / manifests /
   `.envs` / dev scripts. `match` (the deployed host) is deliberately NOT derived — the guess was too weak,
   so it's always filled by hand. Path-driven,
   not a separate "auto" mode: works with no `projectsDir` (type an absolute/`~` path via the escape) and for
@@ -293,9 +296,10 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
 - `workspaceSettings` (optional top-level object): written verbatim into the generated
   `.code-workspace` `settings` (e.g. `{"jest.enable": false}` to stop the Jest extension
   auto-running per folder). crew injects nothing by default. Edited in `crew config` → Settings (a `json` map).
-- Two execution modes by `config.longRunning`: long-running (streamed, first exit or
-  Ctrl-C tears the whole group down) vs run-to-completion (wait all, no kill-others,
-  pass/fail summary, non-zero if any failed).
+- `crew start` always STREAMS: each project spawns and the first exit (any) or Ctrl-C tears the whole
+  group down (`runFanout` `killOthers`). There is NO run-to-completion mode and no `longRunning` config —
+  `start` is the one core command and is always a service (see `cmdStart`). (`runFanout` still supports a
+  non-kill-others / wait-all mode, but nothing calls it now that `install` is gone.)
 - Runner (`runFanout`): each command spawns `detached` in its own process group; teardown
   signals the group by pgid (`kill(-pgid)`) with SIGTERM -> grace -> SIGKILL escalation, so
   reparented grandchildren (autoreload children, supervisord) die too — unlike a ppid
@@ -315,8 +319,8 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `wireRun`: env-override warnings) — are passed to `runFanout` as `notices` and **seeded into `history` as
   `{notice:true}` rows** (unprefixed, ignore the `f` project filter, honor `/` search, excluded from `c` copy).
   This is the anti-**"spirit"** rule: in interactive mode those messages must NOT be `console.log`/`warn`ed to the
-  MAIN screen (they'd survive the viewer's alt-screen exit as scrollback residue) — so `cmdRun` prints skips/warnings
-  inline ONLY when `!interactive` (piped / run-to-completion, no alt screen). `resolveRun` and `applyEnvOverrides`
+  MAIN screen (they'd survive the viewer's alt-screen exit as scrollback residue) — so `cmdStart` prints skips/warnings
+  inline ONLY when `!interactive` (piped, no alt screen). `resolveRun` and `applyEnvOverrides`
   therefore COLLECT their warnings into their return value instead of printing. `f` opens the `menu` multiselect (preselected =
   `shown`); applying repaints from history, so **select none = blank screen** and re-showing a
   project brings its recent lines back. Footer pinned to row R via a DECSTBM scroll region
@@ -345,13 +349,14 @@ No unit-test framework. Two suites, both run by `npm test`:
   gives the helpers `crun`/`must`/`want_exit`/`want_done`/`config_has`/`local_has`. Covers check (+error/exit
   codes), v1 migration (asserts the rewritten config), graph/resolve/list, dir (+ orphan warning)/config
   (path + removed `edit`), the visual editor (`crew config`, scrolling to the Settings/Projects/Guards
-  sections: create/update/delete/map-rows/list-rows/pick panels), the retired-command errors
-  (`add`/`remove`/`guards`/`overrides`), and the runner: `crew start`
-  (picker → run-to-completion AND streamed viewer + teardown),
+  sections: create/update/delete/map-rows/pick panels), the retired-command errors
+  (`add`/`remove`/`guards`/`overrides`/`install`), and the runner: `crew start`
+  (picker → streamed viewer + teardown),
   `workspace`/`claude` (via `code`/`claude` stubs on `PATH`), env wiring + guards. Interactive tips:
   `spawn`-in-a-proc needs `global spawn_id`; the graph `pager`/picker/viewer are raw-mode alt-screen so
-  quit them (`esc`/Ctrl-C) or they hang; `longRunning: []` makes `crew start` run-to-completion (auto-exit
-  0); `crew start` REQUIRES `env=<name>` (errors before the picker without it — pass `env=x`).
+  quit them (`esc`/Ctrl-C) or they hang; `crew start` ALWAYS streams, so a start case must drive the viewer
+  (assert its output, then `send "\033"` + `want_done` — the viewer holds open once every child exits);
+  `crew start` REQUIRES `env=<name>` (errors before the picker without it — pass `env=x`).
   Coverage: `npm run test:cov` (c8 over `NODE_V8_COVERAGE`);
   it's black-box so it works per-language (Go `-cover`+`GOCOVERDIR`, Python coverage.py) — same tests.
 
@@ -364,7 +369,7 @@ node bin/crew.js --config /tmp/x.json graph            # read-only, no TTY neede
 node bin/crew.js --config /tmp/x.json check            # validate; exit 1 on errors
 ```
 
-`start`/`install`/`workspace`/`claude` open the picker, so they need an interactive TTY
+`start`/`workspace`/`claude` open the picker, so they need an interactive TTY
 (non-TTY = clear error); `list`/`graph`/`check`/`resolve` work non-interactively.
 
 `crew check` (`cmdCheck`) is the hand-rolled, zero-dep config validator — NO JSON-Schema

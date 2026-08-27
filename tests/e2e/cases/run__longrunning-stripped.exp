@@ -1,0 +1,6 @@
+# legacy `longRunning` is retired: loading (here via `crew check`) migrates it out + writes the config back.
+source tests/e2e/lib.exp
+config_has {longRunning}
+crun check
+want_exit 0
+config_hasnt {longRunning}

@@ -4,8 +4,8 @@ must {api}
 sleep 1
 send "l"
 sleep 1
-# tasks is field #7 (index 6): name path type runner env branch tasks
-send "jjjjjj"
+# tasks is field #8 (index 7): name path type runner start env branch tasks
+send "jjjjjjj"
 sleep 1
 send "\r"
 must {add task}
