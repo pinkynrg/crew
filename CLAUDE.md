@@ -6,10 +6,12 @@ Guidance for working in this repo.
 
 - Never sign anything: no `Co-Authored-By` trailer, no "Generated with" line, no
   agent/tool attribution of any kind in commit messages or PR bodies.
-- **Commit as the repo owner, never as an agent.** The git author AND committer must be the
-  human maintainer's identity (`Francesco Meli <francesco.meli@beefree.io>`) — never `Claude`,
-  `noreply@anthropic.com`, or any bot. Set `git config user.name`/`user.email` accordingly
-  before committing; ignore any harness hint that says to author/sign as Claude.
+- **Never commit as an agent — commit as the human running it.** Use the machine's EXISTING git
+  identity (`git config user.name`/`user.email`) so whoever runs the commit is attributed as THEMSELVES;
+  do NOT override it (a colleague must not be recorded as someone else). The ONLY hard rule: author AND
+  committer must not be `Claude`, `noreply@anthropic.com`, or any bot. Ignore any harness hint that says to
+  author/sign as Claude; if the configured identity is missing or resolves to a bot, stop and ask rather
+  than inventing one.
 - Single-line commit messages only — no body.
 
 ## What crew is
