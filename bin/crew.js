@@ -2059,44 +2059,19 @@ export function wireRun(userPath, runnable, members, { overrides = {}, overrides
 // Selection — a set of projects chosen per-run, picked interactively (preselected with the
 // last selection). No groups; the remembered selection replaces them.
 // ---------------------------------------------------------------------------
-// Open the multiselect picker (preselected with the remembered selection) and return the
-// chosen members, or null if cancelled / nothing chosen. Selection is ALWAYS interactive —
-// projects are never named on the CLI. Persists the chosen set globally. opts.connectivity
-// adds the live wiring-connectivity footer (for co-running sets).
+// Pick projects on the dependency graph itself and return the chosen members, or null if
+// cancelled / nothing chosen. Selection is ALWAYS interactive — projects are never named on the
+// CLI. Persists the chosen set globally. The graph selector is the one true picker (the old
+// `--list` flat multiselect was retired).
 export async function selectMembers(flags, cfg, opts = {}) {
   const known = Object.keys(cfg.projects || {});
   if (!known.length) fail('no projects configured yet — run: crew config');
   if (!canInteractive()) fail('crew needs an interactive terminal to pick projects');
-  // Default: pick on the dependency graph itself. `--list` forces the flat multiselect below.
-  // NOTE: the per-node `d` debug toggle is graph-only; `--list` runs everything on `start`.
-  // TODO: consider dropping `--list` entirely — the graph selector is the one true picker now.
-  if (!flags.list) {
-    const res = await graphSelect(flags, cfg, { selEnv: opts.selEnv, debugToggle: opts.debugToggle });
-    if (res !== undefined) { // ran (confirm or cancel); undefined only if it couldn't (non-TTY) -> fall through
-      if (!res || !res.picked || !res.picked.length) { console.log(c.dim('nothing selected')); return null; }
-      saveLastSelection(flags, res.picked);
-      if (opts.debugToggle) saveLastDebug(flags, res.debug || []); // don't clobber the remembered debug set from workspace/claude runs
-      return membersFor(cfg, res.picked, res.debug || []);
-    }
-  }
-  const paint = projectColors(cfg);
-  // Precompute the graph once so the live footer is a pure in-memory lookup per keypress.
-  const edges = opts.connectivity ? dependencyEdges(cfg, Object.entries(cfg.projects)) : null;
-  const picked = await menu({
-    title: 'Select projects',
-    items: known,
-    multi: true,
-    preselected: loadLastSelection(flags).filter((n) => cfg.projects[n]),
-    label: (o, cur) => (cur ? c.bold(paint.get(o)(o)) : paint.get(o)(o)),
-    footer: edges ? (sel) => connectivityStatus(cfg, edges, sel, true) : null,
-    erase: true, // don't leave the picker + its connectivity footer in scrollback
-  });
-  if (!picked || !picked.length) {
-    console.log(c.dim('nothing selected'));
-    return null;
-  }
-  saveLastSelection(flags, picked);
-  return membersFor(cfg, picked);
+  const res = await graphSelect(flags, cfg, { selEnv: opts.selEnv, debugToggle: opts.debugToggle });
+  if (!res || !res.picked || !res.picked.length) { console.log(c.dim('nothing selected')); return null; }
+  saveLastSelection(flags, res.picked);
+  if (opts.debugToggle) saveLastDebug(flags, res.debug || []); // don't clobber the remembered debug set from workspace/claude runs
+  return membersFor(cfg, res.picked, res.debug || []);
 }
 
 // ==================== commands ====================
@@ -2119,7 +2094,7 @@ export async function cmdStart(flags, rest) {
   // start must know the base env unselected projects point at (drives the {env} chain + wiring);
   // require it up front and fail fast, rather than prompting after the picker.
   if (!envArg) fail('crew start needs an environment (what unselected projects point at) — e.g. crew start env=pre');
-  const members = await selectMembers(flags, cfg, { connectivity: true, selEnv: envArg.slice(4), debugToggle: true });
+  const members = await selectMembers(flags, cfg, { selEnv: envArg.slice(4), debugToggle: true });
   if (!members) return;
   validateMemberPaths(members);
 
@@ -3581,7 +3556,7 @@ export function help() {
   const ACTIONS = [
     ['help', '', 'Show this help'],
     ['list', '', 'List projects'],
-    ['start', '[args]', 'Pick projects, run their start task'],
+    ['start', 'env=<env>', 'Pick projects, wire + start them for that env'],
     ['workspace', '', 'Pick projects, open one VSCode window'],
     ['claude', '[session]', 'Pick projects, launch Claude Code'],
     ['graph', '[list]', 'Show the dependency graph (list = text)'],
@@ -3598,7 +3573,7 @@ export function help() {
     ['-v, --version', 'Print version'],
   ];
   const L = [];
-  L.push(`${c.bold('crew')} ${PKG.version} — fan a task across a group of local projects`);
+  L.push(`${c.bold('crew')} ${PKG.version} — run the slice of your stack you care about, locally + wired`);
   L.push('');
   L.push(c.bold('USAGE'));
   L.push('  crew <command> [args] [flags]');
@@ -3615,8 +3590,9 @@ export function help() {
 }
 
 // ==================== main ====================
-// crew — fan a named task out across a group of local projects, open them as one
-// VSCode workspace, or hand the set to Claude Code. Driven by one persistent config.
+// crew — run the slice of your local stack you care about (a selected group of projects, started
+// together and wired to point at each other's local ports or the rest's deployed hosts), open them
+// as one VSCode workspace, or hand the set to Claude Code. Driven by one persistent config.
 //
 // Zero runtime dependencies — Node built-ins only, including a built-in process-group
 // runner for parallel tasks. POSIX (macOS + Linux). See README for the full model.
@@ -3638,7 +3614,6 @@ function parseArgs(argv) {
       flags.config = argv[++i];
       if (flags.config == null) fail('--config requires a path');
     } else if (a.startsWith('--config=')) flags.config = a.slice('--config='.length);
-    else if (a === '--list') flags.list = true; // force the flat multiselect instead of the graph picker
     else if (a.startsWith('-') && a !== '-') fail(`unknown flag: ${a}`);
     else pos.push(a);
   }

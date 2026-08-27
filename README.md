@@ -175,7 +175,7 @@ loop of flipping a couple of services on and letting everything else stay remote
 
 ```
 crew list                       list projects (remembered selection, per-folder status)
-crew start [env=…] [k=v …]      pick projects, run their start task (local wiring)
+crew start env=<env>            pick projects, wire + start them for that env
 crew workspace                  pick projects, open one VS Code window
 crew claude [name]              pick projects, launch one Claude Code session (--add-dir)
 crew graph [list]               dependency graph derived from .envs files (drawn / adjacency)
@@ -318,8 +318,8 @@ optional session name: `crew claude billing-work`.
 
 ## Known limitations (by design)
 
-- **No task dependency graph, no ordering.** crew fans out one task at a time; "install before start"
-  is two commands. No caching, no build-system behavior - that's `make` / `turbo` / `nx` territory.
+- **No task dependency graph, no ordering.** crew just starts the selected projects in parallel;
+  it doesn't sequence tasks. No caching, no build-system behavior - that's `make` / `turbo` / `nx` territory.
 - **No startup ordering within a run.** All projects start simultaneously; services must tolerate
   their dependencies coming up in any order.
 - No bundler command, no terminal/pane spawning, no tmux, no health-check / wait-for-ready, no

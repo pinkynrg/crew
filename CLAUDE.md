@@ -14,11 +14,12 @@ Guidance for working in this repo.
 
 ## What crew is
 
-A single-file macOS CLI that fans a **named task** out across a group of local
-projects — run tasks in parallel, open the set as one VSCode workspace, or hand it to
-Claude Code. crew owns the fan-out (parallelism, labelled output, exit-code aggregation,
-lifecycle); each **project** owns task semantics. crew never interprets a task beyond
-`{placeholder}` substitution.
+A single-file macOS/Linux CLI that runs the **slice of your local stack you care about** — `crew
+start` a selected group of projects together, in parallel, each auto-wired to point at the others'
+local ports (or the rest's deployed hosts when left off). Also opens the set as one VSCode workspace,
+or hands it to Claude Code. crew owns the fan-out (parallelism, labelled output, exit-code
+aggregation, lifecycle); each **project** owns its `start` command. crew never interprets a command
+beyond `{placeholder}` substitution.
 
 ## Layout
 
@@ -209,8 +210,8 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `local.json.lastDebug`. Gated by `opts.debugToggle` so it's start-only — the shared selector shows
   nothing debug-related for `workspace`/`claude` (which don't run tasks) and never clobbers `lastDebug`.
   Each project owns its debugger command + port (`node --inspect=:9230 …`, `python -m debugpy …`, `next
-  dev`), so it's language-agnostic. NOTE: the toggle is graph-only — the `--list` flat picker runs plain
-  `start` (a reason to consider retiring `--list`).
+  dev`), so it's language-agnostic. The graph selector is the ONLY picker now (`--list` and its flat
+  multiselect were retired — `crew start --list` errors as an unknown flag).
 - `guards`: top-level `guards: {name: {comment, command, message}}` registry; a project lists
   names in `project.guards` (many-to-many). `comment` is required and states what the check
   verifies — it's printed in faint gray beside each result when guards run. Before a run, the
