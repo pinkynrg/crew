@@ -1,0 +1,19 @@
+# each field shows an always-visible description under the form when focused.
+source tests/e2e/lib.exp
+set stty_init "rows 40 cols 110"
+crun config
+must {config editor}
+sleep 1
+send "l"
+sleep 1
+# name(0) path(1) type(2) runner(3) start(4) -> 4 j's to the start field
+send "jjjj"
+sleep 1
+must {command that starts this project}
+# move to env (5) -> its own description replaces it
+send "j"
+sleep 1
+must {this project's env files live}
+send "\033"
+send "\033"
+want_exit 0

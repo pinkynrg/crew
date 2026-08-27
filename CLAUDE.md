@@ -268,7 +268,9 @@ beyond `{placeholder}` substitution.
   not a separate "auto" mode: works with no `projectsDir` (type an absolute/`~` path via the escape) and for
   folders outside it; non-destructive (blanks only). Renaming a guard migrates its key AND every
   `project.guards` link; deleting a guard unlinks it everywhere (warns if in use). A `readonly` field with a
-  `.hint` shows it as a status message on `⏎`. `↑↓` move, `tab`/`←→` switch pane, `s` writes (that item, to
+  `.hint` shows it as a status message on `⏎`. Every field can carry a `desc` string — the FOCUSED field's
+  `desc` is word-wrapped and rendered as an always-visible dim help block pinned under the form (no keypress;
+  hidden during a sub-editor takeover). `↑↓` move, `tab`/`←→` switch pane, `s` writes (that item, to
   disk). A `dirty` flag is set on any field/map/pick mutation. **Edits are a whole-session working copy**: a
   `drafts` Map (keyed by section+item, a NEW item uses a sentinel slot) holds every edited-but-unsaved form —
   `stashDraft` parks the current form before any navigation and `loadForm` returns the SAME draft ref if one

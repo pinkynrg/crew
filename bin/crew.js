@@ -2828,27 +2828,27 @@ async function configForm(flags, opts = {}) {
     key: 'projects', title: 'PROJECTS', noun: 'project', newLabel: '+ New project',
     names: () => Object.keys(cfg.projects),
     fields: [
-      { key: 'name', label: 'name', kind: 'name', req: true },
-      { key: 'path', label: 'path', kind: 'text', req: true },
-      { key: 'type', label: 'type', kind: 'choice', options: PROJECT_TYPES },
-      { key: 'runner', label: 'runner', kind: 'text' },
+      { key: 'name', label: 'name', kind: 'name', req: true, desc: 'A short, unique name for this project.' },
+      { key: 'path', label: 'path', kind: 'text', req: true, desc: "The project's folder. Type it, or press ⏎ to pick from your projects dir." },
+      { key: 'type', label: 'type', kind: 'choice', options: PROJECT_TYPES, desc: 'What this project is: a frontend app, a backend service, or other.' },
+      { key: 'runner', label: 'runner', kind: 'text', desc: 'Optional. A command template with {task} (e.g. "npm run {task}"). You can usually skip this and just fill start below.' },
       // start: the core command, entered as a plain string (stored as tasks.start). The `tasks` map below
       // holds only the OTHER, optional tasks (e.g. debug) — start is edited here, not as a map row.
-      { key: 'start', label: 'start', kind: 'text' },
-      { key: 'env', label: 'env', kind: 'text' },
-      { key: 'defaultBranch', label: 'branch', kind: 'text' },
-      { key: 'tasks', label: 'tasks (other)', kind: 'map', kLabel: 'task', vLabel: 'command' },
-      { key: 'guards', label: 'guards', kind: 'multiselect', options: () => Object.keys(cfg.guards) },
-      { key: 'local', label: 'local', kind: 'text' },
+      { key: 'start', label: 'start', kind: 'text', desc: 'The command that starts this project (e.g. "npm run dev"). Write {envfile} where it should load the env file.' },
+      { key: 'env', label: 'env', kind: 'text', desc: 'Where this project\'s env files live, with {env} for the environment name (e.g. ".envs/{env}").' },
+      { key: 'defaultBranch', label: 'branch', kind: 'text', desc: 'Optional. The branch you cut new work from (e.g. main). Just a note — crew runs no git.' },
+      { key: 'tasks', label: 'tasks (other)', kind: 'map', kLabel: 'task', vLabel: 'command', desc: 'Optional extra commands besides start (e.g. a "debug" command). Not required.' },
+      { key: 'guards', label: 'guards', kind: 'multiselect', options: () => Object.keys(cfg.guards), desc: 'Checks that must pass before this project starts. Tick the ones to require.' },
+      { key: 'local', label: 'local', kind: 'text', desc: "This project's local URL, e.g. http://localhost:3000." },
       // match: env-labeled hosts, rendered INLINE (one line per env, like Environment Overrides). Keys are
       // DERIVED from the project's env files (the `env` template) — you can't add/remove rows, only fill each
       // env's host value (blank = no match). Space-separate to give one env several hosts. Union with any
       // labels already stored so existing data stays editable.
-      { key: 'match', label: 'match', kind: 'match' },
+      { key: 'match', label: 'match', kind: 'match', desc: "This project's deployed host per environment (e.g. pre = api.pre.example.com). Fill in the host for each env." },
       // env overrides — TWO titled blocks (see save/del below): shared writes config.json (committable),
       // local writes local.json (machine-only, secrets, WINS at run time). Same inline row editor for both.
-      { key: 'overrides', label: 'overrides', kind: 'overrides', groupTitle: 'Environment Overrides · shared (config)' },
-      { key: 'localOverrides', label: 'local overrides', kind: 'overrides', groupTitle: 'Environment Overrides · local (wins · machine-only)' },
+      { key: 'overrides', label: 'overrides', kind: 'overrides', groupTitle: 'Environment Overrides · shared (config)', desc: 'Extra environment variables to set when this project runs. Shared with your team — no secrets here.' },
+      { key: 'localOverrides', label: 'local overrides', kind: 'overrides', groupTitle: 'Environment Overrides · local (wins · machine-only)', desc: 'Extra environment variables just for you, kept off git. Put secrets like a DB password here.' },
     ],
     load: (n) => {
       const p = cfg.projects[n] || {};
@@ -2897,10 +2897,10 @@ async function configForm(flags, opts = {}) {
     key: 'guards', title: 'GUARDS', noun: 'guard', newLabel: '+ New guard',
     names: () => Object.keys(cfg.guards),
     fields: [
-      { key: 'name', label: 'name', kind: 'name', req: true },
-      { key: 'comment', label: 'comment', kind: 'text', req: true },
-      { key: 'command', label: 'command', kind: 'text', req: true },
-      { key: 'message', label: 'message', kind: 'text' },
+      { key: 'name', label: 'name', kind: 'name', req: true, desc: 'A short name for this check.' },
+      { key: 'comment', label: 'comment', kind: 'text', req: true, desc: 'One line saying what this check verifies.' },
+      { key: 'command', label: 'command', kind: 'text', req: true, desc: 'A shell command to run. It passes if the command exits 0.' },
+      { key: 'message', label: 'message', kind: 'text', desc: 'What to show if the check fails — tell the user how to fix it.' },
     ],
     load: (n) => { const g = cfg.guards[n] || {}; return { name: n, comment: g.comment || '', command: g.command || '', message: g.message || '', isNew: false, orig: n }; },
     blank: () => ({ name: '', comment: '', command: '', message: '', isNew: true, orig: null }),
@@ -2934,9 +2934,9 @@ async function configForm(flags, opts = {}) {
     key: 'settings', title: 'SETTINGS', noun: 'settings', fixed: true,
     names: () => ['config'],
     fields: [
-      { key: 'workspaceName', label: 'workspaceName', kind: 'text' },
-      { key: 'workspaceSettings', label: 'wsSettings', kind: 'map', json: true, kLabel: 'setting', vLabel: 'value' },
-      { key: 'projectsDir', label: 'projectsDir', kind: 'text' },
+      { key: 'workspaceName', label: 'workspaceName', kind: 'text', desc: 'A name for the VS Code workspace crew opens.' },
+      { key: 'workspaceSettings', label: 'wsSettings', kind: 'map', json: true, kLabel: 'setting', vLabel: 'value', desc: 'Optional VS Code settings for that workspace, e.g. jest.enable = false.' },
+      { key: 'projectsDir', label: 'projectsDir', kind: 'text', desc: 'The folder your projects live in. Project paths you enter as relative are looked up here.' },
     ],
     load: loadSettings,
     blank: loadSettings,
@@ -3160,6 +3160,15 @@ async function configForm(flags, opts = {}) {
         });
         const info = s.info ? s.info(form) : '';
         if (info) { Rn.push(''); Rn.push('  ' + info); }
+        // Per-field help: the focused field's `desc`, word-wrapped, pinned under the form in dim. Always
+        // visible so hovering a field explains it (no keypress needed). Hidden during a sub-editor takeover.
+        const fdesc = s.fields[fi] && s.fields[fi].desc;
+        if (fdesc) {
+          const lines = []; let line = '';
+          for (const w of String(fdesc).split(/\s+/)) { if (line && line.length + 1 + w.length > RW - 4) { lines.push(line); line = w; } else line = line ? `${line} ${w}` : w; }
+          if (line) lines.push(line);
+          Rn.push(''); for (const ln of lines) Rn.push(`  ${DIM}${ln}${UNDIM}`);
+        }
       }
       // ---- compose ---- (home + per-row \x1b[K, NEVER a full-screen \x1b[2J: 2J pushes the erased
       // lines into scrollback on some terminals, making the editor "scrollable". The graph pager and
