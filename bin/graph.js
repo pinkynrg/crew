@@ -30,11 +30,10 @@ const N_ = 1, E_ = 2, S_ = 4, W_ = 8, RESET = '\x1b[0m', GAP = 1;
 export function renderAsciiGraph(nodes, edges, opts = {}) {
   const colorOf = opts.colorOf || (() => '');
   const sublabel = opts.sublabel || (() => '');   // optional short suffix on the name line (e.g. resolved env) — no extra box height
-  const cursor = opts.cursor;                      // optional cursor node (interactive selector)
-  const sel = cursor != null;                      // selector mode: reserve a ▸ marker gutter so moving the cursor never reflows widths
+  const cursor = opts.cursor;                      // optional cursor node (interactive selector) — highlighted by a tinted frame (below), no marker gutter needed
   const subW = opts.sublabelWidth || 0;            // pad the [env] field to this INNER width, spaces OUTSIDE the tight brackets (centered), so a box keeps its width when its sublabel changes (local<->qa in the selector). 0 = no padding.
   const subField = (c) => { const s = sublabel(c); if (!s) return ''; const tok = '[' + s + ']', t = Math.max(0, (subW + 2) - tok.length), l = t >> 1; return ' ' + ' '.repeat(l) + tok + ' '.repeat(t - l); };
-  const boxLabel = (c) => (sel ? (c === cursor ? '▸ ' : '  ') : '') + c + subField(c); // env is any string the caller gives; the [brackets] are ours
+  const boxLabel = (c) => c + subField(c); // env is any string the caller gives; the [brackets] are ours
   const NODES = [...new Set(nodes)];
   if (!NODES.length) return opts.withLayout ? { text: '', layers: [], place: new Map(), height: 0 } : ''; // keep the {text,…} shape for interactive callers (empty filter -> blank graph, not a crash)
   const has = new Set(NODES);
@@ -390,16 +389,22 @@ export function renderAsciiGraph(nodes, edges, opts = {}) {
   const vsg = (y1, y2, x, ref, id, c, cid) => { const [a, b] = y1 <= y2 ? [y1, y2] : [y2, y1]; for (let yy = a; yy <= b; yy++) { if (yy > a) bit(x, yy, N_, id, c, cid); if (yy < b) bit(x, yy, S_, id, c, cid); if (ref) dashV.add(x + ',' + yy); } };
   const hsg = (x1, x2, yy, ref, id, c, cid) => { const [a, b] = x1 <= x2 ? [x1, x2] : [x2, x1]; for (let x = a; x <= b; x++) { if (x > a) bit(x, yy, W_, id, c, cid); if (x < b) bit(x, yy, E_, id, c, cid); if (ref) dashH.add(x + ',' + yy); } };
 
+  // The cursor node (interactive selector): its FRAME cells get a dark-grey BACKGROUND tint (not reverse-video)
+  // in addition to the box's own foreground colour — softer than an inverted bar (no flash to near-white), yet
+  // it still reads at rest as a filled outline. Colour-agnostic. Reset at the RESET run boundary, no bleed.
+  // Gated on `cc` being non-empty so the mono renderer (no colorOf -> '') stays ANSI-free for the snapshots.
+  const CURFRAME = '\x1b[48;5;237m', curCC = (cc) => (c) => (c === cursor && cc(c) ? CURFRAME + cc(c) : cc(c));
+  const boxCol = curCC(colorOf);
   for (const c of NODES) { // boxes (own color)
-    const x0 = cellX.get(c), w = CW(c), t = yTop[cellL.get(c)], cc = colorOf(c), lbl = ` ${boxLabel(c)} `, pad = w - 2 - lbl.length, lp = Math.max(0, pad >> 1);
-    put(x0, t, '╔', cc); put(x0 + w - 1, t, '╗', cc); put(x0, t + 2, '╚', cc); put(x0 + w - 1, t + 2, '╝', cc);
-    for (let x = x0 + 1; x < x0 + w - 1; x++) { put(x, t, '═', cc); put(x, t + 2, '═', cc); }
-    put(x0, t + 1, '║', cc); put(x0 + w - 1, t + 1, '║', cc);
+    const x0 = cellX.get(c), w = CW(c), t = yTop[cellL.get(c)], cc = colorOf(c), fcc = boxCol(c), lbl = ` ${boxLabel(c)} `, pad = w - 2 - lbl.length, lp = Math.max(0, pad >> 1);
+    put(x0, t, '╔', fcc); put(x0 + w - 1, t, '╗', fcc); put(x0, t + 2, '╚', fcc); put(x0 + w - 1, t + 2, '╝', fcc);
+    for (let x = x0 + 1; x < x0 + w - 1; x++) { put(x, t, '═', fcc); put(x, t + 2, '═', fcc); }
+    put(x0, t + 1, '║', fcc); put(x0 + w - 1, t + 1, '║', fcc);
     const text = ' '.repeat(lp) + lbl + ' '.repeat(Math.max(0, pad - lp));
     for (let i = 0; i < text.length && x0 + 1 + i < x0 + w - 1; i++) put(x0 + 1 + i, t + 1, text[i], cc);
   }
   for (const c of NODES) { // T-junctions where a line LEAVES a box (source side only — a target side already
-    const t = yTop[cellL.get(c)], cc = colorOf(c);                                // has an arrowhead, so no tick there). DEP=double (╦/╩), REF=single-into-double (╤/╧).
+    const t = yTop[cellL.get(c)], cc = boxCol(c);                                // has an arrowhead, so no tick there). DEP=double (╦/╩), REF=single-into-double (╤/╧). cursor: bg-tint to match its frame.
     for (const s of botSeg.get(c) || []) if (s.to !== c) put(xU(s), t + 2, s.ref ? '╤' : '╦', cc); // leaves the bottom, going down
     for (const s of topSeg.get(c) || []) if (s.to !== c) put(xL(s), t, s.ref ? '╧' : '╩', cc);     // leaves the top, going up
   }
