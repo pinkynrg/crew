@@ -7,7 +7,7 @@ sleep 1
 send "jjjjjjjjjjjj"
 sleep 1
 send "\r"
-must {Environment Overrides}
+must {Environment overrides}
 sleep 1
 # append a new override: DB_URL = localhost:5432, only when 'worker' is local
 send "jj"

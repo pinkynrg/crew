@@ -240,9 +240,12 @@ beyond `{placeholder}` substitution.
   as objects, serialized on `save`; a `json`
   map (`workspaceSettings`) parses each value so `false`/`3` keep their type), `list` (the same row editor
   minus the key column — one value per row, carried as a string array; no field currently uses this kind),
-  `overrides` + `match` (two INLINE row editors — rendered in the form, NOT a full-pane takeover, and edited
-  in place via the shared `ovEdit` mode; `⏎` enters row-edit, `↑↓` rows). `overrides` = a service's Environment
-  Overrides, 3 columns `VAR / value / when <peer> local` (`←→` between columns, `+ add`, `d` removes; the
+  `overrides` + `match` (INLINE row editors — drawn as a bordered BOX in the form, NOT a full-pane takeover,
+  so each reads as a distinct container you `⏎` INTO; focused = reversed title bar + bright border, else dim.
+  Each box is padded to `BOX_MIN_ROWS` body rows so scrolling between services with different row counts
+  doesn't jump the layout. Titles: `Environment hosts` (match), `Environment overrides · shared` / `· local`.
+  Edited in place via the shared `ovEdit` mode; `⏎` enters row-edit, `↑↓` rows). `overrides` = a service's env
+  overrides, 3 columns `VAR / value / when <peer> local` (`←→` between columns, `+ add`, `d` removes; the
   when-column opens a single-select peer picker). `match` = env-labeled hosts, 2 columns `env = host` with
   **FIXED keys** — the env labels are DERIVED from the service's env files (`matchLabels` = `serviceEnvFiles`
   unioned with any stored labels), so rows can't be added/removed, only each host value filled (blank = no

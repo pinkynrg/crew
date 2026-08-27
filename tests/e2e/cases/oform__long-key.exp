@@ -1,6 +1,6 @@
 # a long VAR must be fully visible both while typing (full-width edit) and after confirm (not clipped)
 source tests/e2e/lib.exp
-set stty_init "rows 24 cols 110"
+set stty_init "rows 44 cols 110"
 crun config
 must {config editor}
 sleep 1
@@ -8,7 +8,7 @@ send "l"
 sleep 1
 send "jjjjjjjjjjjj"
 send "\r"
-must {Environment Overrides}
+must {Environment overrides}
 sleep 1
 send "jj"
 send "\r"

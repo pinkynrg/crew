@@ -47,6 +47,7 @@ export const faint = fgRGB(110, 110, 110);
 // black \x1b[90m, which a light theme maps to a light gray that's nearly invisible on white).
 // Closes with 22m, never 39m (39m restores the foreground color, it doesn't turn dim off).
 const DIM = '\x1b[2m', UNDIM = '\x1b[22m';
+const BOX_MIN_ROWS = 3; // min body rows for a config-editor inline box (match/overrides) so scrolling services doesn't jump the layout
 function hslToRgb(h, s, l) {
   const a = s * Math.min(l, 1 - l);
   const f = (n) => {
@@ -2856,8 +2857,8 @@ async function configForm(flags, opts = {}) {
       { key: 'match', label: 'match', kind: 'match', desc: "This service's deployed host per environment (e.g. pre = api.pre.example.com). Fill in the host for each env." },
       // env overrides — TWO titled blocks (see save/del below): shared writes config.json (committable),
       // local writes local.json (machine-only, secrets, WINS at run time). Same inline row editor for both.
-      { key: 'overrides', label: 'overrides', kind: 'overrides', groupTitle: 'Environment Overrides · shared (config)', desc: 'Extra environment variables to set when this service runs. Shared with your team — no secrets here.' },
-      { key: 'localOverrides', label: 'local overrides', kind: 'overrides', groupTitle: 'Environment Overrides · local (wins · machine-only)', desc: 'Extra environment variables just for you, kept off git. Put secrets like a DB password here.' },
+      { key: 'overrides', label: 'overrides', kind: 'overrides', groupTitle: 'Environment overrides · shared', desc: 'Extra environment variables to set when this service runs. Shared with your team — no secrets here.' },
+      { key: 'localOverrides', label: 'local overrides', kind: 'overrides', groupTitle: 'Environment overrides · local', desc: 'Extra environment variables just for you, kept off git. Put secrets like a DB password here.' },
     ],
     load: (n) => {
       const p = cfg.services[n] || {};
@@ -3125,24 +3126,34 @@ async function configForm(flags, opts = {}) {
           // INLINE row lists (overrides + match) — one line per row, rendered in the form (NOT a full-pane
           // page) and edited in place: ⏎ enters row-edit; ↑↓ rows; ←→ cols (overrides); ⏎ edits a cell.
           if (fld.kind === 'overrides' || fld.kind === 'match') {
+            // Rendered as a BOX (top/side/bottom borders) so it reads as a distinct container you ⏎ into —
+            // not another editable field. Focused = reversed title bar + bright border; else dim border.
             const isMatch = fld.kind === 'match';
             const editingRows = !!ovEdit && ovEdit.field.key === fld.key;
             const rows = editingRows ? ovEdit.rows
               : isMatch ? matchLabels(form).map((env) => ({ env, host: matchValToStr((form.match || {})[env]) }))
                         : (form[fld.key] || []);
-            Rn.push('');
-            const title = isMatch ? `match  ${DIM}· env-labeled hosts (keys from env files)${UNDIM}` : fld.groupTitle;
             const titleFocused = on && !editingRows && !editing;
-            Rn.push(titleFocused ? rev(`  ${title.replace(/\x1b\[[0-9;]*m/g, '')}  ⏎ edit `) : `  ${DIM}${title}${UNDIM}`);
-            // Key column shows the FULL key (env vars are long) — sized to the actual pane width, capped only
-            // enough to leave the value some room. Value clips (full value is visible when you ⏎ to edit it).
-            const keyW = Math.min(Math.max(3, RW - 14), Math.max(3, ...rows.map((r) => [...String((isMatch ? r.env : r.var) || '(VAR)')].length)));
-            if (!rows.length) Rn.push(isMatch ? `    ${DIM}(no env files found — set env / create them)${UNDIM}` : `    ${DIM}(none)${UNDIM}`);
+            const active = on || editingRows;               // bright border when focused or being edited
+            const plainTitle = isMatch ? 'Environment hosts' : fld.groupTitle;
+            const bw = Math.max(24, RW - 1);                // box outer width
+            const iw = bw - 4;                              // inner text width  ("│ " + content + " │")
+            const bc = active ? '' : DIM, bce = active ? '' : UNDIM;
+            const bl = (content) => `${bc}│${bce} ${padP(content, iw)} ${bc}│${bce}`; // one boxed body row
+            // top border carries the title (+ ⏎ hint when focused)
+            const tt = ` ${plainTitle}${titleFocused ? '  ⏎ edit' : ''} `;
+            const top = '┌─' + tt + '─'.repeat(Math.max(0, bw - 3 - [...tt].length)) + '┐';
+            Rn.push('');
+            Rn.push(titleFocused ? rev(top) : `${bc}${top}${bce}`);
+            // Key column shows the FULL key (env vars are long), sized to the box interior; value clips.
+            const keyW = Math.min(Math.max(3, iw - 12), Math.max(3, ...rows.map((r) => [...String((isMatch ? r.env : r.var) || '(VAR)')].length)));
+            const body = [];
+            if (!rows.length) body.push(bl(`${DIM}${isMatch ? '(no env files found — set env / create them)' : '(none)'}${UNDIM}`));
             rows.forEach((row, ri) => {
               const rowOn = editingRows && ovEdit.ri === ri, ci = editingRows ? ovEdit.ci : -1;
-              // While editing a cell, give it the WHOLE row (no cramped column) so a long VAR/value stays visible as you type.
-              if (editing && rowOn && editTarget === 'ovVar') { Rn.push(`  ▸ ${DIM}VAR${UNDIM} ${editCell(Math.max(8, RW - 8))}`); return; }
-              if (editing && rowOn && (editTarget === 'ovVal' || editTarget === 'meHost')) { Rn.push(`  ▸ ${DIM}${isMatch ? 'host' : 'value'}${UNDIM} ${editCell(Math.max(8, RW - 10))}`); return; }
+              // While editing a cell, give it the whole inner width so a long VAR/value stays visible as you type.
+              if (editing && rowOn && editTarget === 'ovVar') { body.push(bl(`▸ ${DIM}VAR${UNDIM} ${editCell(Math.max(6, iw - 8))}`)); return; }
+              if (editing && rowOn && (editTarget === 'ovVal' || editTarget === 'meHost')) { body.push(bl(`▸ ${DIM}${isMatch ? 'host' : 'value'}${UNDIM} ${editCell(Math.max(6, iw - 10))}`)); return; }
               const k0 = isMatch ? (row.env || '') : (row.var || '(VAR)');
               const kP = padP(clipP(k0, keyW), keyW);
               // col 0 = key (VAR for overrides; env is FIXED for match — shown cyan, not focusable)
@@ -3150,13 +3161,16 @@ async function configForm(flags, opts = {}) {
               // col 1 = value/host (clips — full value is visible when you ⏎ to edit it)
               const v1 = isMatch ? (row.host || '(host)') : (row.value || '(value)');
               const wpLen = isMatch ? 0 : (row.peer ? `when ${row.peer} local`.length : 6);
-              const vDisp = clipP(v1, Math.max(4, RW - keyW - wpLen - 10));
+              const vDisp = clipP(v1, Math.max(4, iw - keyW - wpLen - 8));
               const c1 = (rowOn && !editing && ci === 1) ? rev(` ${vDisp} `) : ` ${vDisp} `;
-              let line = `  ${rowOn && !editing ? '▸' : ' '}${c0}${DIM}=${UNDIM}${c1}`;
-              if (!isMatch) { const wp = row.peer ? `when ${row.peer} local` : 'always'; line += (rowOn && !editing && ci === 2) ? rev(` ${wp} `) : (row.peer ? ` \x1b[36m${wp}\x1b[39m` : ` ${DIM}${wp}${UNDIM}`); }
-              Rn.push(line);
+              let content = `${rowOn && !editing ? '▸' : ' '}${c0}${DIM}=${UNDIM}${c1}`;
+              if (!isMatch) { const wp = row.peer ? `when ${row.peer} local` : 'always'; content += (rowOn && !editing && ci === 2) ? rev(` ${wp} `) : (row.peer ? ` \x1b[36m${wp}\x1b[39m` : ` ${DIM}${wp}${UNDIM}`); }
+              body.push(bl(content));
             });
-            if (editingRows && !isMatch) { const addOn = ovEdit.ri === rows.length; Rn.push(`  ${addOn && !editing ? rev(' ▸ + add override ') : ' \x1b[32m+ add override\x1b[39m'}`); }
+            if (editingRows && !isMatch) { const addOn = ovEdit.ri === rows.length; body.push(bl(addOn && !editing ? rev(' ▸ + add ') : '\x1b[32m+ add\x1b[39m')); }
+            while (body.length < BOX_MIN_ROWS) body.push(bl('')); // MIN height: keeps each box a stable size so scrolling services doesn't make the form jump
+            for (const b of body) Rn.push(b);
+            Rn.push(`${bc}└${'─'.repeat(bw - 2)}┘${bce}`);
             return;
           }
           if (fld.groupTitle) { Rn.push(''); Rn.push(`  ${DIM}${fld.groupTitle}${UNDIM}`); } // a titled block separator before this field

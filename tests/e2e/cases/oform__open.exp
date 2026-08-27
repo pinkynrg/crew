@@ -5,7 +5,7 @@ sleep 1
 send "l"
 sleep 1
 # collapsed project form shows the titled block + the override summary (VAR=value, @peer)
-must {Environment Overrides}
+must {Environment overrides}
 must {AWS_PROFILE}
 send "\033"
 send "\033"
