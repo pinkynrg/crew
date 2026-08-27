@@ -1,0 +1,5 @@
+{ "version": 2, "longRunning": ["start"],
+  "projects": {
+    "svc": { "path": "svc", "type": "backend", "env": ".envs/{env}.env",
+             "tasks": { "start": "set -a && . {envfile} && set +a && echo FOO=[$FOO]; sleep 2" } } },
+  "overrides": { "svc": { "FOO": "on" } } }

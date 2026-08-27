@@ -388,14 +388,9 @@ export function loadUserConfig(flags) {
     delete cfg.projectsDir;
     changed = true;
   }
-  // `overrides` used to live in local.json (machine-local); it now lives in the committable config.json
-  // (no secrets). Migrate any legacy machine copy up into the config and strip it from local.json.
-  if (isObj(machine.overrides) && Object.keys(machine.overrides).length && !cfg.overrides) {
-    cfg.overrides = machine.overrides;
-    changed = true;
-    const rest = { ...machine }; delete rest.overrides;
-    try { writeMachine(flags, rest); } catch { /* read-only fs */ }
-  }
+  // NB: `local.json.overrides` is NOT migrated up — it's now the machine-local, per-user/secret OVERLAY that
+  // merges over `config.json.overrides` at run time (mergeOverrides). Auto-hoisting it would leak secrets
+  // into the committable config, so we never touch it here.
   if (changed) {
     try {
       writeUserConfig(path, cfg);
@@ -481,6 +476,19 @@ export function saveLastDebug(flags, names) {
     /* read-only fs — preference just won't persist */
   }
 }
+// Per-run DISABLED overrides (machine-local): { project: [key…] } where key is `VAR` / `peer.VAR`. Toggled
+// with `e` in the graph selector; honored by overrideVarsFor. Default (absent) = every override enabled.
+export function loadOverridesOff(flags) {
+  const o = loadMachine(flags).overridesOff;
+  return o && typeof o === 'object' && !Array.isArray(o) ? o : {};
+}
+export function saveOverridesOff(flags, map) {
+  try {
+    writeMachine(flags, { ...loadMachine(flags), overridesOff: map });
+  } catch {
+    /* read-only fs — preference just won't persist */
+  }
+}
 
 // Log-viewer filter memory: we persist the HIDDEN names (global, machine-local), not the shown
 // ones — so a project/guard absent from a later run is simply ignored and anything NEW defaults
@@ -529,12 +537,12 @@ export function saveGraphShown(flags, names) {
 // Order: state -> how to move -> what to toggle (f/r together) -> action -> exit. Count turns RED when
 // not all nodes are shown/selected. `scroll` (pager, only when the graph overflows) and `warn` (select,
 // e.g. "not connected") are optional. Returns the inner bar text; the caller adds the reverse-video + pad.
-function graphFooter({ mode, total, sel, vis, shown, hasRef, showRef, warn = '', scroll = '', dbg = false }) {
+function graphFooter({ mode, total, sel, vis, shown, hasRef, showRef, warn = '', scroll = '', dbg = false, env = false }) {
   const red = (n, d) => (n < d ? `\x1b[31m${n}/${d}\x1b[39m` : `${n}/${d}`); // red when partial; 39m keeps the reverse bar (not a full reset)
   const parts = [];
   if (mode === 'select') { // selector shows TWO counts: `sel` = picked-to-run, `shown` = visible after the f-filter
     parts.push(`${sel}/${total} sel · ${red(vis, total)} shown${warn ? ` ${warn}` : ''}`);
-    parts.push('↑↓←→ move', 'space pick', ...(dbg ? ['d debug'] : []), 'a all'); // `d` only when the focused node is local + has a debug task
+    parts.push('↑↓←→ move', 'space pick', ...(dbg ? ['d debug'] : []), ...(env ? ['e env'] : []), 'a all'); // d/e only when the focused node is local + has a debug task / overrides
   } else {
     parts.push(red(shown, total) + ' shown' + (warn ? ` ${warn}` : ''));
     if (scroll) parts.push(scroll);
@@ -555,6 +563,9 @@ function footerBar(inner, cols) {
   const wide = [...inner.replace(/\x1b\[[0-9;]*m/g, '')].length; // display width, ANSI-stripped
   return '\x1b[7m' + inner + ' '.repeat(Math.max(0, cols - wide)) + '\x1b[0m';
 }
+// Render a line as a dimmed backdrop behind a modal: STRIP its own colours/reverse and repaint the plain
+// text in faint dark-grey, so the whole background recedes uniformly (not a colourful faint wash). 0m at end.
+function dimText(s) { return '\x1b[2m\x1b[38;5;240m' + String(s).replace(/\x1b\[[0-9;]*m/g, '') + '\x1b[0m'; }
 
 // Split one stdin `data` chunk into individual key tokens — a single read can bundle several
 // keystrokes (fast typing, paste, PTY batching, e.g. space+Enter arriving as " \r"). An escape
@@ -581,31 +592,38 @@ function splitKeys(s) {
 // (or space) picks the cursor row and applies immediately (project `type`). Self-contained cursor/scroll/
 // selection — no screen clear, so the view never disappears. `esc`/`q` cancel.
 function makeFilterPanel(items, { paint, title = 'Show nodes', single = false } = {}) {
-  const disp = (s) => [...s.replace(/\x1b\[[0-9;]*m/g, '')].length;         // display width, ANSI-stripped
+  // An item is a selectable string, or a `{header:'TEXT'}` non-selectable group label (skipped by the
+  // cursor, excluded from `selected`/`a`). Headers are inert when none are passed (f/config stay flat).
+  const isH = (n) => n && typeof n === 'object' && 'header' in n;
+  const text = (n) => (isH(n) ? n.header : n);
+  const disp = (s) => [...String(s).replace(/\x1b\[[0-9;]*m/g, '')].length;         // display width, ANSI-stripped
   const colOf = (n) => { const f = paint && paint.get && paint.get(n); return typeof f === 'function' ? f : (x) => x; };
-  const nameMax = items.reduce((m, n) => Math.max(m, disp(n)), 0);
+  const pick = items.filter((n) => !isH(n));                                // the selectable items
+  const nameMax = items.reduce((m, n) => Math.max(m, disp(text(n))), 0);
   const innerW = Math.max(disp(title) + 4, nameMax + 6);                    // "─ title ─" and " ▸[x] name" both fit
   const H = '─';
-  let selected = new Set(items), cursor = 0, scroll = 0, active = false;
+  const firstSel = () => { const i = items.findIndex((n) => !isH(n)); return i < 0 ? 0 : i; };
+  const step = (from, dir) => { let i = from; do { i += dir; } while (i >= 0 && i < items.length && isH(items[i])); return i >= 0 && i < items.length ? i : from; };
+  let selected = new Set(pick), cursor = firstSel(), scroll = 0, active = false;
   const pad = (s, cur) => { const body = s + ' '.repeat(Math.max(0, innerW - disp(s))); return '│' + (cur ? '\x1b[7m' + body + '\x1b[27m' : body) + '│'; };
   return {
     get active() { return active; },
     get selected() { return selected; },
     get width() { return innerW + 2; },                                     // │ … │
     open(pre) { // single: pre is the current value (string) -> cursor lands on it; multi: pre is an array (even empty = exact set; null = all)
-      if (single) { const v = Array.isArray(pre) ? pre[0] : pre; selected = new Set(v != null && items.includes(v) ? [v] : []); cursor = Math.max(0, items.indexOf(v)); }
-      else { const p = Array.isArray(pre) ? pre.filter((n) => items.includes(n)) : items.slice(); selected = new Set(p); cursor = 0; }
+      if (single) { const v = Array.isArray(pre) ? pre[0] : pre; selected = new Set(v != null && pick.includes(v) ? [v] : []); cursor = v != null && items.includes(v) ? items.indexOf(v) : firstSel(); }
+      else { const p = Array.isArray(pre) ? pre.filter((n) => pick.includes(n)) : pick.slice(); selected = new Set(p); cursor = firstSel(); }
       scroll = 0; active = true;
     },
     close() { active = false; },
     key(k) {
       if (k === '\x1b') return 'cancel';
-      if (k === 'j' || k === '\x1b[B') { cursor = Math.min(items.length - 1, cursor + 1); return 'change'; }
-      if (k === 'k' || k === '\x1b[A') { cursor = Math.max(0, cursor - 1); return 'change'; }
-      if (single) { if (k === '\r' || k === '\n' || k === ' ') { selected = new Set([items[cursor]]); return 'apply'; } return null; }
+      if (k === 'j' || k === '\x1b[B') { cursor = step(cursor, 1); return 'change'; }
+      if (k === 'k' || k === '\x1b[A') { cursor = step(cursor, -1); return 'change'; }
+      if (single) { if ((k === '\r' || k === '\n' || k === ' ') && !isH(items[cursor])) { selected = new Set([items[cursor]]); return 'apply'; } return null; }
       if (k === '\r' || k === '\n') return 'apply';
-      if (k === ' ') { const n = items[cursor]; selected.has(n) ? selected.delete(n) : selected.add(n); return 'change'; }
-      if (k === 'a') { selected = items.every((n) => selected.has(n)) ? new Set() : new Set(items); return 'change'; }
+      if (k === ' ') { const n = items[cursor]; if (isH(n)) return null; selected.has(n) ? selected.delete(n) : selected.add(n); return 'change'; }
+      if (k === 'a') { selected = pick.every((n) => selected.has(n)) ? new Set() : new Set(pick); return 'change'; }
       return null;
     },
     // Unboxed, full-WIDTH list lines (no border) for rendering INSIDE a pane rather than as an overlay —
@@ -618,6 +636,7 @@ function makeFilterPanel(items, { paint, title = 'Show nodes', single = false } 
       const out = [];
       for (let i = 0; i < vis; i++) {
         const idx = scroll + i, n = items[idx], cur = idx === cursor;
+        if (isH(n)) { out.push(padW(`  \x1b[2m${text(n)}\x1b[22m`)); continue; }
         const mark = single ? (selected.has(n) ? '(•)' : '( )') : (selected.has(n) ? '[x]' : '[ ]');
         out.push(cur ? '\x1b[7m' + padW(` ▸ ${mark} ${n}`) + '\x1b[27m' : padW(` ${' '} ${mark} ${colOf(n)(n)}`));
       }
@@ -634,6 +653,7 @@ function makeFilterPanel(items, { paint, title = 'Show nodes', single = false } 
       const out = ['┌' + t + H.repeat(Math.max(0, innerW - disp(t) - 1)) + (up ? '↑' : H) + '┐'];
       for (let i = 0; i < vis; i++) {
         const idx = scroll + i, n = items[idx], cur = idx === cursor;
+        if (isH(n)) { out.push(pad(`  \x1b[2m${text(n)}\x1b[22m`, false)); continue; }
         const mark = single ? (selected.has(n) ? '(•)' : '( )') : (selected.has(n) ? '[x]' : '[ ]');
         out.push(pad(` ${cur ? '▸' : ' '}${mark} ${cur ? n : colOf(n)(n)}`, cur));
       }
@@ -1021,14 +1041,45 @@ export function wireText(text, peers) {
 // Secrets/personal values live in local.json (untracked), never in the shared config. Overrides
 // beat the base env file and the URL swap.
 export const OVERRIDE_WHEN_LOCAL = 'whenLocal';
-export function overrideVarsFor(overrides, name, running) {
+export function overrideVarsFor(overrides, name, running, off) {
+  const skip = off instanceof Set ? off : new Set(off || []); // per-run disabled keys: bare `VAR` or `peer.VAR` (the `e` toggle)
   const o = overrides && overrides[name];
   if (!o || typeof o !== 'object') return {};
   const vars = {};
-  for (const [k, v] of Object.entries(o)) if (k !== OVERRIDE_WHEN_LOCAL) vars[k] = v;
+  for (const [k, v] of Object.entries(o)) if (k !== OVERRIDE_WHEN_LOCAL && !skip.has(k)) vars[k] = v;
   const wl = o[OVERRIDE_WHEN_LOCAL];
-  if (wl && typeof wl === 'object') for (const peer of running || []) if (wl[peer] && typeof wl[peer] === 'object') Object.assign(vars, wl[peer]);
+  if (wl && typeof wl === 'object') for (const peer of running || []) if (wl[peer] && typeof wl[peer] === 'object') for (const [k, v] of Object.entries(wl[peer])) if (!skip.has(`${peer}.${k}`)) vars[k] = v;
   return vars;
+}
+// The keys `overrideVarsFor`/the `e` toggle use to identify each override of a project: bare `VAR`, and
+// `peer.VAR` for a whenLocal entry. Order: bare first, then per-peer. Each row = { key, var, value, peer }.
+export function overrideEntries(mergedForProject) {
+  const o = mergedForProject || {};
+  const out = [];
+  for (const [k, v] of Object.entries(o)) if (k !== OVERRIDE_WHEN_LOCAL) out.push({ key: k, var: k, value: String(v), peer: '' });
+  const wl = o[OVERRIDE_WHEN_LOCAL];
+  if (wl && typeof wl === 'object') for (const peer of Object.keys(wl)) if (wl[peer] && typeof wl[peer] === 'object') for (const [vk, vv] of Object.entries(wl[peer])) out.push({ key: `${peer}.${vk}`, var: vk, value: String(vv), peer });
+  return out;
+}
+// TWO-LAYER overrides: `config.json.overrides` (committable, shared, non-secret) MERGED with
+// `local.json.overrides` (machine-local, gitignored — per-user/secret values like a DB password).
+// local WINS, per project + per var + per whenLocal[peer][var]. So DB_HOST/PORT/NAME can be shared in
+// the config while only DB_PASSWORD lives in each dev's local.json.
+export function mergeOverrides(cfgOv, localOv) {
+  const out = {};
+  for (const p of new Set([...Object.keys(cfgOv || {}), ...Object.keys(localOv || {})])) {
+    const a = (cfgOv && cfgOv[p]) || {}, b = (localOv && localOv[p]) || {}, m = {};
+    for (const [k, v] of Object.entries(a)) if (k !== OVERRIDE_WHEN_LOCAL) m[k] = v;
+    for (const [k, v] of Object.entries(b)) if (k !== OVERRIDE_WHEN_LOCAL) m[k] = v; // local bare wins
+    const aw = a[OVERRIDE_WHEN_LOCAL], bw = b[OVERRIDE_WHEN_LOCAL];
+    if ((aw && typeof aw === 'object') || (bw && typeof bw === 'object')) {
+      const wl = {};
+      for (const peer of new Set([...Object.keys(aw || {}), ...Object.keys(bw || {})])) wl[peer] = { ...((aw && aw[peer]) || {}), ...((bw && bw[peer]) || {}) }; // local peer-var wins
+      m[OVERRIDE_WHEN_LOCAL] = wl;
+    }
+    if (Object.keys(m).length) out[p] = m;
+  }
+  return out;
 }
 // dotenv/sh-safe: quote only values with characters outside a safe set, so plain keys/tokens
 // stay unquoted (max compat with both `. envfile` sourcing and dotenv-style loaders).
@@ -1966,7 +2017,7 @@ export async function runGuards(cfg, members) {
 // origin, and materialize a FRESH temp file per run (stateless — regenerated every start,
 // deleted on teardown). {envfile} in the command is replaced with the temp path. Peers not
 // in the running set (or without a `local`) stay remote.
-export function wireRun(userPath, runnable, members, { overrides = {} }) {
+export function wireRun(userPath, runnable, members, { overrides = {}, overridesOff = {} }) {
   const peers = members
     .filter((m) => m.project.local)
     .map((m) => ({ name: m.name, tokens: projectIdentity(m.project).tokens, origin: originOf(m.project.local) || m.project.local, local: m.project.local }));
@@ -1981,7 +2032,7 @@ export function wireRun(userPath, runnable, members, { overrides = {} }) {
     const basePath = resolve(projectDir(r.project), r.envFile);
     if (!pathExists(basePath)) fail(`project '${r.name}': env file not found: ${basePath}`);
     const myPeers = peers.filter((p) => p.name !== r.name);
-    const overrideVars = overrideVarsFor(overrides, r.name, running);
+    const overrideVars = overrideVarsFor(overrides, r.name, running, overridesOff[r.name]);
     let baseText = '';
     try {
       baseText = readFileSync(basePath, 'utf8');
@@ -2091,8 +2142,9 @@ export async function cmdRun(flags, task, rest) {
 
   // Materialize wired env files (fills {envfile}); fresh per run, cleaned up after.
   // Env overrides live in the config (committable — no secrets); applied to each project's wired env.
-  const overrides = cfg.overrides || {};
-  const { cleanup, warnings: wireWarnings } = wireRun(userPath, runnable, members, { overrides });
+  const overrides = mergeOverrides(cfg.overrides, loadMachine(flags).overrides); // shared (config) + per-user/secret (local.json), local wins
+  const overridesOff = loadOverridesOff(flags); // per-run disabled overrides (the `e` toggle)
+  const { cleanup, warnings: wireWarnings } = wireRun(userPath, runnable, members, { overrides, overridesOff });
 
   const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
 
@@ -2367,6 +2419,15 @@ async function graphSelect(flags, cfg, opts = {}) {
   const canDebug = (n) => { const t = cfg.projects[n] && cfg.projects[n].tasks; return debugToggle && !!(t && t.debug != null); }; // running node has a `tasks.debug`
   // debug ⊂ active: which local projects launch `tasks.debug`. Only eligible + running nodes qualify.
   let debug = new Set(debugToggle ? loadLastDebug(flags).filter((n) => active.has(n) && canDebug(n)) : []);
+  // `e` overrides toggle (start only, same gate as debug): merged config+local overrides per project; `e`
+  // overlays a checklist to enable/disable each for THIS run. Disabled set persisted machine-local.
+  const cfgOv = debugToggle ? (cfg.overrides || {}) : {};                 // global (shared, committable)
+  const localOv = debugToggle ? (loadMachine(flags).overrides || {}) : {}; // local (machine-only, wins)
+  const mergedOv = debugToggle ? mergeOverrides(cfgOv, localOv) : {};
+  const ovEntriesFor = (n) => overrideEntries(mergedOv[n]);
+  const canEnv = (n) => debugToggle && active.has(n) && ovEntriesFor(n).length > 0;
+  const off = loadOverridesOff(flags);            // { project: [disabled key…] }, mutated + persisted on apply
+  let ePanel = null, eNode = null, eLabelKey = null; // overrides checklist (built per node when `e` is pressed)
   let cursor = [...nodes].find((n) => shown.has(n)) || nodes[0];
   const panel = makeFilterPanel(nodes, { paint, title: 'Show nodes' }); // `f` overlays this on the graph's right
   const remoteEnv = selEnv != null ? resolveEnvs(cfg, nodes, selEnv).resolved : new Map(); // where each service is deployed (crew resolve) — shown for the ones NOT run locally
@@ -2384,24 +2445,27 @@ async function graphSelect(flags, cfg, opts = {}) {
   return new Promise((resolve) => {
     const w = (x) => stdout.write(x);
     const wasRaw = stdin.isRaw;
-    let top = 0, vpad = 0, mxw = 0, layout = draw(); // vpad/mxw = current centring offsets (kept so a mouse click can be mapped back to a node)
+    let top = 0, vpad = 0, layout = draw(); // vpad = current vertical centring offset
     const body = () => Math.max(3, (stdout.rows || 24) - 1); // reserve 1 row: the footer bar
-    const cleanup = () => { stdin.removeListener('data', onData); stdout.removeListener('resize', repaint); w('\x1b[?1000l\x1b[?1006l\x1b[?7h\x1b[?25h\x1b[?1049l'); if (stdin.setRawMode) stdin.setRawMode(wasRaw); stdin.pause(); };
+    const cleanup = () => { stdin.removeListener('data', onData); stdout.removeListener('resize', repaint); w('\x1b[?7h\x1b[?25h\x1b[?1049l'); if (stdin.setRawMode) stdin.setRawMode(wasRaw); stdin.pause(); };
     const cpw = (s) => [...s.replace(/\x1b\[[0-9;]*m/g, '')].length; // display width, ANSI-stripped
     const repaint = () => {
       const R = body(), cols = stdout.columns || 80, lines = layout.text.split('\n');
-      const gw = Math.max(0, ...lines.map(cpw)), mx = ' '.repeat(Math.max(0, (cols - gw) >> 1)); mxw = mx.length; // centre horizontally
+      const gw = Math.max(0, ...lines.map(cpw)), mx = ' '.repeat(Math.max(0, (cols - gw) >> 1)); // centre horizontally
       vpad = 0;
       if (lines.length <= R) { vpad = (R - lines.length) >> 1; top = 0; }                          // fits vertically -> centre it
       else { const y = layout.place.get(cursor).y0; if (y < top) top = y; else if (y + 3 > top + R) top = y + 3 - R; top = Math.max(0, Math.min(top, lines.length - R)); } // taller -> scroll cursor into view
+      // A modal (node filter `f` or overrides `e`) dims the whole graph + footer and floats a CENTERED box.
+      const modal = panel.active ? panel : (ePanel && ePanel.active ? ePanel : null);
+      const shade = modal ? dimText : (x) => x;
       let out = '\x1b[H';
-      for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + (li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
+      for (let i = 0; i < R; i++) { const li = i - vpad; out += '\x1b[K' + shade(li >= 0 && top + li < lines.length ? mx + lines[top + li] : '') + '\x1b[0m\r\n'; }
       const split = cpw(connectivityStatus(cfg, depEdges, [...active], false)) > 0; // non-verbose returns islands text only when disconnected
-      const bar = graphFooter({ mode: 'select', total: nodes.length, sel: active.size, vis: shown.size, hasRef, showRef, warn: split ? '⚠ not connected' : '', dbg: active.has(cursor) && canDebug(cursor) });
-      out += '\x1b[K' + footerBar(bar, cols); // one full-width reverse-video footer (shared with the pager + guards editor)
-      if (panel.active) {                                                                 // filter panel overlays the graph's right columns (graph stays visible)
-        const pr = panel.rows(R), col = Math.max(1, cols - panel.width + 1);
-        for (let i = 0; i < pr.length && i < R; i++) out += `\x1b[${i + 1};${col}H` + pr[i];
+      const bar = graphFooter({ mode: 'select', total: nodes.length, sel: active.size, vis: shown.size, hasRef, showRef, warn: split ? '⚠ not connected' : '', dbg: active.has(cursor) && canDebug(cursor), env: canEnv(cursor) });
+      out += '\x1b[K' + shade(footerBar(bar, cols)); // one full-width reverse-video footer (shared with the pager + guards editor)
+      if (modal) { // centered box over the dimmed backdrop (bright)
+        const pr = modal.rows(R), w = modal.width, mtop = Math.max(1, ((R - pr.length) >> 1) + 1), col = Math.max(1, ((cols - w) >> 1) + 1);
+        for (let i = 0; i < pr.length && mtop + i <= R; i++) out += `\x1b[${mtop + i};${col}H` + pr[i];
         out += '\x1b[0m';
       }
       w(out);
@@ -2416,26 +2480,11 @@ async function graphSelect(flags, cfg, opts = {}) {
     const restoreSnap = () => { if (!snap) return; shown = new Set(snap.shown); active = new Set(snap.active); debug = new Set(snap.debug); cursor = snap.cursor; layout = draw(); };
     const moveH = (d) => { const p = layout.place.get(cursor); if (!p) return; const list = layout.layers[p.layer], i = list.indexOf(cursor); cursor = list[Math.max(0, Math.min(list.length - 1, i + d))]; }; // no-op when the graph is empty (everything filtered out)
     const moveV = (d) => { const p0 = layout.place.get(cursor); if (!p0) return; let l = p0.layer + d; while (l >= 0 && l < layout.layers.length && !layout.layers[l].length) l += d; if (l < 0 || l >= layout.layers.length || !layout.layers[l].length) return; const cx = p0.cx; let best = layout.layers[l][0], bd = Infinity; for (const n of layout.layers[l]) { const dd = Math.abs(layout.place.get(n).cx - cx); if (dd < bd) { bd = dd; best = n; } } cursor = best; };
-    const hitTest = (col, row) => { // SGR 1-based screen (col,row) -> node whose box contains it, else null
-      const gx = col - 1 - mxw, gy = top + (row - 1 - vpad);
-      for (const n of nodes) { const p = layout.place.get(n); if (p && gx >= p.x0 && gx < p.x0 + p.w && gy >= p.y0 && gy < p.y0 + p.h) return n; }
-      return null;
-    };
     // Handle ONE key. Returns true once the selector has resolved (so onData stops feeding the rest of a
     // coalesced chunk — e.g. Enter then esc arriving as one read must apply the filter AND still act).
     const handleKey = (key) => {
-      const m = key.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/); // SGR mouse: btn;col;row + M(press)/m(release)
-      if (m) {
-        if (panel.active) return false;                                                  // ignore mouse while the filter panel is open
-        const btn = +m[1];
-        if (m[4] === 'M' && btn === 64) { top -= 3; repaint(); return false; }            // wheel up
-        if (m[4] === 'M' && btn === 65) { top += 3; repaint(); return false; }            // wheel down
-        if (m[4] === 'M' && (btn & 0b11) === 0 && !(btn & 0b1100000)) {                   // left-button press (not motion/wheel)
-          const hit = hitTest(+m[2], +m[3]);
-          if (hit) { cursor = hit; if (active.has(hit)) { active.delete(hit); debug.delete(hit); } else active.add(hit); layout = draw(); repaint(); }
-        }
-        return false;
-      }
+      // Mouse is not used in the selector — reporting is never enabled (below), so no SGR sequences arrive.
+      // Node enable/disable + scrolling are keyboard-only (space / ↑↓←→).
       if (panel.active) { // filter panel owns keys while open: space previews live, Enter confirms + persists, esc/q revert
         const r = panel.key(key);
         if (r === 'change') previewShown([...panel.selected]);                           // graph updates on every toggle (no persist yet)
@@ -2444,11 +2493,32 @@ async function graphSelect(flags, cfg, opts = {}) {
         repaint();
         return false;
       }
+      if (ePanel && ePanel.active) { // overrides checklist owns keys: space toggles, Enter persists the disabled set, esc reverts
+        const r = ePanel.key(key);
+        if (r === 'apply') { const disabled = [...eLabelKey.entries()].filter(([lbl]) => !ePanel.selected.has(lbl)).map(([, k]) => k); if (disabled.length) off[eNode] = disabled; else delete off[eNode]; saveOverridesOff(flags, off); ePanel = null; }
+        else if (r === 'cancel') ePanel = null;
+        repaint();
+        return false;
+      }
       if (key === '\x03' || key === '\x1b') { cleanup(); resolve(null); return true; }
       if (key === '\r' || key === '\n') { cleanup(); resolve({ picked: [...active], debug: [...debug] }); return true; }
       if (key === 'r' && hasRef) { showRef = !showRef; saveGraphRefs(flags, showRef); layout = draw(); repaint(); return false; }
       if (key === 'f') { snap = { shown: new Set(shown), active: new Set(active), debug: new Set(debug), cursor }; panel.open([...shown]); repaint(); return false; }
       if (key === 'd') { if (active.has(cursor) && canDebug(cursor)) { debug.has(cursor) ? debug.delete(cursor) : debug.add(cursor); layout = draw(); repaint(); } return false; } // toggle debug — only for a running node that has a `tasks.debug`
+      if (key === 'e') { // open the overrides checklist for the focused node — grouped GLOBAL (shared) then LOCAL (wins)
+        if (!canEnv(cursor)) return false;
+        const lEntries = overrideEntries(localOv[cursor]);
+        const localKeys = new Set(lEntries.map((e) => e.key));
+        const gEntries = overrideEntries(cfgOv[cursor]).filter((e) => !localKeys.has(e.key)); // a global shadowed by a local shows only under local (which wins)
+        const items = []; eLabelKey = new Map();
+        const addRow = (en) => { const lbl = `${en.var} = ${en.value}${en.peer ? `  (when ${en.peer})` : ''}`; eLabelKey.set(lbl, en.key); items.push(lbl); };
+        if (gEntries.length) { items.push({ header: 'global (shared config)' }); gEntries.forEach(addRow); }
+        if (lEntries.length) { items.push({ header: 'local (wins · machine-only)' }); lEntries.forEach(addRow); }
+        const offSet = new Set(off[cursor] || []); eNode = cursor;
+        ePanel = makeFilterPanel(items, { title: `overrides · ${cursor}` });
+        ePanel.open(items.filter((x) => typeof x === 'string' && !offSet.has(eLabelKey.get(x)))); // preselect the ENABLED ones
+        repaint(); return false;
+      }
       if (key === ' ') { if (active.has(cursor)) { active.delete(cursor); debug.delete(cursor); } else active.add(cursor); }
       else if (key === 'a') { active = [...shown].every((n) => active.has(n)) ? new Set() : new Set(shown); for (const n of [...debug]) if (!active.has(n)) debug.delete(n); } // all/none among VISIBLE nodes; debug ⊂ active
       else if (key === '\x1b[C' || key === 'l') moveH(1);
@@ -2462,7 +2532,7 @@ async function graphSelect(flags, cfg, opts = {}) {
     const onData = (buf) => { for (const key of splitKeys(buf.toString())) if (handleKey(key)) return; };
     if (stdin.setRawMode) stdin.setRawMode(true);
     stdin.resume();
-    w('\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1006h'); // alt screen + hide cursor + no-wrap + SGR mouse reporting
+    w('\x1b[?1049h\x1b[?25l\x1b[?7l'); // alt screen + hide cursor + no-wrap (no mouse reporting — selector is keyboard-only)
     stdin.on('data', onData); stdout.on('resize', repaint);
     repaint();
   });
@@ -2807,9 +2877,12 @@ async function configForm(flags, opts = {}) {
   // machine + the module-global PROJECTS_DIR so every project's path check / folder picker / match-labels
   // reflects it right away. Disk (local.json) is still only written on save.
   const syncProjectsDir = (v) => { const pd = String(v).trim(); if (pd) machine.projectsDir = pd; else delete machine.projectsDir; PROJECTS_DIR = pd ? resolvePath(pd) : null; };
-  // Env overrides now live in the committable config.json (no secrets) — edited as the per-project block.
+  // Env overrides are TWO layers, both editable as per-project blocks: shared lives in the committable
+  // config.json (no secrets), local lives in machine-only local.json and WINS at run time (see mergeOverrides).
   cfg.overrides = isObj(cfg.overrides) ? cfg.overrides : {};
-  const overrides = cfg.overrides;
+  machine.overrides = isObj(machine.overrides) ? machine.overrides : {};
+  const overrides = cfg.overrides;          // shared layer (config.json) — persist()
+  const localOverrides = machine.overrides; // local layer (local.json)   — writeMachine()
 
   const projectsSection = {
     key: 'projects', title: 'PROJECTS', noun: 'project', newLabel: '+ New project',
@@ -2829,14 +2902,16 @@ async function configForm(flags, opts = {}) {
       // env's host value (blank = no match). Space-separate to give one env several hosts. Union with any
       // labels already stored so existing data stays editable.
       { key: 'match', label: 'match', kind: 'match' },
-      // env overrides (in config.json) — its own titled block at the end (see save/del below)
-      { key: 'overrides', label: 'overrides', kind: 'overrides', groupTitle: 'Environment Overrides' },
+      // env overrides — TWO titled blocks (see save/del below): shared writes config.json (committable),
+      // local writes local.json (machine-only, secrets, WINS at run time). Same inline row editor for both.
+      { key: 'overrides', label: 'overrides', kind: 'overrides', groupTitle: 'Environment Overrides · shared (config)' },
+      { key: 'localOverrides', label: 'local overrides', kind: 'overrides', groupTitle: 'Environment Overrides · local (wins · machine-only)' },
     ],
     load: (n) => {
       const p = cfg.projects[n] || {};
-      return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', env: p.env || '', local: p.local || '', match: (p.match && typeof p.match === 'object' && !Array.isArray(p.match)) ? { ...p.match } : {}, guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: { ...(p.tasks || {}) }, overrides: overridesToRows(overrides[n]), isNew: false, orig: n };
+      return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', env: p.env || '', local: p.local || '', match: (p.match && typeof p.match === 'object' && !Array.isArray(p.match)) ? { ...p.match } : {}, guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: { ...(p.tasks || {}) }, overrides: overridesToRows(overrides[n]), localOverrides: overridesToRows(localOverrides[n]), isNew: false, orig: n };
     },
-    blank: () => ({ name: '', path: '', type: 'other', runner: '', env: '', local: '', match: {}, guards: [], defaultBranch: '', tasks: {}, overrides: [], isNew: true, orig: null }),
+    blank: () => ({ name: '', path: '', type: 'other', runner: '', env: '', local: '', match: {}, guards: [], defaultBranch: '', tasks: {}, overrides: [], localOverrides: [], isNew: true, orig: null }),
     save: (f) => {
       const name = String(f.name).trim();
       if (!name) return 'name is required';
@@ -2854,14 +2929,19 @@ async function configForm(flags, opts = {}) {
       setOrDel(proj, 'tasks', f.tasks, f.tasks && Object.keys(f.tasks).length > 0);
       setOrDel(proj, 'guards', f.guards, Array.isArray(f.guards) && f.guards.length > 0);
       cfg.projects[name] = proj;
-      // env overrides live in cfg.overrides now (moves with a rename; empty = no entry) — one persist writes it
-      if (renaming) delete overrides[f.orig];
-      const entry = rowsToOverrides(f.overrides);
-      if (Object.keys(entry).length) overrides[name] = entry; else delete overrides[name];
+      // env overrides: shared -> cfg.overrides (persist), local -> machine.overrides (writeMachine). Both move
+      // with a rename; empty = no entry. local.json is NOT touched unless a local override actually changed.
+      if (renaming) { delete overrides[f.orig]; delete localOverrides[f.orig]; }
+      const shared = rowsToOverrides(f.overrides);
+      if (Object.keys(shared).length) overrides[name] = shared; else delete overrides[name];
+      const local = rowsToOverrides(f.localOverrides);
+      const hadLocal = localOverrides[name] != null || renaming;
+      if (Object.keys(local).length) localOverrides[name] = local; else delete localOverrides[name];
       persist();
+      if (hadLocal || Object.keys(local).length) writeMachine(flags, machine);
       return null;
     },
-    del: (n) => { delete cfg.projects[n]; delete overrides[n]; persist(); },
+    del: (n) => { delete cfg.projects[n]; delete overrides[n]; const hadLocal = localOverrides[n] != null; delete localOverrides[n]; persist(); if (hadLocal) writeMachine(flags, machine); },
     info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveProjectPath(String(f.path).trim()); } catch { return `${DIM}path${UNDIM}  ${String(f.path).trim()}  ${DIM}(set a projects dir in Settings)${UNDIM}`; } return pathExists(abs) ? `${DIM}path${UNDIM}  ${abs}` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
   };
 
@@ -3139,9 +3219,10 @@ async function configForm(flags, opts = {}) {
       // ---- compose ---- (home + per-row \x1b[K, NEVER a full-screen \x1b[2J: 2J pushes the erased
       // lines into scrollback on some terminals, making the editor "scrollable". The graph pager and
       // log viewer avoid it the same way — every row is rewritten each frame, so [K is enough.)
+      const shade = modal ? dimText : (x) => x; // a modal dims the whole editor behind its (bright) box
       let out = '\x1b[H';
-      out += '\x1b[K ' + '\x1b[1mcrew\x1b[22m' + DIM + '  ·  config editor' + UNDIM + '\r\n';
-      for (let r = 0; r < body; r++) out += '\x1b[K ' + padP(L[r] || '', LW) + ' ' + DIM + '│' + UNDIM + ' ' + (Rn[r] || '') + '\r\n';
+      out += '\x1b[K' + shade(' \x1b[1mcrew\x1b[22m' + DIM + '  ·  config editor' + UNDIM) + '\r\n';
+      for (let r = 0; r < body; r++) out += '\x1b[K' + shade(' ' + padP(L[r] || '', LW) + ' ' + DIM + '│' + UNDIM + ' ' + (Rn[r] || '')) + '\r\n';
       // ---- footer ----
       let parts;
       if (modal) parts = modal.choices.map((c) => c.label);
@@ -3152,7 +3233,7 @@ async function configForm(flags, opts = {}) {
       else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', 'esc quit'];
       else { const fld = s.fields[fi]; const eh = (fld.key === 'path' && s.key === 'projects') ? '⏎ pick folder' : fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'list' || fld.kind === 'map' ? '⏎ rows' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew || s.fixed ? [] : ['d delete']), 'esc ← list'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
-      out += '\x1b[K' + footerBar(footerText(parts), C);
+      out += '\x1b[K' + shade(footerBar(footerText(parts), C));
       // ---- modal overlay (roomy, perfectly-centered box; captures all keys until a choice runs) ----
       if (modal) {
         const dw = (x) => [...String(x).replace(/\x1b\[[0-9;]*m/g, '')].length;
@@ -3256,7 +3337,7 @@ async function configForm(flags, opts = {}) {
         else if (!isMatch && k === 'd') { if (F.ri < n) { F.rows.splice(F.ri, 1); F.ri = Math.min(F.ri, F.rows.length); F.ci = 0; } } // match: keys can't be removed
         else if (k === '\x1b' || k === '\x03') { // commit rows back to the form
           if (isMatch) form.match = matchCommit(F.rows.map((r) => [r.env, r.host]));
-          else form.overrides = F.rows.filter((r) => String(r.var || '').trim());
+          else form[F.field.key] = F.rows.filter((r) => String(r.var || '').trim());
           ovEdit = null; dirty = true;
         }
         else return false;
@@ -3410,43 +3491,38 @@ export function cmdCheck(flags) {
   const usedGuards = new Set(Object.values(cfg.projects || {}).flatMap((p) => (isObj(p) && Array.isArray(p.guards) ? p.guards : [])));
   for (const name of Object.keys(guards)) if (!usedGuards.has(name)) W(`guard '${name}' is defined but used by no project`);
 
-  // Env overrides (config.json — committable). whenLocal is the reserved nested key.
+  // Env overrides — validate BOTH layers: config.json (committable; warn on secret-LOOKING keys) and the
+  // local.json overlay (machine-local; secrets belong here, no warn). Same shape; whenLocal is reserved.
   const projNames = new Set(Object.keys(cfg.projects || {}));
-  if (cfg.overrides != null) {
-    if (!isObj(cfg.overrides)) E(`overrides must be an object`);
-    else
-      for (const [proj, vars] of Object.entries(cfg.overrides)) {
-        if (!projNames.has(proj)) W(`overrides: unknown project '${proj}'`);
-        if (!isObj(vars)) {
-          E(`overrides['${proj}'] must be an object of VAR:value`);
+  const SECRETISH = /(pass|pwd|secret|token|credential|private[_-]?key|api[_-]?key)/i;
+  const checkOverrides = (src, label, warnSecret) => {
+    if (src == null) return;
+    if (!isObj(src)) { E(`${label} must be an object`); return; }
+    const checkVar = (where, k, v) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) W(`${where}: invalid env var name '${k}'`);
+      if (v === null || typeof v === 'object') W(`${where}.${k} must be a string`);
+      if (warnSecret && SECRETISH.test(k)) W(`${where}.${k} looks secret — put it in local.json overrides (machine-local, gitignored), not the committable config`);
+    };
+    for (const [proj, vars] of Object.entries(src)) {
+      if (!projNames.has(proj)) W(`${label}: unknown project '${proj}'`);
+      if (!isObj(vars)) { E(`${label}['${proj}'] must be an object of VAR:value`); continue; }
+      for (const [k, v] of Object.entries(vars)) {
+        if (k === OVERRIDE_WHEN_LOCAL) {
+          if (!isObj(v)) { E(`${label}['${proj}'].whenLocal must be an object keyed by project`); continue; }
+          for (const [peer, pv] of Object.entries(v)) {
+            if (!projNames.has(peer)) W(`${label}['${proj}'].whenLocal: unknown project '${peer}'`);
+            if (!isObj(pv)) { E(`${label}['${proj}'].whenLocal['${peer}'] must be an object of VAR:value`); continue; }
+            for (const [vk, vv] of Object.entries(pv)) checkVar(`${label}['${proj}'].whenLocal['${peer}']`, vk, vv);
+          }
           continue;
         }
-        const checkVar = (where, k, v) => {
-          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) W(`${where}: invalid env var name '${k}'`);
-          if (v === null || typeof v === 'object') W(`${where}.${k} must be a string`);
-        };
-        for (const [k, v] of Object.entries(vars)) {
-          if (k === OVERRIDE_WHEN_LOCAL) {
-            if (!isObj(v)) {
-              E(`overrides['${proj}'].whenLocal must be an object keyed by project`);
-              continue;
-            }
-            for (const [peer, pv] of Object.entries(v)) {
-              if (!projNames.has(peer)) W(`overrides['${proj}'].whenLocal: unknown project '${peer}'`);
-              if (!isObj(pv)) {
-                E(`overrides['${proj}'].whenLocal['${peer}'] must be an object of VAR:value`);
-                continue;
-              }
-              for (const [vk, vv] of Object.entries(pv)) checkVar(`overrides['${proj}'].whenLocal['${peer}']`, vk, vv);
-            }
-            continue;
-          }
-          checkVar(`overrides['${proj}']`, k, v);
-        }
+        checkVar(`${label}['${proj}']`, k, v);
       }
-  }
-  // Machine-local local.json (remembered selection + prefs).
+    }
+  };
   const machine = loadMachine(flags);
+  checkOverrides(cfg.overrides, 'overrides', true);
+  checkOverrides(machine.overrides, 'local.json overrides', false);
   if (Array.isArray(machine.lastSelection)) for (const n of machine.lastSelection) if (!projNames.has(n)) W(`local.json lastSelection: unknown project '${n}'`);
   if (Array.isArray(machine.lastDebug)) for (const n of machine.lastDebug) if (!projNames.has(n)) W(`local.json lastDebug: unknown project '${n}'`);
 

@@ -87,30 +87,40 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   `resolve`) exit 0. `crew check` keeps its own full report (never gated); `crew list` shows all projects
   (red/green dot per folder) plus the `warnMissing` banner. So a pulled config on a machine that hasn't
   cloned everything self-explains instead of erroring cryptically — no "set projectsDir" warning needed.
-- `overrides` (top-level in the committable `config.json` — no secrets yet, so it's shared like the rest;
-  a legacy machine-local `local.json.overrides` auto-migrates up into `config.json` on load and is stripped
-  from `local.json`): extra env vars upserted into a project's **wired** env file (the one
-  crew materializes for `{envfile}`; a project without `{envfile}` can't be overridden).
+- `overrides`: extra env vars upserted into a project's **wired** env file (the one crew materializes for
+  `{envfile}`; a project without `{envfile}` can't be overridden). **TWO layers**, merged by
+  `mergeOverrides(cfgOv, localOv)` with the **local layer WINNING** per project / var / whenLocal-peer-var:
+  the **shared** layer is top-level `overrides` in the committable `config.json` (no secrets — shared like the
+  rest); the **local** layer is `local.json.overrides` (machine-local, gitignored — the home for per-user /
+  secret values, e.g. a DB password). A legacy `local.json.overrides` is NO LONGER migrated up into
+  `config.json` — it IS the overlay now (the old migrate-up in `loadUserConfig` was removed).
   `overrides["<project>"]` has two entry kinds: bare `VAR:val` applied whenever `<project>`
   starts (self/unconditional — e.g. a Temporal queue so the local worker consumes `foo-local`
   not shared `foo`); and `whenLocal: {"<peer>": {VAR:val}}` applied only when `<peer>` is also
   being started (`running` set in `wireRun`) — e.g. point a URL at a local dependency's exact
   host+path (which the host-only URL swap can't do), but only while it's up. Resolved by
-  `overrideVarsFor(overrides, name, running)` (`whenLocal` wins over bare; reserved key
-  `OVERRIDE_WHEN_LOCAL`) and applied by `applyEnvOverrides` in `wireRun`, after `wireText`;
+  `overrideVarsFor(overrides, name, running, off)` — `off` is a per-project disabled Set (keys `VAR` or
+  `peer.VAR`) from the graph-selector `e` toggle (persisted machine-local as `local.json.overridesOff`), so a
+  user can enable/disable individual overrides for one run; `whenLocal` wins over bare; reserved key
+  `OVERRIDE_WHEN_LOCAL` — and applied by `applyEnvOverrides` in `wireRun`, after `wireText`;
   overrides beat the base file and the URL swap. Upsert = replace an existing `VAR=`/`export
   VAR=` line in place, else append; values quoted only when unsafe (non-string values skipped
   with a warning). Also the escape hatch for cross-env wiring (inject a key an env lacks) when
   env derivation + the URL swap don't cover a case. crew stays agnostic — a plain
-  per-project table. Edited in `crew config` as one **Environment Overrides** block at the END of each
-  project's form (`kind: 'overrides'`): an INLINE list, one line per override — `VAR = value   when <peer>
-  local` (peer blank = unconditional/bare). Bare `VAR:val` and `whenLocal` are flattened into ONE flat row
-  list `{var, value, peer}` (`overridesToRows`) and rebuilt to the stored shape on save (`rowsToOverrides`) —
-  so `whenLocal` is a per-row OPTION (the `when local` column, a single-select picker of the other projects +
-  an "always" choice), NOT a separate field. `⏎` on the block enters in-place row-edit (`ovEdit = {rows, ri,
-  ci}`, `ci` 0=VAR 1=value 2=when): `↑↓` rows, `←→` columns, `⏎` edits the focused cell (VAR/value inline,
-  `when` opens the picker), `d` removes, `esc` commits. Written to `config.json` via `persist()` (moved on
-  rename, cleared on delete; empty = no entry). `crew check` validates both stored forms.
+  per-project table. Edited in `crew config` as **TWO inline Environment Overrides blocks** at the END of each
+  project's form (both `kind: 'overrides'`, same row editor, distinguished only by `field.key`): **· shared
+  (config)** → `cfg.overrides` (written by `persist()`) and **· local (wins · machine-only)** →
+  `machine.overrides` (written by `writeMachine`, loaded via `localOverrides`). Each is an INLINE list, one line
+  per override — `VAR = value   when <peer> local` (peer blank = unconditional/bare). Bare `VAR:val` and
+  `whenLocal` are flattened into ONE flat row list `{var, value, peer}` (`overridesToRows`) and rebuilt to the
+  stored shape on save (`rowsToOverrides`) — so `whenLocal` is a per-row OPTION (the `when local` column, a
+  single-select picker of the other projects + an "always" choice), NOT a separate field. `⏎` on a block enters
+  in-place row-edit (`ovEdit = {field, rows, ri, ci}`, `ci` 0=VAR 1=value 2=when): `↑↓` rows, `←→` columns, `⏎`
+  edits the focused cell (VAR/value inline, `when` opens the picker), `d` removes, `esc` commits to
+  `form[field.key]`. Both blocks move on rename and clear on delete (shared via `persist`, local via
+  `writeMachine` — local.json untouched unless a local override actually changed). `crew check` validates both
+  stored forms in BOTH files (`checkOverrides` — a secret-looking key in the shared `config.json` layer WARNs;
+  the local layer doesn't).
 - No groups, no `run` command. `start`/`workspace`/`claude` act on a **multiselect selection**
   (`selectMembers`, preselected with `lastSelection`); projects are never named on the CLI there
   (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
@@ -238,12 +248,13 @@ lifecycle); each **project** owns task semantics. crew never interprets a task b
   open; last-writer-wins over external edits) that also **strips unknown keys** (`pruneConfig` whitelists
   top-level to `TOP_KEYS`, per-project to `PROJECT_KEYS`, per-guard to `GUARD_KEYS`), so a save normalizes the
   file. (The migration write-back in `loadUserConfig` does NOT prune — load never silently strips.) Each
-  section owns `load/save/del`: Projects/Guards (incl. each project's `overrides` block) write the user
-  config via `persist()`; only the Settings `projectsDir` field still writes `local.json` via `writeMachine`.
-  Env **overrides live on the PROJECT
-  form** as one inline **Environment Overrides** block (`kind: 'overrides'`, the `overridesToRows`/
-  `rowsToOverrides` round-trip described above) — `cfg.overrides[project]` moves on a rename and is deleted
-  with the project (all via the one `persist()`), so there's no separate Overrides section. **Semi-auto add**: `⏎` on a project's `path` field opens
+  section owns `load/save/del`: Projects/Guards write the user config via `persist()`; the Settings
+  `projectsDir` field AND each project's **local** overrides block write `local.json` via `writeMachine`.
+  Env **overrides live on the PROJECT form** as the TWO inline **Environment Overrides** blocks described above
+  (`kind: 'overrides'`; `overridesToRows`/`rowsToOverrides` round-trip) — the **shared** block
+  (`cfg.overrides[project]`, `persist()`) and the **local** block (`machine.overrides[project]`,
+  `writeMachine`); both move on a rename and are deleted with the project, so there's no separate Overrides
+  section. **Semi-auto add**: `⏎` on a project's `path` field opens
   a **folder picker** (`openFolderPick` — the subfolders of `projectsDir` via `projectDirs()`, single-select,
   plus a `✎ type a path…` escape that drops to the inline editor). Picking a folder (or committing a typed
   path) for a NEW project runs `detectProject(abs)` and prefills only the still-EMPTY fields — `name`

@@ -1,0 +1,2 @@
+{ "version": 2, "projects": { "api": { "path": "api", "type": "backend" } },
+  "overrides": { "api": { "DB_PASSWORD": "hunter2" } } }

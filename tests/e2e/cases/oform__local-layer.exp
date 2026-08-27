@@ -1,0 +1,60 @@
+# the project form has TWO override blocks. This proves each writes the RIGHT file and neither leaks
+# into the other: shared var -> config.json only; local var -> local.json only.
+source tests/e2e/lib.exp
+set stty_init "rows 40 cols 110"
+crun config
+must {config editor}
+sleep 1
+send "l"
+sleep 1
+# fields: name path type runner env branch tasks guards local match overrides(shared) localOverrides
+# --- SHARED block (field #10): 10 j's from name ---
+send "jjjjjjjjjj"
+sleep 1
+must {shared}
+send "\r"
+sleep 1
+# api has 2 shared rows -> "+ add" is row 2
+send "jj"
+send "\r"
+send "SHAREDX"
+send "\r"
+sleep 1
+must {SHAREDX}
+send "l"
+send "\r"
+send "svalue"
+send "\r"
+sleep 1
+send "\033"
+sleep 1
+# --- LOCAL block (field #11): one more j ---
+send "j"
+sleep 1
+must {machine-only}
+send "\r"
+sleep 1
+# local block starts empty -> row 0 IS the "+ add" row
+send "\r"
+send "LOCALX"
+send "\r"
+sleep 1
+must {LOCALX}
+send "l"
+send "\r"
+send "lvalue"
+send "\r"
+sleep 1
+send "\033"
+sleep 1
+send "s"
+must {saved}
+send "\033"
+send "\033"
+want_exit 0
+# shared -> config.json, NOT local.json
+config_has {"SHAREDX"}
+local_hasnt {"SHAREDX"}
+# local -> local.json, NOT config.json
+local_has {"LOCALX"}
+config_hasnt {"LOCALX"}

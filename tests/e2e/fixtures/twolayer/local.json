@@ -1,0 +1,1 @@
+{ "projectsDir": "__DIR__/projects", "overrides": { "svc": { "BAR": "local-bar", "DB_PASSWORD": "local-secret" } } }
