@@ -4,7 +4,7 @@
 [![downloads](https://img.shields.io/npm/dm/@pinkynrg/crew)](https://www.npmjs.com/package/@pinkynrg/crew)
 [![node](https://img.shields.io/node/v/@pinkynrg/crew)](https://www.npmjs.com/package/@pinkynrg/crew)
 [![license](https://img.shields.io/npm/l/@pinkynrg/crew)](#license)
-![coverage](https://img.shields.io/badge/coverage-86%25-green)
+![coverage](https://img.shields.io/badge/coverage-85%25-green)
 
 **Quickly select and run the slice of your stack you're interested in - locally, wired to the rest.**
 
