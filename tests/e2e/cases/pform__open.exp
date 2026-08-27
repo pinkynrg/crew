@@ -1,7 +1,7 @@
 source tests/e2e/lib.exp
 crun config
 must {config editor}
-must {PROJECTS}
+must {SERVICES}
 must {api}
 must {backend}
 send "\033"

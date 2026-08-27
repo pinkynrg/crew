@@ -9,11 +9,15 @@ sleep 1
 # name(0) path(1) type(2) runner(3) start(4) -> 4 j's to the start field
 send "jjjj"
 sleep 1
-must {command that starts this project}
-# move to env (5) -> its own description replaces it
+must {command that starts this service}
+# debug (5) -> its own description
 send "j"
 sleep 1
-must {this project's env files live}
+must {debug mode}
+# env (6) -> its own description
+send "j"
+sleep 1
+must {this service's env files live}
 send "\033"
 send "\033"
 want_exit 0

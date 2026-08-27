@@ -4,8 +4,8 @@ must {api}
 sleep 1
 send "l"
 sleep 1
-# match is field #11 (index 10): name path type runner start env branch tasks guards local match
-send "jjjjjjjjjj"
+# match is field #12 (index 11): name path type runner start debug env branch tasks guards local match
+send "jjjjjjjjjjj"
 sleep 1
 send "\r"
 # keys are DERIVED from api's env files (pro, qa) — no + add, only fill a host value

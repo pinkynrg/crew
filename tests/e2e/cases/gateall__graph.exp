@@ -1,5 +1,5 @@
 source tests/e2e/lib.exp
 crun graph
-must {check your projects dir}
+must {check your services dir}
 must {Nothing to show here}
 want_exit 0

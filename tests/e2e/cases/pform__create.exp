@@ -3,7 +3,7 @@ crun config
 must {config editor}
 sleep 1
 send "n"
-must {New project}
+must {New service}
 sleep 1
 send "\r"
 send "worker"

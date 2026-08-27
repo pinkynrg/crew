@@ -66,11 +66,11 @@ export function colorForIndex(i) {
   const [r, g, b] = rgbForIndex(i);
   return fgRGB(r, g, b);
 }
-// Assign every known project a stable rank (sorted name order) -> golden-angle color.
-// Same project set always yields the same color per name, and neighbours differ sharply.
+// Assign every known service a stable rank (sorted name order) -> golden-angle color.
+// Same service set always yields the same color per name, and neighbours differ sharply.
 // Built once per command so list/groups/run all agree.
-export function projectColors(cfg) {
-  const names = Object.keys(cfg.projects || {}).sort();
+export function serviceColors(cfg) {
+  const names = Object.keys(cfg.services || {}).sort();
   const map = new Map();
   names.forEach((n, i) => map.set(n, colorForIndex(i)));
   return map;
@@ -136,7 +136,7 @@ export function placeholdersIn(str) {
   return [...set];
 }
 export function substitute(str, values) {
-  // Unknown placeholders are left intact (e.g. crew fills {envfile} per-project later).
+  // Unknown placeholders are left intact (e.g. crew fills {envfile} per-service later).
   return str.replace(PLACEHOLDER_RE, (m, k) => (k in values ? shellQuote(values[k]) : m));
 }
 
@@ -194,31 +194,31 @@ export function exitCodeFromEvents(events) {
 }
 
 // ==================== config ====================
-// Machine-local projects directory; relative project paths resolve against it. Set once
+// Machine-local services directory; relative service paths resolve against it. Set once
 // per machine via `crew dir` (stored in the user-level config, never in a committed
 // ./.crew.json), so shared configs can use short relative paths like "bee-beepro-backend".
-let PROJECTS_DIR = null;
-// Resolve a PROJECT path: `~`/absolute is used as-is (escape hatch for repos outside the
-// projects dir); anything relative resolves against PROJECTS_DIR.
-export function resolveProjectPath(p) {
+let SERVICES_DIR = null;
+// Resolve a SERVICE path: `~`/absolute is used as-is (escape hatch for repos outside the
+// services dir); anything relative resolves against SERVICES_DIR.
+export function resolveServicePath(p) {
   const e = expandHome(String(p));
   if (isAbsolute(e)) return e;
-  if (!PROJECTS_DIR)
+  if (!SERVICES_DIR)
     fail(
-      `project path '${p}' is relative but no projects directory is set.\n` +
+      `service path '${p}' is relative but no services directory is set.\n` +
         `  Set it in Settings: crew config`
     );
-  return resolve(PROJECTS_DIR, e);
+  return resolve(SERVICES_DIR, e);
 }
 
-// Which projects' folders don't exist under `dir` (a candidate projects directory) — the consistency
+// Which services' folders don't exist under `dir` (a candidate services directory) — the consistency
 // check behind `crew dir`, `crew check` and the editor's Settings warning. Absolute/`~` paths resolve
 // as-is; relative paths join `dir` (a null dir means every relative path counts as missing). Warn-only:
-// a wrong `projectsDir` should never silently invalidate — or auto-delete — projects.
-export function missingProjectFolders(cfg, dir) {
+// a wrong `servicesDir` should never silently invalidate — or auto-delete — services.
+export function missingServiceFolders(cfg, dir) {
   const abs = dir ? resolvePath(dir) : null;
   const out = [];
-  for (const [name, p] of Object.entries((cfg && cfg.projects) || {})) {
+  for (const [name, p] of Object.entries((cfg && cfg.services) || {})) {
     if (!p || !p.path) continue;
     const e = expandHome(String(p.path));
     const full = isAbsolute(e) ? e : abs ? resolve(abs, e) : null;
@@ -228,42 +228,42 @@ export function missingProjectFolders(cfg, dir) {
 }
 
 // Shared NON-blocking gate for the folder-consuming commands (start/workspace/claude/graph/
-// resolve). A project whose `path` folder is absent is treated as if it didn't exist: excluded from the
+// resolve). A service whose `path` folder is absent is treated as if it didn't exist: excluded from the
 // graph AND the selector (so you can't pick or draw a phantom), while the SHARED config is never touched.
-// `warnMissing` surfaces the misses with direction-aware advice; the caller shows `emptyProjectsState`
+// `warnMissing` surfaces the misses with direction-aware advice; the caller shows `emptyServicesState`
 // when nothing is left. (`crew check` keeps its own full report; `crew list` just adds the banner.)
 function presentCfg(cfg) {
-  const miss = new Set(missingProjectFolders(cfg, PROJECTS_DIR));
-  const projects = {};
-  for (const [n, p] of Object.entries((cfg && cfg.projects) || {})) if (!miss.has(n)) projects[n] = p;
-  return { ...cfg, projects };
+  const miss = new Set(missingServiceFolders(cfg, SERVICES_DIR));
+  const services = {};
+  for (const [n, p] of Object.entries((cfg && cfg.services) || {})) if (!miss.has(n)) services[n] = p;
+  return { ...cfg, services };
 }
 function warnMissing(cfg) {
-  const missing = missingProjectFolders(cfg, PROJECTS_DIR);
+  const missing = missingServiceFolders(cfg, SERVICES_DIR);
   if (!missing.length) return missing;
-  const total = Object.keys((cfg && cfg.projects) || {}).length;
-  // No projects dir, or a MAJORITY missing -> the projects dir is the likely culprit. A minority -> the
+  const total = Object.keys((cfg && cfg.services) || {}).length;
+  // No services dir, or a MAJORITY missing -> the services dir is the likely culprit. A minority -> the
   // individual paths are. Advise accordingly; informational only — the command runs on whatever remains.
-  if (!PROJECTS_DIR || missing.length > Math.floor(total / 2)) {
-    warn(`${missing.length}/${total} project folder(s) not found${PROJECTS_DIR ? ` under ${tildify(PROJECTS_DIR)}` : ''} — check your projects dir:  crew config › Settings › config › projectsDir`);
+  if (!SERVICES_DIR || missing.length > Math.floor(total / 2)) {
+    warn(`${missing.length}/${total} service folder(s) not found${SERVICES_DIR ? ` under ${tildify(SERVICES_DIR)}` : ''} — check your services dir:  crew config › Settings › config › servicesDir`);
   } else {
-    const where = (p) => { const e = expandHome(String(p.path || '')); const full = isAbsolute(e) ? e : (PROJECTS_DIR ? resolve(PROJECTS_DIR, e) : e); return tildify(full); };
-    warn(`project folder(s) missing — fix each path (or remove it):  ${missing.map((n) => `${n} → ${where(cfg.projects[n])}`).join('  ')}`);
+    const where = (p) => { const e = expandHome(String(p.path || '')); const full = isAbsolute(e) ? e : (SERVICES_DIR ? resolve(SERVICES_DIR, e) : e); return tildify(full); };
+    warn(`service folder(s) missing — fix each path (or remove it):  ${missing.map((n) => `${n} → ${where(cfg.services[n])}`).join('  ')}`);
   }
   return missing;
 }
-function emptyProjectsState(headline) {
+function emptyServicesState(headline) {
   console.log('\n  ' + c.bold(headline));
-  console.log(c.dim('  Make sure your config has projects and their paths are correct') + (PROJECTS_DIR ? c.dim(` (checked under ${tildify(PROJECTS_DIR)})`) : '') + c.dim('.'));
-  console.log(c.dim('  Set your projects dir:  crew config › Settings › config › projectsDir') + '\n');
+  console.log(c.dim('  Make sure your config has services and their paths are correct') + (SERVICES_DIR ? c.dim(` (checked under ${tildify(SERVICES_DIR)})`) : '') + c.dim('.'));
+  console.log(c.dim('  Set your services dir:  crew config › Settings › config › servicesDir') + '\n');
 }
 
 // ---------------------------------------------------------------------------
-// Config — user-level at ~/.config/crew/config.json, project-local ./.crew.json
+// Config — user-level at ~/.config/crew/config.json, service-local ./.crew.json
 // merges on top. v1 configs migrate to v2 in memory and are written back.
 // ---------------------------------------------------------------------------
 // `start` is crew's one core task — the streamed command (kill-others + interactive viewer). `debug` runs
-// under it (the per-node toggle), so it streams too. Everything else in a project's `tasks` map is optional
+// under it (the per-node toggle), so it streams too. Everything else in a service's `tasks` map is optional
 // data with no core command yet (a future generic runner will funnel it). This set drives display only.
 export const STREAMED_TASKS = new Set(['start', 'debug']);
 
@@ -271,7 +271,7 @@ export function defaultConfig() {
   return {
     version: 2,
     workspaceName: 'crew',
-    projects: {},
+    services: {},
   };
 }
 
@@ -283,9 +283,9 @@ export function crewHomeFor(configPath) {
   // The dir that holds the config also holds generated workspaces.
   return dirname(configPath);
 }
-// Machine-local settings (currently just projectsDir) live beside the config as
+// Machine-local settings (currently just servicesDir) live beside the config as
 // `local.json` — never committed. This keeps config.json fully shareable; teammates set
-// their own projectsDir with `crew dir`. Add `local.json` to .gitignore when committing.
+// their own servicesDir with `crew dir`. Add `local.json` to .gitignore when committing.
 export function machineConfigPath(flags) {
   return join(crewHomeFor(userConfigPath(flags)), 'local.json');
 }
@@ -293,7 +293,9 @@ export function loadMachine(flags) {
   const p = machineConfigPath(flags);
   if (!pathExists(p)) return {};
   try {
-    return JSON.parse(readFileSync(p, 'utf8'));
+    const m = JSON.parse(readFileSync(p, 'utf8'));
+    if (m && m.projectsDir && !m.servicesDir) { m.servicesDir = m.projectsDir; delete m.projectsDir; } // key renamed
+    return m;
   } catch {
     return {};
   }
@@ -307,9 +309,14 @@ export function writeMachine(flags, obj) {
 // Migrate a config object in place to v2. Returns true if anything changed.
 export function migrate(cfg) {
   let changed = false;
+  if (cfg.projects && !cfg.services) { // key renamed: `projects` -> `services`
+    cfg.services = cfg.projects;
+    delete cfg.projects;
+    changed = true;
+  }
   if (typeof cfg.version !== 'number' || cfg.version < 2) {
-    // v1 -> v2: a project's single `start` block becomes tasks.start.
-    for (const p of Object.values(cfg.projects || {})) {
+    // v1 -> v2: a service's single `start` block becomes tasks.start.
+    for (const p of Object.values(cfg.services || {})) {
       if (p && p.start && typeof p.start === 'object') {
         p.tasks = p.tasks || {};
         if (p.start.command && p.tasks.start == null) p.tasks.start = p.start.command;
@@ -323,8 +330,8 @@ export function migrate(cfg) {
     delete cfg.longRunning;
     changed = true;
   }
-  if (!cfg.projects) {
-    cfg.projects = {};
+  if (!cfg.services) {
+    cfg.services = {};
     changed = true;
   }
   // Groups were removed in favour of the on-the-fly picker + remembered selection; drop any.
@@ -336,13 +343,13 @@ export function migrate(cfg) {
     cfg.workspaceName = 'crew';
     changed = true;
   }
-  // Rename the short-lived `checks` feature to `guards` (top-level registry + per-project).
+  // Rename the short-lived `checks` feature to `guards` (top-level registry + per-service).
   if (cfg.checks && typeof cfg.checks === 'object') {
     cfg.guards = { ...cfg.checks, ...(cfg.guards || {}) };
     delete cfg.checks;
     changed = true;
   }
-  for (const p of Object.values(cfg.projects || {})) {
+  for (const p of Object.values(cfg.services || {})) {
     if (p && Array.isArray(p.checks) && !p.guards) {
       p.guards = p.checks;
       changed = true;
@@ -350,9 +357,9 @@ export function migrate(cfg) {
   }
   // Self-heal: drop fields removed in later versions so a config edited by an older crew
   // gets cleaned up (and written back) the first time a newer crew loads it.
-  const DEPRECATED_PROJECT_FIELDS = ['relatedDirs', 'cwd', 'start', 'checks'];
-  for (const p of Object.values(cfg.projects || {})) {
-    for (const dead of DEPRECATED_PROJECT_FIELDS) {
+  const DEPRECATED_SERVICE_FIELDS = ['relatedDirs', 'cwd', 'start', 'checks'];
+  for (const p of Object.values(cfg.services || {})) {
+    for (const dead of DEPRECATED_SERVICE_FIELDS) {
       if (p && typeof p === 'object' && dead in p) {
         delete p[dead];
         changed = true;
@@ -373,21 +380,22 @@ export function loadUserConfig(flags) {
     fail(`config file is not valid JSON: ${path}`);
   }
   let changed = migrate(cfg);
-  // projectsDir is machine-local: it belongs in local.json, not the committable config.
+  if (cfg.projectsDir && !cfg.servicesDir) { cfg.servicesDir = cfg.projectsDir; delete cfg.projectsDir; changed = true; } // key renamed
+  // servicesDir is machine-local: it belongs in local.json, not the committable config.
   // Migrate any legacy value out of config.json into local.json so config.json stays
   // shareable.
   const machine = loadMachine(flags);
-  let projectsDir = machine.projectsDir;
-  if (cfg.projectsDir) {
-    if (!projectsDir) {
-      projectsDir = cfg.projectsDir;
+  let servicesDir = machine.servicesDir;
+  if (cfg.servicesDir) {
+    if (!servicesDir) {
+      servicesDir = cfg.servicesDir;
       try {
-        writeMachine(flags, { ...machine, projectsDir });
+        writeMachine(flags, { ...machine, servicesDir });
       } catch {
         /* read-only fs */
       }
     }
-    delete cfg.projectsDir;
+    delete cfg.servicesDir;
     changed = true;
   }
   // NB: `local.json.overrides` is NOT migrated up — it's now the machine-local, per-user/secret OVERLAY that
@@ -400,7 +408,7 @@ export function loadUserConfig(flags) {
       /* read-only fs — proceed with the in-memory migration */
     }
   }
-  PROJECTS_DIR = projectsDir ? resolvePath(projectsDir) : null;
+  SERVICES_DIR = servicesDir ? resolvePath(servicesDir) : null;
   return { path, cfg, existed: true };
 }
 
@@ -409,7 +417,7 @@ export function writeUserConfig(path, cfg) {
   writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n');
 }
 
-// Merge project-local ./.crew.json on top of the user config (read-only overlay).
+// Merge service-local ./.crew.json on top of the user config (read-only overlay).
 export function loadMerged(flags) {
   const { cfg: user, path } = loadUserConfig(flags);
   const merged = JSON.parse(JSON.stringify(user));
@@ -420,10 +428,10 @@ export function loadMerged(flags) {
     try {
       local = JSON.parse(readFileSync(localPath, 'utf8'));
     } catch {
-      fail(`project-local config is not valid JSON: ${localPath}`);
+      fail(`service-local config is not valid JSON: ${localPath}`);
     }
     if (local.workspaceName) merged.workspaceName = local.workspaceName;
-    Object.assign(merged.projects, local.projects || {});
+    Object.assign(merged.services, local.services || {});
     merged.guards = { ...(merged.guards || {}), ...(local.guards || {}) };
     localUsed = localPath;
   }
@@ -434,20 +442,20 @@ export function loadMerged(flags) {
 // Selection helpers — resolve names to members, remember the last picked set.
 // ---------------------------------------------------------------------------
 export function membersFor(cfg, names, debug = []) {
-  const known = Object.keys(cfg.projects || {});
-  const missing = names.filter((n) => !cfg.projects[n]);
+  const known = Object.keys(cfg.services || {});
+  const missing = names.filter((n) => !cfg.services[n]);
   if (missing.length)
     fail(
-      `unknown project(s): ${missing.join(', ')}.\n` +
-        `  projects: ${known.join(', ') || '(none) — run: crew config'}`
+      `unknown service(s): ${missing.join(', ')}.\n` +
+        `  services: ${known.join(', ') || '(none) — run: crew config'}`
     );
   const dbg = new Set(debug);
   // A member launches `tasks.debug` (not `tasks.start`) only when it was debug-toggled AND actually has a
   // debug task. `task` is left UNSET otherwise, so resolveRun falls back to the command's own task (start).
   return names.map((n) => {
-    const project = cfg.projects[n];
-    const useDebug = dbg.has(n) && project.tasks && project.tasks.debug != null;
-    return useDebug ? { name: n, project, task: 'debug' } : { name: n, project };
+    const service = cfg.services[n];
+    const useDebug = dbg.has(n) && service.tasks && service.tasks.debug != null;
+    return useDebug ? { name: n, service, task: 'debug' } : { name: n, service };
   });
 }
 
@@ -464,7 +472,7 @@ export function saveLastSelection(flags, names) {
     /* read-only fs — selection just won't persist */
   }
 }
-// Remembered per-project DEBUG set (machine-local) — which picked projects launch their `tasks.debug`
+// Remembered per-service DEBUG set (machine-local) — which picked services launch their `tasks.debug`
 // instead of `tasks.start`. Toggled with `d` in the graph selector; a subset of the run selection.
 export function loadLastDebug(flags) {
   const d = loadMachine(flags).lastDebug;
@@ -477,7 +485,7 @@ export function saveLastDebug(flags, names) {
     /* read-only fs — preference just won't persist */
   }
 }
-// Per-run DISABLED overrides (machine-local): { project: [key…] } where key is `VAR` / `peer.VAR`. Toggled
+// Per-run DISABLED overrides (machine-local): { service: [key…] } where key is `VAR` / `peer.VAR`. Toggled
 // with `e` in the graph selector; honored by overrideVarsFor. Default (absent) = every override enabled.
 export function loadOverridesOff(flags) {
   const o = loadMachine(flags).overridesOff;
@@ -492,7 +500,7 @@ export function saveOverridesOff(flags, map) {
 }
 
 // Log-viewer filter memory: we persist the HIDDEN names (global, machine-local), not the shown
-// ones — so a project/guard absent from a later run is simply ignored and anything NEW defaults
+// ones — so a service/guard absent from a later run is simply ignored and anything NEW defaults
 // to visible (saving "shown" would silently hide new entries).
 export function loadHiddenLog(flags) {
   const h = loadMachine(flags).hiddenLog;
@@ -589,8 +597,8 @@ function splitKeys(s) {
 // left; the caller paints `.rows(h)` over the screen's rightmost columns each frame and feeds keys to
 // `.key(k)`. `.key` returns 'apply' (close, take `.selected`), 'cancel' (close, discard), 'change' (stay
 // open, repaint) or null (ignored). Two modes: MULTI (default) = checkboxes, `space`/`a` toggle, `⏎`
-// applies the whole set (graph node filter, project guard links); SINGLE (`{single:true}`) = radio, `⏎`
-// (or space) picks the cursor row and applies immediately (project `type`). Self-contained cursor/scroll/
+// applies the whole set (graph node filter, service guard links); SINGLE (`{single:true}`) = radio, `⏎`
+// (or space) picks the cursor row and applies immediately (service `type`). Self-contained cursor/scroll/
 // selection — no screen clear, so the view never disappears. `esc`/`q` cancel.
 function makeFilterPanel(items, { paint, title = 'Show nodes', single = false } = {}) {
   // An item is a selectable string, or a `{header:'TEXT'}` non-selectable group label (skipped by the
@@ -667,32 +675,32 @@ function makeFilterPanel(items, { paint, title = 'Show nodes', single = false } 
   };
 }
 
-export const PROJECT_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
+export const SERVICE_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 
 // ---------------------------------------------------------------------------
 // Config-validation key sets (used by `crew check`).
 // ---------------------------------------------------------------------------
-export const TOP_KEYS = new Set(['version', 'workspaceName', 'workspaceSettings', 'projects', 'guards', 'overrides']);
-export const PROJECT_KEYS = new Set(['path', 'type', 'runner', 'env', 'local', 'match', 'tasks', 'guards', 'defaultBranch']);
+export const TOP_KEYS = new Set(['version', 'workspaceName', 'workspaceSettings', 'services', 'guards', 'overrides']);
+export const SERVICE_KEYS = new Set(['path', 'type', 'runner', 'env', 'local', 'match', 'tasks', 'guards', 'defaultBranch']);
 export const GUARD_KEYS = new Set(['comment', 'command', 'message']);
 export const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const isStrArr = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
-// Strip keys the schema doesn't know (top-level / per-project / per-guard) — the visual editor calls this
+// Strip keys the schema doesn't know (top-level / per-service / per-guard) — the visual editor calls this
 // on every write so a save fully normalizes the file (unknown/typo/removed keys are dropped, not carried).
 export function pruneConfig(cfg) {
   for (const k of Object.keys(cfg)) if (!TOP_KEYS.has(k)) delete cfg[k];
-  for (const p of Object.values(cfg.projects || {})) if (isObj(p)) for (const k of Object.keys(p)) if (!PROJECT_KEYS.has(k)) delete p[k];
+  for (const p of Object.values(cfg.services || {})) if (isObj(p)) for (const k of Object.keys(p)) if (!SERVICE_KEYS.has(k)) delete p[k];
   for (const g of Object.values(cfg.guards || {})) if (isObj(g)) for (const k of Object.keys(g)) if (!GUARD_KEYS.has(k)) delete g[k];
   return cfg;
 }
 
 // ==================== wiring ====================
-// Directed dependency edges among the given [name, project] entries: name -> Set(peer).
+// Directed dependency edges among the given [name, service] entries: name -> Set(peer).
 // Same rule as `crew graph` (exact hostname match).
 export function dependencyEdges(cfg, entries) {
   const meta = {};
-  for (const [name, project] of entries) {
-    meta[name] = { files: projectEnvFiles(project), ...projectIdentity(project) };
+  for (const [name, service] of entries) {
+    meta[name] = { files: serviceEnvFiles(service), ...serviceIdentity(service) };
   }
   const edges = new Map(entries.map(([n]) => [n, new Set()]));
   for (const [name] of entries) {
@@ -758,12 +766,12 @@ export function componentsFrom(edges, names) {
 // there's nothing to say (unless verbose, which also emits the <2 hint and the ✓ line).
 // Disconnected => one inline line listing the islands (they run with no local wiring between).
 export function connectivityStatus(cfg, edges, names, verbose = false) {
-  const valid = names.filter((n) => cfg.projects[n]);
-  if (valid.length < 2) return verbose ? c.dim('  select 2+ projects to check local wiring') : '';
+  const valid = names.filter((n) => cfg.services[n]);
+  if (valid.length < 2) return verbose ? c.dim('  select 2+ services to check local wiring') : '';
   const comps = componentsFrom(edges, valid);
   if (comps.length <= 1)
     return verbose ? '  ' + c.green('✓') + c.dim(' connected') : '';
-  const paint = projectColors(cfg);
+  const paint = serviceColors(cfg);
   const islands = comps
     .sort((a, b) => b.length - a.length)
     .map((comp) => comp.map((n) => paint.get(n)(n)).join(c.dim('·')))
@@ -771,20 +779,20 @@ export function connectivityStatus(cfg, edges, names, verbose = false) {
   return '  ' + c.yellow('⚠ not connected:') + ' ' + islands;
 }
 
-// Verify every member's path exists. Names the offending project.
+// Verify every member's path exists. Names the offending service.
 export function validateMemberPaths(members) {
   for (const m of members) {
-    const p = resolveProjectPath(m.project.path);
-    if (!pathExists(p)) fail(`project '${m.name}': path not found: ${p}`);
+    const p = resolveServicePath(m.service.path);
+    if (!pathExists(p)) fail(`service '${m.name}': path not found: ${p}`);
   }
 }
 
-// Build a deduped absolute-path list of member project paths, first-seen order.
+// Build a deduped absolute-path list of member service paths, first-seen order.
 export function dirList(members) {
   const seen = new Set();
   const out = [];
   for (const m of members) {
-    const abs = resolveProjectPath(m.project.path);
+    const abs = resolveServicePath(m.service.path);
     if (!seen.has(abs)) {
       seen.add(abs);
       out.push(abs);
@@ -793,8 +801,8 @@ export function dirList(members) {
   return out;
 }
 
-export function projectDir(project) {
-  return resolveProjectPath(project.path);
+export function serviceDir(service) {
+  return resolveServicePath(service.path);
 }
 
 // ---------------------------------------------------------------------------
@@ -806,19 +814,19 @@ export function resolveRun(cfg, task, members, args) {
   for (const m of members) {
     const t = m.task || task; // a member can override the task (e.g. 'debug' from the selector); else the command's task
     let template;
-    if (m.project.tasks && m.project.tasks[t] != null) template = m.project.tasks[t];
-    else if (m.project.runner) template = m.project.runner;
+    if (m.service.tasks && m.service.tasks[t] != null) template = m.service.tasks[t];
+    else if (m.service.runner) template = m.service.runner;
     else {
       skipped.push(m.name);
       continue;
     }
-    runnable.push({ name: m.name, project: m.project, template, task: t });
+    runnable.push({ name: m.name, service: m.service, template, task: t });
   }
   if (runnable.length === 0)
-    fail(`no project in target can run task '${task}' (all run-less for this task)`);
+    fail(`no service in target can run task '${task}' (all run-less for this task)`);
 
   // Reserved placeholders crew fills itself (not from user args): {task} = the task name;
-  // {envfile} = the per-project wired env file crew materializes at start (see cmdStart).
+  // {envfile} = the per-service wired env file crew materializes at start (see cmdStart).
   const RESERVED = new Set(['task', 'envfile']);
   // Union of placeholders across all runnable commands, excluding the reserved ones.
   const union = new Set();
@@ -857,9 +865,9 @@ export function resolveRun(cfg, task, members, args) {
     if (i < positionals.length) values[k] = positionals[i];
   });
 
-  // Per-project value set: {env} is DERIVED from the chain — the entry (root) runs at the
-  // selection env; every other project inherits the env-variant its consumer's env file points
-  // at (see resolveEnvs). Everything else is shared. Strict-check + substitution run per project.
+  // Per-service value set: {env} is DERIVED from the chain — the entry (root) runs at the
+  // selection env; every other service inherits the env-variant its consumer's env file points
+  // at (see resolveEnvs). Everything else is shared. Strict-check + substitution run per service.
   const derived = values.env != null ? resolveEnvs(cfg, members, values.env) : { resolved: new Map(), warnings: [] };
   const unresolved = new Set();
   for (const r of runnable) {
@@ -869,8 +877,8 @@ export function resolveRun(cfg, task, members, args) {
       if (!RESERVED.has(p) && !(p in r._values)) unresolved.add(p);
     // Only the env-file path needs its placeholders resolved when the command actually sources
     // it via {envfile}; a task that doesn't reference {envfile} doesn't touch the env file, so don't demand {env}.
-    if (r.project.env && r.template.includes('{envfile}'))
-      for (const p of placeholdersIn(r.project.env))
+    if (r.service.env && r.template.includes('{envfile}'))
+      for (const p of placeholdersIn(r.service.env))
         if (!RESERVED.has(p) && !(p in r._values)) unresolved.add(p);
   }
   if (unresolved.size)
@@ -883,20 +891,20 @@ export function resolveRun(cfg, task, members, args) {
     r.resolved = substitute(r.template, r._values); // {envfile} left intact for cmdStart
     // Resolve the base env-file path (if declared) with the same values — raw (no shell
     // quoting): it's a filesystem path crew reads, not a shell token.
-    r.envFile = r.project.env
-      ? r.project.env.replace(PLACEHOLDER_RE, (m, k) => (k in r._values ? r._values[k] : m))
+    r.envFile = r.service.env
+      ? r.service.env.replace(PLACEHOLDER_RE, (m, k) => (k in r._values ? r._values[k] : m))
       : null;
   }
   return { runnable, skipped, warnings: [...argWarnings, ...derived.warnings] };
 }
 
-// Scan <dir>/.envs, parse each file's name as <env>[-<slug>] (slug optional; some projects
+// Scan <dir>/.envs, parse each file's name as <env>[-<slug>] (slug optional; some services
 // name files plainly, e.g. `pre`, `qa`). Returns [{env, slug, path}].
 export function envFilesFor(dir) {
   const envsDir = join(dir, '.envs');
   let names = [];
   try {
-    // Skip hidden/editor junk, but KEEP dotfile env files (`.env`, `.env.qa`, …) — some projects
+    // Skip hidden/editor junk, but KEEP dotfile env files (`.env`, `.env.qa`, …) — some services
     // (e.g. the loader) name their envs that way, and the graph must read them for edges.
     names = readdirSync(envsDir).filter((n) => !n.startsWith('.') || n === '.env' || n.startsWith('.env.'));
   } catch {
@@ -915,20 +923,20 @@ export function envFilesFor(dir) {
   });
 }
 
-// Enumerate a project's env files. If it declares `env` (a path template containing {env}), resolve
+// Enumerate a service's env files. If it declares `env` (a path template containing {env}), resolve
 // that template against the filesystem — {env} becomes a wildcard, captured CONSISTENTLY across every
 // occurrence — so monorepo layouts like `.envs/<app>/{env}/{env}-foo.env` (or a `../.envs/...` path)
 // are found and the env label comes from the template, not a fixed `.envs` dir. This makes the `env`
 // field the single source of truth for env-file location (wiring AND the graph). No template (or a
 // static `env` with no {env}) -> the default `<dir>/.envs` scan.
-export function projectEnvFiles(project) {
+export function serviceEnvFiles(service) {
   let dir;
   try {
-    dir = resolveProjectPath(project.path);
+    dir = resolveServicePath(service.path);
   } catch {
     return [];
   }
-  const tmpl = project && project.env;
+  const tmpl = service && service.env;
   if (!tmpl || !tmpl.includes('{env}')) return envFilesFor(dir);
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const segs = tmpl.split('/');
@@ -1032,13 +1040,13 @@ export function wireText(text, peers) {
 }
 
 // Local-wiring env overrides (config.json `overrides` — committable, no secrets). When crew starts a
-// project locally it materializes a wired env for it; `overrides["<project>"]` upserts extra
+// service locally it materializes a wired env for it; `overrides["<service>"]` upserts extra
 // `KEY=value` lines into that env. Two forms:
-//   - bare `VAR: val`  — applied whenever the project runs (e.g. a Temporal queue so your local
+//   - bare `VAR: val`  — applied whenever the service runs (e.g. a Temporal queue so your local
 //     worker consumes `foo-local` not shared `foo`);
 //   - `whenLocal: { "<peer>": { VAR: val } }` — applied ONLY when that peer is also being started
 //     (e.g. point a URL at a local dependency's exact host+path, but only while it's up).
-// `whenLocal` beats bare (applied last). `running` = names of all projects being started.
+// `whenLocal` beats bare (applied last). `running` = names of all services being started.
 // Secrets/personal values live in local.json (untracked), never in the shared config. Overrides
 // beat the base env file and the URL swap.
 export const OVERRIDE_WHEN_LOCAL = 'whenLocal';
@@ -1052,10 +1060,10 @@ export function overrideVarsFor(overrides, name, running, off) {
   if (wl && typeof wl === 'object') for (const peer of running || []) if (wl[peer] && typeof wl[peer] === 'object') for (const [k, v] of Object.entries(wl[peer])) if (!skip.has(`${peer}.${k}`)) vars[k] = v;
   return vars;
 }
-// The keys `overrideVarsFor`/the `e` toggle use to identify each override of a project: bare `VAR`, and
+// The keys `overrideVarsFor`/the `e` toggle use to identify each override of a service: bare `VAR`, and
 // `peer.VAR` for a whenLocal entry. Order: bare first, then per-peer. Each row = { key, var, value, peer }.
-export function overrideEntries(mergedForProject) {
-  const o = mergedForProject || {};
+export function overrideEntries(mergedForService) {
+  const o = mergedForService || {};
   const out = [];
   for (const [k, v] of Object.entries(o)) if (k !== OVERRIDE_WHEN_LOCAL) out.push({ key: k, var: k, value: String(v), peer: '' });
   const wl = o[OVERRIDE_WHEN_LOCAL];
@@ -1064,7 +1072,7 @@ export function overrideEntries(mergedForProject) {
 }
 // TWO-LAYER overrides: `config.json.overrides` (committable, shared, non-secret) MERGED with
 // `local.json.overrides` (machine-local, gitignored — per-user/secret values like a DB password).
-// local WINS, per project + per var + per whenLocal[peer][var]. So DB_HOST/PORT/NAME can be shared in
+// local WINS, per service + per var + per whenLocal[peer][var]. So DB_HOST/PORT/NAME can be shared in
 // the config while only DB_PASSWORD lives in each dev's local.json.
 export function mergeOverrides(cfgOv, localOv) {
   const out = {};
@@ -1126,13 +1134,13 @@ export function clipboardCopy(text) {
   return null;
 }
 
-// A project's id comes from config `match`, an ENV-LABELED map `{ env: host | [hosts] }` — the
+// A service's id comes from config `match`, an ENV-LABELED map `{ env: host | [hosts] }` — the
 // complete hostname(s) it is served under per environment (exact strings, optionally host/path).
 // `tokens` = the flat host list (identity for edges + wiring); `envOf` maps each host token
 // (lowercased) to its env label (so a matched URL reveals which env it points at — the basis for
 // env derivation). No `match` = no id, so nothing can point at it.
-export function projectIdentity(project) {
-  const m = project && project.match;
+export function serviceIdentity(service) {
+  const m = service && service.match;
   const tokens = [];
   const envOf = new Map();
   if (m && typeof m === 'object' && !Array.isArray(m)) {
@@ -1147,15 +1155,15 @@ export function projectIdentity(project) {
   return { tokens, envOf, source: tokens.length ? 'match' : 'none' };
 }
 
-// A URL from a non-frontend INTO a `type: frontend` project is a REFERENCE (a link-back /
+// A URL from a non-frontend INTO a `type: frontend` service is a REFERENCE (a link-back /
 // allowed-origin / redirect base — e.g. a backend embedding the app's public URL), NOT a runtime
 // dependency. It's still shown in `crew graph` (marked), but excluded from connectivity and env
 // derivation — so a backend that merely links to the frontend can't make an unrelated selection
 // look "connected", nor seed the frontend's env. Nothing legitimately *depends on* a frontend
 // except another frontend embedding it (which stays an edge). Uses the declared `type` only.
 export function isReferenceEdge(cfg, from, to) {
-  const f = cfg.projects && cfg.projects[from];
-  const t = cfg.projects && cfg.projects[to];
+  const f = cfg.services && cfg.services[from];
+  const t = cfg.services && cfg.services[to];
   return !!(t && t.type === 'frontend' && f && f.type !== 'frontend');
 }
 
@@ -1182,16 +1190,16 @@ export function stronglyConnected(nodes, adj) {
   return comps;
 }
 
-// Derive each selected project's run-env from the chain. The selection env `selEnv` seeds the
-// ENTRY CLUSTERS (source SCCs — projects nothing else in the selection depends on); every other
-// project inherits the env-variant its consumer's env file actually points at (host -> env via the
+// Derive each selected service's run-env from the chain. The selection env `selEnv` seeds the
+// ENTRY CLUSTERS (source SCCs — services nothing else in the selection depends on); every other
+// service inherits the env-variant its consumer's env file actually points at (host -> env via the
 // labeled `match`). BFS from the seeds, so the claim CLOSEST TO an entry wins; within one file the
 // MAJORITY label wins. Disagreements, missing envs and unreached nodes are reported, never silently
 // mis-resolved. Returns { resolved: Map(name -> env), warnings: string[] }.
 export function resolveEnvs(cfg, selection, selEnv) {
   const names = (selection || [])
     .map((m) => (typeof m === 'string' ? m : m.name))
-    .filter((n) => cfg.projects && cfg.projects[n]);
+    .filter((n) => cfg.services && cfg.services[n]);
   const set = new Set(names);
   const warnings = [];
   const resolved = new Map();
@@ -1199,10 +1207,10 @@ export function resolveEnvs(cfg, selection, selEnv) {
 
   const meta = {};
   for (const n of names) {
-    const p = cfg.projects[n];
+    const p = cfg.services[n];
     const byEnv = {};
-    for (const f of projectEnvFiles(p)) if (!(f.env in byEnv)) byEnv[f.env] = f.path;
-    meta[n] = { byEnv, envs: Object.keys(byEnv), ...projectIdentity(p) };
+    for (const f of serviceEnvFiles(p)) if (!(f.env in byEnv)) byEnv[f.env] = f.path;
+    meta[n] = { byEnv, envs: Object.keys(byEnv), ...serviceIdentity(p) };
   }
 
   // Best (longest-token) peer a URL points at, plus that peer's env label for the matched host.
@@ -1419,7 +1427,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
     let menuOpen = false; // reentrancy guard for the key handler
     let detachKeys = () => {};
     // Interactive log viewer (created below when streamed to a TTY): keeps a tagged line
-    // history and repaints a filtered view, so hiding every project clears the screen. It owns
+    // history and repaints a filtered view, so hiding every service clears the screen. It owns
     // an alternate screen while running. null = plain prefixed streaming (piped / CI).
     let viewer = null;
     const LOG_HISTORY = Number(process.env.CREW_LOG_HISTORY) || 5000;
@@ -1542,7 +1550,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       for (const [sig, h] of handlers) process.removeListener(sig, h);
       process.stdout.removeListener('error', onStdoutErr);
       for (const t of timers) clearTimeout(t);
-      // Final sweep: SIGKILL each project's process group to reap stragglers that
+      // Final sweep: SIGKILL each service's process group to reap stragglers that
       // outlived their tracked shell — e.g. a supervisord/gunicorn worker orphaned on a
       // "clean" exit. The leader is already gone, so -pgid only hits survivors (ESRCH is
       // ignored). This is why crew reaps such orphans even when the app's own shutdown
@@ -1601,7 +1609,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
     };
 
     // Interactive log viewer (streamed mode on a TTY): a full-screen pager on the alternate
-    // screen showing the SELECTED projects' history, scrollable (keyboard + mouse wheel) with a
+    // screen showing the SELECTED services' history, scrollable (keyboard + mouse wheel) with a
     // wrap/cut toggle and a pinned footer. Mouse is captured (SGR) so the wheel scrolls OUR
     // viewport, not the shell — so during the run you only ever see logs. On exit we leave the
     // alternate screen and dump the full history to the terminal, so the logs persist in
@@ -1612,8 +1620,8 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
       const wasRaw = stdin.isRaw;
       if (stdin.setRawMode) stdin.setRawMode(true);
       stdin.resume();
-      // Guards appear as pseudo-projects (`[vpn]`/`[aws]`) — filterable rows. Their names join the
-      // project names in the filter list + hidden memory. Rows are added live by viewerRunGuards.
+      // Guards appear as pseudo-services (`[vpn]`/`[aws]`) — filterable rows. Their names join the
+      // service names in the filter list + hidden memory. Rows are added live by viewerRunGuards.
       const guardProcs = new Map(guards.map((g) => [g.name, { _name: g.name, _color: (s) => c.dim(s) }]));
       const names = [...commands.map((cmd) => cmd.name), ...guards.map((g) => g.name)];
       const history = []; // { proc, text } complete lines (capped at LOG_HISTORY); { notice:true } rows are unprefixed + always shown
@@ -1639,8 +1647,8 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
         const dots = '·'.repeat(Math.max(1, fillW - proc._name.length - 1));
         return color(`[${proc._name} `) + c.dim(dots) + color(']') + ' ';
       };
-      // A history row is visible when its project is shown AND (no search, or the LOG TEXT
-      // matches — search is content-only; project names are filtered via `f`, not `/`).
+      // A history row is visible when its service is shown AND (no search, or the LOG TEXT
+      // matches — search is content-only; service names are filtered via `f`, not `/`).
       const matches = (proc, text) =>
         shown.has(proc._name) && (!query || text.replace(ESC, '').toLowerCase().includes(query.toLowerCase()));
 
@@ -1696,7 +1704,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
         const w = cols();
         const out = [];
         for (const h of history) {
-          if (h.notice) { if (query && !h.text.replace(ESC, '').toLowerCase().includes(query.toLowerCase())) continue; } // notice rows ignore the project (`f`) filter, honor search
+          if (h.notice) { if (query && !h.text.replace(ESC, '').toLowerCase().includes(query.toLowerCase())) continue; } // notice rows ignore the service (`f`) filter, honor search
           else if (!matches(h.proc, h.text)) continue;
           const line = (h.notice ? '' : prefixFor(h.proc)) + h.text;
           if (wrap) for (const rr of splitRows(line, w)) out.push(rr);
@@ -1709,7 +1717,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
         if (searching) return c.dim('search: ') + query + c.cyan('▌') + c.dim('   (Enter apply · Esc clear)');
         if (allStopped) return c.red('■ stopped') + c.dim(' — scroll to review · [/] search · [esc] exit');
         const pos = scroll > 0 ? c.yellow(`  ↑${scroll}`) : '';
-        // Count goes RED when anything is hidden, so a suppressed project/guard is always obvious.
+        // Count goes RED when anything is hidden, so a suppressed service/guard is always obvious.
         const nShown = `${shown.size}/${names.length}`;
         const count = shown.size < names.length ? c.red(nShown) : c.dim(nShown);
         const q = query ? c.cyan(`  /${query}`) : '';
@@ -1885,7 +1893,7 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
           return paint();
         }
         if (s === 'c') {
-          // Copy the FILTERED view (current project + keyword filters) as full lines — ANSI
+          // Copy the FILTERED view (current service + keyword filters) as full lines — ANSI
           // stripped, `[name]` prefixed, ignoring the wrap/cut display transform. Not the whole
           // history; not the on-screen window — exactly what the filters select.
           const lines = history.filter((h) => !h.notice && matches(h.proc, h.text)).map((h) => `[${h.proc._name}] ${h.text.replace(ESC, '')}`); // notice rows are crew meta, not log output
@@ -1957,19 +1965,19 @@ export function runFanout(commands, { killOthers, announceExits, interactive = f
 }
 
 // ---------------------------------------------------------------------------
-// Guards — named shell probes a project can require (VPN up, AWS logged in, …). crew is
+// Guards — named shell probes a service can require (VPN up, AWS logged in, …). crew is
 // agnostic: a guard passes iff its command exits 0. Deduped by name across the target, so
-// a guard shared by several projects runs once. Any failure prints its message and aborts
+// a guard shared by several services runs once. Any failure prints its message and aborts
 // before anything starts.
 // ---------------------------------------------------------------------------
-// The target's guard specs, deduped by name (a guard shared by several projects runs once).
+// The target's guard specs, deduped by name (a guard shared by several services runs once).
 // Errors if any referenced guard is undefined. [{ name, command, comment, message }].
 export function collectGuards(cfg, members) {
   const registry = cfg.guards || {};
   const names = [];
   const seen = new Set();
   for (const m of members)
-    for (const gn of m.project.guards || [])
+    for (const gn of m.service.guards || [])
       if (!seen.has(gn)) {
         seen.add(gn);
         names.push(gn);
@@ -2014,31 +2022,31 @@ export async function runGuards(cfg, members) {
 }
 
 // Local service wiring: for each runnable whose command uses {envfile}, load its base env
-// (project.env), rewrite any URL pointing at a CO-RUNNING peer to that peer's `local`
+// (service.env), rewrite any URL pointing at a CO-RUNNING peer to that peer's `local`
 // origin, and materialize a FRESH temp file per run (stateless — regenerated every start,
 // deleted on teardown). {envfile} in the command is replaced with the temp path. Peers not
 // in the running set (or without a `local`) stay remote.
 export function wireRun(userPath, runnable, members, { overrides = {}, overridesOff = {} }) {
   const peers = members
-    .filter((m) => m.project.local)
-    .map((m) => ({ name: m.name, tokens: projectIdentity(m.project).tokens, origin: originOf(m.project.local) || m.project.local, local: m.project.local }));
+    .filter((m) => m.service.local)
+    .map((m) => ({ name: m.name, tokens: serviceIdentity(m.service).tokens, origin: originOf(m.service.local) || m.service.local, local: m.service.local }));
   const tmpDir = join(crewHomeFor(userPath), 'tmp');
   const tempPaths = [];
   const warnings = []; // override warnings, collected (not printed) so the caller can route them into the viewer
-  // Trigger set for `whenLocal` overrides: every project being started (self included).
+  // Trigger set for `whenLocal` overrides: every service being started (self included).
   const running = runnable.map((r) => r.name);
   for (const r of runnable) {
     if (!r.resolved.includes('{envfile}')) continue;
-    if (!r.envFile) fail(`project '${r.name}' uses {envfile} but has no "env" field in config`);
-    const basePath = resolve(projectDir(r.project), r.envFile);
-    if (!pathExists(basePath)) fail(`project '${r.name}': env file not found: ${basePath}`);
+    if (!r.envFile) fail(`service '${r.name}' uses {envfile} but has no "env" field in config`);
+    const basePath = resolve(serviceDir(r.service), r.envFile);
+    if (!pathExists(basePath)) fail(`service '${r.name}': env file not found: ${basePath}`);
     const myPeers = peers.filter((p) => p.name !== r.name);
     const overrideVars = overrideVarsFor(overrides, r.name, running, overridesOff[r.name]);
     let baseText = '';
     try {
       baseText = readFileSync(basePath, 'utf8');
     } catch (e) {
-      fail(`project '${r.name}': cannot read env file ${basePath}: ${e.message}`);
+      fail(`service '${r.name}': cannot read env file ${basePath}: ${e.message}`);
     }
     // Normalize CRLF/CR -> LF: some env files ship with Windows line endings, and `. {envfile}`
     // would otherwise choke on `^M` and leave a trailing \r on every value.
@@ -2056,17 +2064,17 @@ export function wireRun(userPath, runnable, members, { overrides = {}, overrides
 
 // ==================== selection ====================
 // ---------------------------------------------------------------------------
-// Selection — a set of projects chosen per-run, picked interactively (preselected with the
+// Selection — a set of services chosen per-run, picked interactively (preselected with the
 // last selection). No groups; the remembered selection replaces them.
 // ---------------------------------------------------------------------------
-// Pick projects on the dependency graph itself and return the chosen members, or null if
-// cancelled / nothing chosen. Selection is ALWAYS interactive — projects are never named on the
+// Pick services on the dependency graph itself and return the chosen members, or null if
+// cancelled / nothing chosen. Selection is ALWAYS interactive — services are never named on the
 // CLI. Persists the chosen set globally. The graph selector is the one true picker (the old
 // `--list` flat multiselect was retired).
 export async function selectMembers(flags, cfg, opts = {}) {
-  const known = Object.keys(cfg.projects || {});
-  if (!known.length) fail('no projects configured yet — run: crew config');
-  if (!canInteractive()) fail('crew needs an interactive terminal to pick projects');
+  const known = Object.keys(cfg.services || {});
+  if (!known.length) fail('no services configured yet — run: crew config');
+  if (!canInteractive()) fail('crew needs an interactive terminal to pick services');
   const res = await graphSelect(flags, cfg, { selEnv: opts.selEnv, debugToggle: opts.debugToggle });
   if (!res || !res.picked || !res.picked.length) { console.log(c.dim('nothing selected')); return null; }
   saveLastSelection(flags, res.picked);
@@ -2081,19 +2089,19 @@ export async function selectMembers(flags, cfg, opts = {}) {
 // `crew start` — crew's one core run command. Picks a co-running set (multiselect graph selector), wires
 // their env, gates on guards, then STREAMS them (kill-others on first exit / Ctrl-C, interactive log viewer
 // on a TTY). Per-node `d` debug toggle swaps a member to its `tasks.debug`. There is no run-to-completion
-// mode and no other core task — optional tasks in a project's `tasks` map have no core command yet.
+// mode and no other core task — optional tasks in a service's `tasks` map have no core command yet.
 export async function cmdStart(flags, rest) {
   let { cfg, userPath } = loadMerged(flags);
   warnMissing(cfg);                 // heads-up about broken paths...
-  cfg = presentCfg(cfg);            // ...then run on only the projects whose folder exists
-  if (!Object.keys(cfg.projects).length) { emptyProjectsState('Nothing to start — no project folders found.'); process.exit(1); }
+  cfg = presentCfg(cfg);            // ...then run on only the services whose folder exists
+  if (!Object.keys(cfg.services).length) { emptyServicesState('Nothing to start — no service folders found.'); process.exit(1); }
   const args = rest.filter((a) => a.includes('='));
   const bare = rest.filter((a) => !a.includes('='));
-  if (bare.length) warn(`ignoring '${bare.join(' ')}' — projects are chosen in the picker`);
+  if (bare.length) warn(`ignoring '${bare.join(' ')}' — services are chosen in the picker`);
   const envArg = args.find((a) => a.startsWith('env='));
-  // start must know the base env unselected projects point at (drives the {env} chain + wiring);
+  // start must know the base env unselected services point at (drives the {env} chain + wiring);
   // require it up front and fail fast, rather than prompting after the picker.
-  if (!envArg) fail('crew start needs an environment (what unselected projects point at) — e.g. crew start env=pre');
+  if (!envArg) fail('crew start needs an environment (what unselected services point at) — e.g. crew start env=pre');
   const members = await selectMembers(flags, cfg, { selEnv: envArg.slice(4), debugToggle: true });
   if (!members) return;
   validateMemberPaths(members);
@@ -2101,12 +2109,12 @@ export async function cmdStart(flags, rest) {
   const { runnable, skipped, warnings } = resolveRun(cfg, 'start', members, args);
 
   // Materialize wired env files (fills {envfile}); fresh per run, cleaned up after.
-  // Env overrides live in the config (committable — no secrets); applied to each project's wired env.
+  // Env overrides live in the config (committable — no secrets); applied to each service's wired env.
   const overrides = mergeOverrides(cfg.overrides, loadMachine(flags).overrides); // shared (config) + per-user/secret (local.json), local wins
   const overridesOff = loadOverridesOff(flags); // per-run disabled overrides (the `e` toggle)
   const { cleanup, warnings: wireWarnings } = wireRun(userPath, runnable, members, { overrides, overridesOff });
 
-  const cmds = runnable.map((r) => `cd ${shellQuote(projectDir(r.project))} && ${r.resolved}`);
+  const cmds = runnable.map((r) => `cd ${shellQuote(serviceDir(r.service))} && ${r.resolved}`);
 
   const interactive = process.stdin.isTTY && process.stdout.isTTY;
   // Skips + warnings (from resolveRun AND wireRun's env overrides). When the interactive viewer owns
@@ -2123,7 +2131,7 @@ export async function cmdStart(flags, rest) {
   if (interactive) guardSpecs = collectGuards(cfg, runnable);
   else await runGuards(cfg, runnable);
 
-  const paint = projectColors(cfg); // same per-project colors as `crew list`
+  const paint = serviceColors(cfg); // same per-service colors as `crew list`
   const commands = runnable.map((r, i) => ({
     command: cmds[i],
     name: r.name,
@@ -2157,8 +2165,8 @@ function selectionLabel(members) {
 export async function cmdWorkspace(flags, rest) {
   let { cfg, userPath } = loadMerged(flags);
   warnMissing(cfg); cfg = presentCfg(cfg);
-  if (!Object.keys(cfg.projects).length) { emptyProjectsState('Nothing to open — no project folders found.'); process.exit(1); }
-  if (rest.length) warn(`ignoring '${rest.join(' ')}' — projects are chosen in the picker`);
+  if (!Object.keys(cfg.services).length) { emptyServicesState('Nothing to open — no service folders found.'); process.exit(1); }
+  if (rest.length) warn(`ignoring '${rest.join(' ')}' — services are chosen in the picker`);
   const members = await selectMembers(flags, cfg);
   if (!members) return;
   validateMemberPaths(members);
@@ -2180,18 +2188,18 @@ export async function cmdWorkspace(flags, rest) {
 export async function cmdClaude(flags, rest) {
   let { cfg, userPath } = loadMerged(flags);
   warnMissing(cfg); cfg = presentCfg(cfg);
-  if (!Object.keys(cfg.projects).length) { emptyProjectsState('Nothing to open — no project folders found.'); process.exit(1); }
+  if (!Object.keys(cfg.services).length) { emptyServicesState('Nothing to open — no service folders found.'); process.exit(1); }
   // Optional first bare arg = a session name for the chat history (always kept under crew's
-  // sessions dir). Omitted => a stable name auto-derived from the selected projects.
+  // sessions dir). Omitted => a stable name auto-derived from the selected services.
   const session = rest.filter((a) => !a.includes('='))[0];
   const members = await selectMembers(flags, cfg);
   if (!members) return;
   validateMemberPaths(members);
   const dirs = dirList(members);
 
-  // Claude Code keys its history off the cwd path (~/.claude/projects/<cwd-slug>/), so a
-  // fixed, crew-owned cwd keeps history tied to the session name — not any single project's
-  // dir. All projects stay reachable via the --add-dir list below.
+  // Claude Code keys its history off the cwd path (~/.claude/services/<cwd-slug>/), so a
+  // fixed, crew-owned cwd keeps history tied to the session name — not any single service's
+  // dir. All services stay reachable via the --add-dir list below.
   const cwd = join(crewHomeFor(userPath), 'sessions', session ? sanitize(session) : selectionLabel(members));
   mkdirSync(cwd, { recursive: true });
 
@@ -2202,34 +2210,34 @@ export async function cmdClaude(flags, rest) {
 
 export function cmdList(flags) {
   const { cfg, localPath } = loadMerged(flags);
-  const projects = Object.entries(cfg.projects || {});
-  const paint = projectColors(cfg);
-  if (projects.length === 0) {
-    console.log(c.dim('No projects configured yet.'));
+  const services = Object.entries(cfg.services || {});
+  const paint = serviceColors(cfg);
+  if (services.length === 0) {
+    console.log(c.dim('No services configured yet.'));
     console.log(`Run ${c.cyan('crew config')} to add one.`);
     return;
   }
-  warnMissing(cfg);   // list shows ALL projects (red/green dot below), plus a direction-aware banner
+  warnMissing(cfg);   // list shows ALL services (red/green dot below), plus a direction-aware banner
 
-  // --- Projects -------------------------------------------------------------
-  console.log(c.bold(c.underline('Projects')));
-  if (projects.length === 0) console.log(c.dim('  (none)'));
-  for (const [name, p] of projects) {
-    // Tolerant of an unset projects dir: show the raw relative path instead of crashing.
+  // --- Services -------------------------------------------------------------
+  console.log(c.bold(c.underline('Services')));
+  if (services.length === 0) console.log(c.dim('  (none)'));
+  for (const [name, p] of services) {
+    // Tolerant of an unset services dir: show the raw relative path instead of crashing.
     let abs = null;
     try {
-      abs = resolveProjectPath(p.path);
+      abs = resolveServicePath(p.path);
     } catch {
       abs = null;
     }
     const ok = abs ? pathExists(abs) : false;
     const dot = ok ? c.green('●') : c.red('●');
     const type = p.type || 'other';
-    const shown = abs ? tildify(abs) : `${p.path}  ${c.dim('(set projects dir: crew config)')}`;
+    const shown = abs ? tildify(abs) : `${p.path}  ${c.dim('(set services dir: crew config)')}`;
     const pathCell = ok ? shown : c.red(shown + (abs ? '  ✗ missing' : ''));
     console.log(`  ${dot} ${c.bold(paint.get(name)(name))}`); // header: status + name only
 
-    // Every field is a labeled row, columns aligned per project (type/path like runner/branch/…).
+    // Every field is a labeled row, columns aligned per service (type/path like runner/branch/…).
     const taskEntries = Object.entries(p.tasks || {});
     const labels = ['type', 'path', ...(p.runner ? ['runner'] : []), ...taskEntries.map(([t]) => t), ...(p.guards && p.guards.length ? ['guards'] : []), ...(p.defaultBranch ? ['branch'] : [])];
     const labelW = Math.max(6, ...labels.map((s) => s.length));
@@ -2247,7 +2255,7 @@ export function cmdList(flags) {
   }
 
   // --- Footer ---------------------------------------------------------------
-  const last = loadLastSelection(flags).filter((n) => cfg.projects[n]);
+  const last = loadLastSelection(flags).filter((n) => cfg.services[n]);
   if (last.length)
     console.log('\n' + c.dim('last selection  ') + last.map((n) => paint.get(n)(n)).join(c.dim(', ')));
   console.log(
@@ -2262,27 +2270,27 @@ export function cmdList(flags) {
 
 // crew graph [list] — read-only dependency graph derived from env files (no wiring). Default draws
 // the ASCII diagram (bin/graph.js); `crew graph list` prints the plain adjacency text below.
-// Each project's id comes ONLY from config `match` (complete hostnames, exact string match);
-// crew resolve <env> [project...] — read-only: show the env each project would run at for a
-// selection (from the chain), without starting anything. No projects given -> the remembered
+// Each service's id comes ONLY from config `match` (complete hostnames, exact string match);
+// crew resolve <env> [service...] — read-only: show the env each service would run at for a
+// selection (from the chain), without starting anything. No services given -> the remembered
 // selection (else all). The dry-run that validates derivation before you `crew start`.
 export function cmdResolve(flags, rest) {
   let { cfg } = loadMerged(flags);
-  warnMissing(cfg); cfg = presentCfg(cfg);             // resolve reads env files — skip projects whose folder is absent
+  warnMissing(cfg); cfg = presentCfg(cfg);             // resolve reads env files — skip services whose folder is absent
   const selEnv = (rest || []).find((a) => !a.includes('='));
-  if (!selEnv) fail('resolve: usage: crew resolve <env> [project...]');
+  if (!selEnv) fail('resolve: usage: crew resolve <env> [service...]');
   const explicit = (rest || []).filter((a) => a !== selEnv && !a.includes('='));
   const machine = loadMachine(flags);
   let names = explicit.length
     ? explicit
-    : (Array.isArray(machine.lastSelection) && machine.lastSelection.length ? machine.lastSelection : Object.keys(cfg.projects || {}));
-  names = names.filter((n) => cfg.projects && cfg.projects[n]);
-  if (!names.length) return void emptyProjectsState('Nothing to resolve.');
+    : (Array.isArray(machine.lastSelection) && machine.lastSelection.length ? machine.lastSelection : Object.keys(cfg.services || {}));
+  names = names.filter((n) => cfg.services && cfg.services[n]);
+  if (!names.length) return void emptyServicesState('Nothing to resolve.');
 
   const { resolved, warnings } = resolveEnvs(cfg, names, selEnv);
-  const paint = projectColors(cfg);
+  const paint = serviceColors(cfg);
   const w = Math.max(...names.map((n) => n.length));
-  console.log(c.bold('Resolved envs') + c.dim(`  — selection env = ${selEnv}  (${names.length} project${names.length > 1 ? 's' : ''})`));
+  console.log(c.bold('Resolved envs') + c.dim(`  — selection env = ${selEnv}  (${names.length} service${names.length > 1 ? 's' : ''})`));
   console.log(c.dim('  entry runs at the selection env; deps inherit the env their consumer points at.'));
   for (const n of names) {
     const e = resolved.get(n) || selEnv;
@@ -2296,13 +2304,13 @@ export function cmdResolve(flags, rest) {
   }
 }
 
-// Crew-project edges derived from .envs URLs: `real` = dependency edges, `ref` = reference
+// Crew-service edges derived from .envs URLs: `real` = dependency edges, `ref` = reference
 // edges (non-frontend -> frontend link-backs). Feeds the ascii renderer (`crew graph`).
 export function collectGraphEdges(cfg) {
-  const entries = Object.entries(cfg.projects || {});
+  const entries = Object.entries(cfg.services || {});
   const meta = {};
-  for (const [name, project] of entries) {
-    meta[name] = { files: projectEnvFiles(project), ...projectIdentity(project) };
+  for (const [name, service] of entries) {
+    meta[name] = { files: serviceEnvFiles(service), ...serviceIdentity(service) };
   }
   const real = [], ref = [];
   for (const [name] of entries) {
@@ -2333,40 +2341,40 @@ export function collectGraphEdges(cfg) {
 // edge P→T when a URL in P's envs has a host equal to one of T's match hosts (tokenMatchLen).
 // localhost URLs match no id, so they drop out.
 // Interactive graph picker for `crew start` (and workspace / claude): navigate the dependency graph and
-// toggle which projects run. ↑↓ = layer, ←→ = neighbour in the layer, space = toggle, a = all/none,
+// toggle which services run. ↑↓ = layer, ←→ = neighbour in the layer, space = toggle, a = all/none,
 // enter = confirm, esc = cancel. Selected nodes render in their own colour and read `[local]`; the rest
 // are grayed and read `[<base env>]` (where they stay remote). Returns the picked names, null if cancelled,
 // or undefined if it can't run (non-TTY) so the caller falls back to the flat menu().
 async function graphSelect(flags, cfg, opts = {}) {
   const stdout = process.stdout, stdin = process.stdin;
-  const names = Object.keys(cfg.projects || {});
+  const names = Object.keys(cfg.services || {});
   if (!stdout.isTTY || !stdin.isTTY || !names.length) return undefined; // undefined = can't run here -> caller falls back to flat menu
   const { nodes, real, ref } = collectGraphEdges(cfg);
   if (!nodes.length) return undefined;
   const edges = [...real.map(([f, t]) => ({ from: f, to: t })), ...ref.map(([f, t]) => ({ from: f, to: t, ref: true }))];
   let showRef = loadGraphRefs(flags);                 // persisted, shared with `crew graph`
   const hasRef = ref.length > 0;
-  const paint = projectColors(cfg);
+  const paint = serviceColors(cfg);
   const prefix = (n) => { const f = paint.get(n); if (!f) return ''; const s = f('\x01'); const i = s.indexOf('\x01'); return i > 0 ? s.slice(0, i) : ''; };
   const GRAY = DIM, selEnv = opts.selEnv;
-  const depEdges = dependencyEdges(cfg, Object.entries(cfg.projects));
+  const depEdges = dependencyEdges(cfg, Object.entries(cfg.services));
   let active = new Set(loadLastSelection(flags).filter((n) => nodes.includes(n)));
   if (!active.size) active = new Set(nodes);        // default: everything selected
   let shown = new Set((loadGraphShown(flags) || nodes).filter((n) => nodes.includes(n))); // visible set (f-filter), persisted + shared with `crew graph`
   if (!shown.size) shown = new Set(nodes);
   for (const n of [...active]) if (!shown.has(n)) active.delete(n); // a hidden node can't be run
   const debugToggle = !!opts.debugToggle; // per-node debug is a `start` concept only (workspace/claude share this picker)
-  const canDebug = (n) => { const t = cfg.projects[n] && cfg.projects[n].tasks; return debugToggle && !!(t && t.debug != null); }; // running node has a `tasks.debug`
-  // debug ⊂ active: which local projects launch `tasks.debug`. Only eligible + running nodes qualify.
+  const canDebug = (n) => { const t = cfg.services[n] && cfg.services[n].tasks; return debugToggle && !!(t && t.debug != null); }; // running node has a `tasks.debug`
+  // debug ⊂ active: which local services launch `tasks.debug`. Only eligible + running nodes qualify.
   let debug = new Set(debugToggle ? loadLastDebug(flags).filter((n) => active.has(n) && canDebug(n)) : []);
-  // `e` overrides toggle (start only, same gate as debug): merged config+local overrides per project; `e`
+  // `e` overrides toggle (start only, same gate as debug): merged config+local overrides per service; `e`
   // overlays a checklist to enable/disable each for THIS run. Disabled set persisted machine-local.
   const cfgOv = debugToggle ? (cfg.overrides || {}) : {};                 // global (shared, committable)
   const localOv = debugToggle ? (loadMachine(flags).overrides || {}) : {}; // local (machine-only, wins)
   const mergedOv = debugToggle ? mergeOverrides(cfgOv, localOv) : {};
   const ovEntriesFor = (n) => overrideEntries(mergedOv[n]);
   const canEnv = (n) => debugToggle && active.has(n) && ovEntriesFor(n).length > 0;
-  const off = loadOverridesOff(flags);            // { project: [disabled key…] }, mutated + persisted on apply
+  const off = loadOverridesOff(flags);            // { service: [disabled key…] }, mutated + persisted on apply
   let ePanel = null, eNode = null, eLabelKey = null; // overrides checklist (built per node when `e` is pressed)
   let cursor = [...nodes].find((n) => shown.has(n)) || nodes[0];
   const panel = makeFilterPanel(nodes, { paint, title: 'Show nodes' }); // `f` overlays this on the graph's right
@@ -2555,12 +2563,12 @@ function pagerView(text, meta = {}) {
 
 export async function cmdGraph(flags, rest) {
   let { cfg } = loadMerged(flags);
-  warnMissing(cfg); cfg = presentCfg(cfg);             // broken projects are dropped from the graph (as if absent)
+  warnMissing(cfg); cfg = presentCfg(cfg);             // broken services are dropped from the graph (as if absent)
   if ((rest || [])[0] !== 'list') {                    // default = drawn ascii diagram; `list` = adjacency text
     const { nodes: allNodes, real, ref } = collectGraphEdges(cfg);
-    if (!allNodes.length) return void emptyProjectsState('Nothing to show here.');
+    if (!allNodes.length) return void emptyServicesState('Nothing to show here.');
     const allEdges = [...real.map(([f, t]) => ({ from: f, to: t })), ...ref.map(([f, t]) => ({ from: f, to: t, ref: true }))];
-    const paint = projectColors(cfg);
+    const paint = serviceColors(cfg);
     const clr = (n) => { const g = paint.get(n); if (!g) return ''; const t = g('\u0001'); const m = t.indexOf('\u0001'); return m > 0 ? t.slice(0, m) : ''; };
     const draw = (shown, showRef) => renderAsciiGraph(allNodes.filter((n) => shown.has(n)), allEdges.filter((e) => shown.has(e.from) && shown.has(e.to) && (showRef || !e.ref)), { colorOf: clr });
     let showRef = loadGraphRefs(flags);                 // persisted, shared with the selector
@@ -2579,13 +2587,13 @@ export async function cmdGraph(flags, rest) {
     }
     return;
   }
-  const paint = projectColors(cfg);
-  const projects = Object.entries(cfg.projects || {});
-  if (!projects.length) return void emptyProjectsState('Nothing to show here.');
+  const paint = serviceColors(cfg);
+  const services = Object.entries(cfg.services || {});
+  if (!services.length) return void emptyServicesState('Nothing to show here.');
 
   const meta = {};
-  for (const [name, project] of projects) {
-    meta[name] = { files: projectEnvFiles(project), ...projectIdentity(project) };
+  for (const [name, service] of services) {
+    meta[name] = { files: serviceEnvFiles(service), ...serviceIdentity(service) };
   }
 
   console.log(c.bold('Dependency graph') + c.dim('  — edges auto-discovered from .envs, no wiring'));
@@ -2593,7 +2601,7 @@ export async function cmdGraph(flags, rest) {
     c.dim(
       [
         'How it works:',
-        '  1. Give each project an id so crew can recognize it when another project\'s URL',
+        '  1. Give each service an id so crew can recognize it when another service\'s URL',
         '     points at it: `match` = an env-labeled map of the complete hostname(s) it is',
         '     served under (exact strings). E.g. match: {"pro":"api.example.com",',
         '     "qa":"qa-api.example.com"}. No `match` = no id, so nothing can point at it (⚠).',
@@ -2601,14 +2609,14 @@ export async function cmdGraph(flags, rest) {
         '  3. For each URL, compare its host to every `match` string — exact match only, so',
         '     api.example.com never collides with rge-api.example.com.',
         '  4. A URL in P whose host equals one of T\'s match hosts → edge P → T.',
-        '  5. URLs matching no project are dropped as 3rd-party.',
+        '  5. URLs matching no service are dropped as 3rd-party.',
       ].join('\n')
     )
   );
   let warned = false;
-  for (const [name] of projects) {
+  for (const [name] of services) {
     const { files, tokens, source } = meta[name];
-    const seen = new Map(); // host\npath -> { host, path } (deduped across this project's envs)
+    const seen = new Map(); // host\npath -> { host, path } (deduped across this service's envs)
     for (const f of files) {
       let text = '';
       try {
@@ -2624,11 +2632,11 @@ export async function cmdGraph(flags, rest) {
     const edges = new Set();
     const refs = new Set(); // non-frontend -> frontend: shown but marked, not a real dep edge
     for (const { host, path } of seen.values()) {
-      // Pick the project whose matching token is longest (most specific), so a gateway host
+      // Pick the service whose matching token is longest (most specific), so a gateway host
       // split by path resolves to the deeper path, not a shorter prefix.
       let best = null;
       let bestLen = 0;
-      for (const [t] of projects) {
+      for (const [t] of services) {
         for (const tok of meta[t].tokens) {
           const len = tokenMatchLen(host, path, tok);
           if (len > bestLen) {
@@ -2654,27 +2662,27 @@ export async function cmdGraph(flags, rest) {
         console.log(`  ${arrow} ${paint.get(t) ? paint.get(t)(t) : t}${tag}`);
       }
     } else {
-      console.log(`  ${c.dim('→ (no crew-project edges)')}`);
+      console.log(`  ${c.dim('→ (no crew-service edges)')}`);
     }
   }
   if (warned)
     console.log(
-      '\n' + c.yellow('⚠ ') + c.dim('some projects have no `match` — add `match: {"pro":"host.example.com"}` (env-labeled exact hosts) so peers can link to them.')
+      '\n' + c.yellow('⚠ ') + c.dim('some services have no `match` — add `match: {"pro":"host.example.com"}` (env-labeled exact hosts) so peers can link to them.')
     );
 }
 
-// crew config — THE config command: opens the two-pane visual editor (Settings + Projects + Guards +
+// crew config — THE config command: opens the two-pane visual editor (Settings + Services + Guards +
 // Overrides — every key). `crew config path` prints the config file path, and a non-TTY `crew config`
 // degrades to printing it too, so `cat "$(crew config path)"` and pipes keep working. No hand-editing verb.
 export async function cmdConfig(flags, sub) {
   if (sub === 'path') { console.log(userConfigPath(flags)); return; }
   if (sub) fail(`config: unknown subcommand '${sub}'. Use: crew config  (opens the editor)  |  crew config path`);
   if (!canInteractive()) { console.log(userConfigPath(flags)); return; } // non-interactive: just print the path
-  await configForm(flags, { section: 'projects' });
+  await configForm(flags, { section: 'services' });
 }
 
 // crew pull <url> — fetch a config.json from a URL and install it as the user config
-// (backing up the current one). local.json (projects dir, last selection) is untouched.
+// (backing up the current one). local.json (services dir, last selection) is untouched.
 export async function cmdPull(flags, url) {
   if (!url || !/^https?:\/\//i.test(url))
     fail('pull: usage: crew pull <url-to-config.json>');
@@ -2691,8 +2699,8 @@ export async function cmdPull(flags, url) {
   } catch {
     fail('pull: response is not valid JSON (check the URL / token)');
   }
-  if (!cfg || typeof cfg !== 'object' || typeof cfg.projects !== 'object')
-    fail('pull: that JSON is not a crew config (missing "projects")');
+  if (!cfg || typeof cfg !== 'object' || typeof cfg.services !== 'object')
+    fail('pull: that JSON is not a crew config (missing "services")');
 
   mkdirSync(dirname(path), { recursive: true });
   let backed = false;
@@ -2701,19 +2709,19 @@ export async function cmdPull(flags, url) {
     backed = true;
   }
   writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n');
-  const n = Object.keys(cfg.projects || {}).length;
-  console.log(`Loaded config → ${tildify(path)} ${c.dim(`(${n} project${n === 1 ? '' : 's'})`)}`);
+  const n = Object.keys(cfg.services || {}).length;
+  console.log(`Loaded config → ${tildify(path)} ${c.dim(`(${n} service${n === 1 ? '' : 's'})`)}`);
   if (backed) console.log(c.dim(`  previous saved as ${tildify(path + '.bak')}`));
-  console.log(c.dim('  set your projects dir if needed: crew config (Settings)'));
+  console.log(c.dim('  set your services dir if needed: crew config (Settings)'));
 }
 
 
 
-// Derive a project's fields from the folder on disk (best-effort) — used by the config editor when a NEW
-// project's `path` points at an existing folder, to prefill the empty fields. Reads package.json / lockfiles
+// Derive a service's fields from the folder on disk (best-effort) — used by the config editor when a NEW
+// service's `path` points at an existing folder, to prefill the empty fields. Reads package.json / lockfiles
 // / manifests / .envs / dev scripts. Returns { type, runner, env, local, start }; `match` (deployed host)
 // is intentionally not derived — the guess was too weak, so the user always fills it by hand.
-export function detectProject(abs) {
+export function detectService(abs) {
   const rd = (rel) => { try { return readFileSync(join(abs, rel), 'utf8'); } catch { return ''; } };
   const isFile = (rel) => { try { return statSync(join(abs, rel)).isFile(); } catch { return false; } };
   const ls = (rel) => { try { return readdirSync(join(abs, rel)); } catch { return []; } };
@@ -2764,31 +2772,31 @@ export function detectProject(abs) {
   return { type, runner, env, local, start };
 }
 
-// Two-pane raw-mode config editor. Left column stacks every SECTION (Projects, Guards) as a name list,
+// Two-pane raw-mode config editor. Left column stacks every SECTION (Services, Guards) as a name list,
 // each ending in a green "+ New" row; the right column is the highlighted item's form. The three actions
 // fall out of position + key: CREATE = a +New row (blank form), UPDATE = edit fields then `s` save, DELETE
 // = `d` + confirm. Field kinds: text (inline editor), name (item key, rename-aware), choice (⏎ cycles a
 // fixed option list), multiselect (⏎ opens a makeFilterPanel overlay), readonly (display only). Zero-dep,
 // same raw-mode primitives as the graph views (splitKeys, alt screen, absolute cursor, footerBar). Each
 // section owns load/save/del so adding Overrides later is just another section descriptor.
-// Entry points: `crew edit` (no name) -> Projects; `crew guards edit` -> Guards.
+// Entry points: `crew edit` (no name) -> Services; `crew guards edit` -> Guards.
 async function configForm(flags, opts = {}) {
   const stdout = process.stdout, stdin = process.stdin;
   if (!stdout.isTTY || !stdin.isTTY) fail('this editor needs an interactive terminal');
   const { cfg, path } = loadUserConfig(flags);
-  cfg.projects = cfg.projects || {};
+  cfg.services = cfg.services || {};
   cfg.guards = cfg.guards || {};
   const persist = () => writeUserConfig(path, pruneConfig(cfg)); // every editor write also strips unknown keys
-  const paint = projectColors(cfg);
+  const paint = serviceColors(cfg);
 
   const toRows = (obj) => Object.entries(obj || {}).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, String(x)]) : [[k, String(v)]]));
   const toObj = (rows, multi) => { const o = {}; for (const [k, v] of rows) { const kk = String(k).trim(); if (!kk) continue; if (multi) o[kk] = o[kk] == null ? String(v) : [].concat(o[kk], String(v)); else o[kk] = String(v); } return o; };
-  // match is an env-labeled host map with FIXED keys: env labels derived from the project's env files
+  // match is an env-labeled host map with FIXED keys: env labels derived from the service's env files
   // (the `env` template), unioned with any labels already stored so existing data stays editable.
-  const matchLabels = (f) => { let envs = []; try { envs = projectEnvFiles({ path: f.path, env: f.env }).map((x) => x.env); } catch { /* path unresolved */ } return [...new Set([...envs, ...Object.keys(f.match || {})])].sort(); };
+  const matchLabels = (f) => { let envs = []; try { envs = serviceEnvFiles({ path: f.path, env: f.env }).map((x) => x.env); } catch { /* path unresolved */ } return [...new Set([...envs, ...Object.keys(f.match || {})])].sort(); };
   const matchValToStr = (v) => (Array.isArray(v) ? v.join(' ') : v == null ? '' : String(v)); // one env's host(s) -> a space-separated string for the value editor
   const matchCommit = (rows) => { const o = {}; for (const [k, v] of rows) { const toks = String(v).trim().split(/\s+/).filter(Boolean); if (!toks.length) continue; o[k] = toks.length === 1 ? toks[0] : toks; } return o; }; // blank = drop; several hosts = array
-  // Environment overrides ↔ editor rows. Storage (config.json `overrides`) per project: bare `VAR:val` keys +
+  // Environment overrides ↔ editor rows. Storage (config.json `overrides`) per service: bare `VAR:val` keys +
   // a reserved `whenLocal: {peer:{VAR:val}}` map. The editor flattens BOTH into one flat list of
   // rows `{var, value, peer}` (peer='' = unconditional/bare), and rebuilds the storage shape on save.
   const overridesToRows = (o) => {
@@ -2811,72 +2819,75 @@ async function configForm(flags, opts = {}) {
     return entry;
   };
   const setOrDel = (o, key, v, keep) => { if (keep == null ? !!v : keep) o[key] = v; else delete o[key]; };
-  const usersOf = (n) => Object.entries(cfg.projects).filter(([, p]) => (p.guards || []).includes(n)).map(([pn]) => pn);
-  const machine = loadMachine(flags);              // projectsDir + UI prefs still live in local.json
-  // Apply a projectsDir edit to the WHOLE session immediately (working-copy model): update the in-memory
-  // machine + the module-global PROJECTS_DIR so every project's path check / folder picker / match-labels
+  const usersOf = (n) => Object.entries(cfg.services).filter(([, p]) => (p.guards || []).includes(n)).map(([pn]) => pn);
+  const machine = loadMachine(flags);              // servicesDir + UI prefs still live in local.json
+  // Apply a servicesDir edit to the WHOLE session immediately (working-copy model): update the in-memory
+  // machine + the module-global SERVICES_DIR so every service's path check / folder picker / match-labels
   // reflects it right away. Disk (local.json) is still only written on save.
-  const syncProjectsDir = (v) => { const pd = String(v).trim(); if (pd) machine.projectsDir = pd; else delete machine.projectsDir; PROJECTS_DIR = pd ? resolvePath(pd) : null; };
-  // Env overrides are TWO layers, both editable as per-project blocks: shared lives in the committable
+  const syncServicesDir = (v) => { const pd = String(v).trim(); if (pd) machine.servicesDir = pd; else delete machine.servicesDir; SERVICES_DIR = pd ? resolvePath(pd) : null; };
+  // Env overrides are TWO layers, both editable as per-service blocks: shared lives in the committable
   // config.json (no secrets), local lives in machine-only local.json and WINS at run time (see mergeOverrides).
   cfg.overrides = isObj(cfg.overrides) ? cfg.overrides : {};
   machine.overrides = isObj(machine.overrides) ? machine.overrides : {};
   const overrides = cfg.overrides;          // shared layer (config.json) — persist()
   const localOverrides = machine.overrides; // local layer (local.json)   — writeMachine()
 
-  const projectsSection = {
-    key: 'projects', title: 'PROJECTS', noun: 'project', newLabel: '+ New project',
-    names: () => Object.keys(cfg.projects),
+  const servicesSection = {
+    key: 'services', title: 'SERVICES', noun: 'service', newLabel: '+ New service',
+    names: () => Object.keys(cfg.services),
     fields: [
-      { key: 'name', label: 'name', kind: 'name', req: true, desc: 'A short, unique name for this project.' },
-      { key: 'path', label: 'path', kind: 'text', req: true, desc: "The project's folder. Type it, or press ⏎ to pick from your projects dir." },
-      { key: 'type', label: 'type', kind: 'choice', options: PROJECT_TYPES, desc: 'What this project is: a frontend app, a backend service, or other.' },
+      { key: 'name', label: 'name', kind: 'name', req: true, desc: 'A short, unique name for this service.' },
+      { key: 'path', label: 'path', kind: 'text', req: true, desc: "The service's folder. Type it, or press ⏎ to pick from your services dir." },
+      { key: 'type', label: 'type', kind: 'choice', options: SERVICE_TYPES, desc: 'What this service is: a frontend app, a backend service, or other.' },
       { key: 'runner', label: 'runner', kind: 'text', desc: 'Optional. A command template with {task} (e.g. "npm run {task}"). You can usually skip this and just fill start below.' },
       // start: the core command, entered as a plain string (stored as tasks.start). The `tasks` map below
       // holds only the OTHER, optional tasks (e.g. debug) — start is edited here, not as a map row.
-      { key: 'start', label: 'start', kind: 'text', desc: 'The command that starts this project (e.g. "npm run dev"). Write {envfile} where it should load the env file.' },
-      { key: 'env', label: 'env', kind: 'text', desc: 'Where this project\'s env files live, with {env} for the environment name (e.g. ".envs/{env}").' },
+      { key: 'start', label: 'start', kind: 'text', desc: 'The command that starts this service (e.g. "npm run dev"). Write {envfile} where it should load the env file.' },
+      { key: 'debug', label: 'debug', kind: 'text', desc: 'Optional. A command to start this service in debug mode (attachable). If set, the picker offers a "d" toggle to launch it instead of start.' },
+      { key: 'env', label: 'env', kind: 'text', desc: 'Where this service\'s env files live, with {env} for the environment name (e.g. ".envs/{env}").' },
       { key: 'defaultBranch', label: 'branch', kind: 'text', desc: 'Optional. The branch you cut new work from (e.g. main). Just a note — crew runs no git.' },
       { key: 'tasks', label: 'tasks (other)', kind: 'map', kLabel: 'task', vLabel: 'command', desc: 'Optional extra commands besides start (e.g. a "debug" command). Not required.' },
-      { key: 'guards', label: 'guards', kind: 'multiselect', options: () => Object.keys(cfg.guards), desc: 'Checks that must pass before this project starts. Tick the ones to require.' },
-      { key: 'local', label: 'local', kind: 'text', desc: "This project's local URL, e.g. http://localhost:3000." },
+      { key: 'guards', label: 'guards', kind: 'multiselect', options: () => Object.keys(cfg.guards), desc: 'Checks that must pass before this service starts. Tick the ones to require.' },
+      { key: 'local', label: 'local', kind: 'text', desc: "This service's local URL, e.g. http://localhost:3000." },
       // match: env-labeled hosts, rendered INLINE (one line per env, like Environment Overrides). Keys are
-      // DERIVED from the project's env files (the `env` template) — you can't add/remove rows, only fill each
+      // DERIVED from the service's env files (the `env` template) — you can't add/remove rows, only fill each
       // env's host value (blank = no match). Space-separate to give one env several hosts. Union with any
       // labels already stored so existing data stays editable.
-      { key: 'match', label: 'match', kind: 'match', desc: "This project's deployed host per environment (e.g. pre = api.pre.example.com). Fill in the host for each env." },
+      { key: 'match', label: 'match', kind: 'match', desc: "This service's deployed host per environment (e.g. pre = api.pre.example.com). Fill in the host for each env." },
       // env overrides — TWO titled blocks (see save/del below): shared writes config.json (committable),
       // local writes local.json (machine-only, secrets, WINS at run time). Same inline row editor for both.
-      { key: 'overrides', label: 'overrides', kind: 'overrides', groupTitle: 'Environment Overrides · shared (config)', desc: 'Extra environment variables to set when this project runs. Shared with your team — no secrets here.' },
+      { key: 'overrides', label: 'overrides', kind: 'overrides', groupTitle: 'Environment Overrides · shared (config)', desc: 'Extra environment variables to set when this service runs. Shared with your team — no secrets here.' },
       { key: 'localOverrides', label: 'local overrides', kind: 'overrides', groupTitle: 'Environment Overrides · local (wins · machine-only)', desc: 'Extra environment variables just for you, kept off git. Put secrets like a DB password here.' },
     ],
     load: (n) => {
-      const p = cfg.projects[n] || {};
-      const { start = '', ...otherTasks } = { ...(p.tasks || {}) }; // start is edited in its own field; the map shows the rest
-      return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', start, env: p.env || '', local: p.local || '', match: (p.match && typeof p.match === 'object' && !Array.isArray(p.match)) ? { ...p.match } : {}, guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: otherTasks, overrides: overridesToRows(overrides[n]), localOverrides: overridesToRows(localOverrides[n]), isNew: false, orig: n };
+      const p = cfg.services[n] || {};
+      const { start = '', debug = '', ...otherTasks } = { ...(p.tasks || {}) }; // start + debug are edited in their own fields; the map shows the rest
+      return { name: n, path: p.path || '', type: p.type || 'other', runner: p.runner || '', start, debug, env: p.env || '', local: p.local || '', match: (p.match && typeof p.match === 'object' && !Array.isArray(p.match)) ? { ...p.match } : {}, guards: [...(p.guards || [])], defaultBranch: p.defaultBranch || '', tasks: otherTasks, overrides: overridesToRows(overrides[n]), localOverrides: overridesToRows(localOverrides[n]), isNew: false, orig: n };
     },
-    blank: () => ({ name: '', path: '', type: 'other', runner: '', start: '', env: '', local: '', match: {}, guards: [], defaultBranch: '', tasks: {}, overrides: [], localOverrides: [], isNew: true, orig: null }),
+    blank: () => ({ name: '', path: '', type: 'other', runner: '', start: '', debug: '', env: '', local: '', match: {}, guards: [], defaultBranch: '', tasks: {}, overrides: [], localOverrides: [], isNew: true, orig: null }),
     save: (f) => {
       const name = String(f.name).trim();
       if (!name) return 'name is required';
       if (!String(f.path).trim()) return 'path is required';
       const renaming = !f.isNew && name !== f.orig;
-      if ((f.isNew || renaming) && cfg.projects[name]) return `project '${name}' already exists`;
-      const base = f.isNew ? {} : { ...(cfg.projects[f.orig] || {}) }; // preserve any unmanaged/future keys
-      if (renaming) delete cfg.projects[f.orig];
+      if ((f.isNew || renaming) && cfg.services[name]) return `service '${name}' already exists`;
+      const base = f.isNew ? {} : { ...(cfg.services[f.orig] || {}) }; // preserve any unmanaged/future keys
+      if (renaming) delete cfg.services[f.orig];
       const proj = { ...base, path: String(f.path).trim(), type: f.type };
       setOrDel(proj, 'runner', String(f.runner).trim());
       setOrDel(proj, 'env', String(f.env).trim());
       setOrDel(proj, 'local', String(f.local).trim());
       setOrDel(proj, 'defaultBranch', String(f.defaultBranch).trim());
       setOrDel(proj, 'match', f.match, f.match && Object.keys(f.match).length > 0);
-      // the dedicated `start` field folds back into tasks.start; the map holds the other tasks
+      // the dedicated `start` + `debug` fields fold back into tasks.start / tasks.debug; the map holds the rest
       const tasks = { ...(f.tasks || {}) };
       const startCmd = String(f.start || '').trim();
       if (startCmd) tasks.start = startCmd; else delete tasks.start;
+      const debugCmd = String(f.debug || '').trim();
+      if (debugCmd) tasks.debug = debugCmd; else delete tasks.debug;
       setOrDel(proj, 'tasks', tasks, Object.keys(tasks).length > 0);
       setOrDel(proj, 'guards', f.guards, Array.isArray(f.guards) && f.guards.length > 0);
-      cfg.projects[name] = proj;
+      cfg.services[name] = proj;
       // env overrides: shared -> cfg.overrides (persist), local -> machine.overrides (writeMachine). Both move
       // with a rename; empty = no entry. local.json is NOT touched unless a local override actually changed.
       if (renaming) { delete overrides[f.orig]; delete localOverrides[f.orig]; }
@@ -2889,8 +2900,8 @@ async function configForm(flags, opts = {}) {
       if (hadLocal || Object.keys(local).length) writeMachine(flags, machine);
       return null;
     },
-    del: (n) => { delete cfg.projects[n]; delete overrides[n]; const hadLocal = localOverrides[n] != null; delete localOverrides[n]; persist(); if (hadLocal) writeMachine(flags, machine); },
-    info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveProjectPath(String(f.path).trim()); } catch { return `${DIM}path${UNDIM}  ${String(f.path).trim()}  ${DIM}(set a projects dir in Settings)${UNDIM}`; } return pathExists(abs) ? `${DIM}path${UNDIM}  ${abs}` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
+    del: (n) => { delete cfg.services[n]; delete overrides[n]; const hadLocal = localOverrides[n] != null; delete localOverrides[n]; persist(); if (hadLocal) writeMachine(flags, machine); },
+    info: (f) => { if (f.isNew || !String(f.path).trim()) return ''; let abs; try { abs = resolveServicePath(String(f.path).trim()); } catch { return `${DIM}path${UNDIM}  ${String(f.path).trim()}  ${DIM}(set a services dir in Settings)${UNDIM}`; } return pathExists(abs) ? `${DIM}path${UNDIM}  ${abs}` : `\x1b[31mpath not found:\x1b[39m ${abs}`; },
   };
 
   const guardsSection = {
@@ -2911,15 +2922,15 @@ async function configForm(flags, opts = {}) {
       if (!String(f.command).trim()) return 'command is required';
       const renaming = !f.isNew && name !== f.orig;
       if ((f.isNew || renaming) && cfg.guards[name]) return `guard '${name}' already exists`;
-      if (renaming) { delete cfg.guards[f.orig]; for (const pr of Object.values(cfg.projects)) if ((pr.guards || []).includes(f.orig)) { setProjectGuard(pr, f.orig, false); setProjectGuard(pr, name, true); } }
+      if (renaming) { delete cfg.guards[f.orig]; for (const pr of Object.values(cfg.services)) if ((pr.guards || []).includes(f.orig)) { setServiceGuard(pr, f.orig, false); setServiceGuard(pr, name, true); } }
       cfg.guards[name] = String(f.message).trim() ? { comment: String(f.comment).trim(), command: String(f.command).trim(), message: String(f.message).trim() } : { comment: String(f.comment).trim(), command: String(f.command).trim() };
       persist(); return null;
     },
-    del: (n) => { delete cfg.guards[n]; for (const pr of Object.values(cfg.projects)) setProjectGuard(pr, n, false); persist(); },
-    info: (f) => f.isNew ? '' : `${DIM}used by${UNDIM}  ${usersOf(f.orig).join(', ') || `${DIM}(no projects)${UNDIM}`}`,
+    del: (n) => { delete cfg.guards[n]; for (const pr of Object.values(cfg.services)) setServiceGuard(pr, n, false); persist(); },
+    info: (f) => f.isNew ? '' : `${DIM}used by${UNDIM}  ${usersOf(f.orig).join(', ') || `${DIM}(no services)${UNDIM}`}`,
   };
 
-  // Top-level (global) config + machine-local projectsDir. A FIXED section: one synthetic item, no +New
+  // Top-level (global) config + machine-local servicesDir. A FIXED section: one synthetic item, no +New
   // row and no create/delete — you only edit the values. workspaceSettings values are JSON-typed (so
   // `false`/`3` keep their type), stringified for the row editor and parsed back on save.
   const mapStringify = (o) => { const r = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) r[k] = typeof v === 'string' ? v : JSON.stringify(v); return r; };
@@ -2927,7 +2938,7 @@ async function configForm(flags, opts = {}) {
   const loadSettings = () => ({
     workspaceName: cfg.workspaceName || '',
     workspaceSettings: mapStringify(cfg.workspaceSettings),
-    projectsDir: machine.projectsDir || '',
+    servicesDir: machine.servicesDir || '',
     isNew: false, orig: 'config',
   });
   const settingsSection = {
@@ -2936,7 +2947,7 @@ async function configForm(flags, opts = {}) {
     fields: [
       { key: 'workspaceName', label: 'workspaceName', kind: 'text', desc: 'A name for the VS Code workspace crew opens.' },
       { key: 'workspaceSettings', label: 'wsSettings', kind: 'map', json: true, kLabel: 'setting', vLabel: 'value', desc: 'Optional VS Code settings for that workspace, e.g. jest.enable = false.' },
-      { key: 'projectsDir', label: 'projectsDir', kind: 'text', desc: 'The folder your projects live in. Project paths you enter as relative are looked up here.' },
+      { key: 'servicesDir', label: 'servicesDir', kind: 'text', desc: 'The folder your services live in. Service paths you enter as relative are looked up here.' },
     ],
     load: loadSettings,
     blank: loadSettings,
@@ -2944,14 +2955,14 @@ async function configForm(flags, opts = {}) {
       setOrDel(cfg, 'workspaceName', String(f.workspaceName).trim());
       setOrDel(cfg, 'workspaceSettings', jsonParseVals(f.workspaceSettings), f.workspaceSettings && Object.keys(f.workspaceSettings).length > 0);
       persist();
-      syncProjectsDir(f.projectsDir);   // in-memory + PROJECTS_DIR (idempotent with the live edit)
+      syncServicesDir(f.servicesDir);   // in-memory + SERVICES_DIR (idempotent with the live edit)
       writeMachine(flags, machine);
       return null;
     },
-    info: (f) => { const miss = missingProjectFolders(cfg, String(f.projectsDir).trim()); const total = Object.keys(cfg.projects).length; return miss.length ? `\x1b[33m⚠ ${miss.length}/${total} project folder(s) not found under projectsDir\x1b[39m` : `${DIM}projectsDir = where relative project paths resolve${UNDIM}`; },
+    info: (f) => { const miss = missingServiceFolders(cfg, String(f.servicesDir).trim()); const total = Object.keys(cfg.services).length; return miss.length ? `\x1b[33m⚠ ${miss.length}/${total} service folder(s) not found under servicesDir\x1b[39m` : ''; },
   };
 
-  const sections = [settingsSection, projectsSection, guardsSection];
+  const sections = [settingsSection, servicesSection, guardsSection];
   const optionsOf = (fld) => (typeof fld.options === 'function' ? fld.options() : fld.options || []);
   // FIXED sections contribute their single item but NO "+ New" row.
   const selectable = () => { const out = []; sections.forEach((s, si) => { s.names().forEach((n) => out.push({ si, name: n })); if (!s.fixed && !s.noNew) out.push({ si, name: null }); }); return out; };
@@ -2976,7 +2987,7 @@ async function configForm(flags, opts = {}) {
   const loadForm = () => { const cur = sel[li], key = draftKey(cur); if (drafts.has(key)) { form = drafts.get(key); dirty = true; } else { form = cur.name == null ? sections[cur.si].blank() : sections[cur.si].load(cur.name); dirty = false; } };
   const reselect = (si, name) => { sel = selectable(); let i = sel.findIndex((n) => n.si === si && n.name === name); if (i < 0) i = sel.findIndex((n) => n.si === si); if (i < 0) i = 0; li = Math.max(0, Math.min(i, sel.length - 1)); loadForm(); };
   const startAt = (key) => { const i = sel.findIndex((n) => sections[n.si].key === key); li = i >= 0 ? i : 0; };
-  startAt(opts.section || 'projects');
+  startAt(opts.section || 'services');
   loadForm();
 
   const doSave = () => {
@@ -3002,14 +3013,14 @@ async function configForm(flags, opts = {}) {
     return null;
   };
   const discardAll = () => { drafts.clear(); dirty = false; };
-  // When a NEW project's `path` points at a real folder, prefill the still-empty fields from folder signals
-  // (detectProject). Non-destructive: only blanks are filled, so it never clobbers what you typed.
+  // When a NEW service's `path` points at a real folder, prefill the still-empty fields from folder signals
+  // (detectService). Non-destructive: only blanks are filled, so it never clobbers what you typed.
   const maybeDetect = () => {
-    if (secOf().key !== 'projects' || !form.isNew) return;
+    if (secOf().key !== 'services' || !form.isNew) return;
     const pth = String(form.path || '').trim(); if (!pth) return;
-    let abs; try { abs = resolveProjectPath(pth); } catch { return; }
+    let abs; try { abs = resolveServicePath(pth); } catch { return; }
     if (!pathExists(abs)) return;
-    const d = detectProject(abs), got = [];
+    const d = detectService(abs), got = [];
     if (!form.name) { form.name = pth.split(/[\\/]/).filter(Boolean).pop() || ''; if (form.name) got.push('name'); }
     if ((!form.type || form.type === 'other') && d.type) { form.type = d.type; got.push('type'); }
     if (!form.runner && d.runner) { form.runner = d.runner; got.push('runner'); }
@@ -3018,14 +3029,14 @@ async function configForm(flags, opts = {}) {
     if (d.start && !form.start) { form.start = d.start; got.push('start'); }
     if (got.length) { dirty = true; msg = `${DIM}auto-filled from folder: ${got.join(', ')}${UNDIM}`; }
   };
-  // Folder picker for the project `path` field: the subfolders of projectsDir + a "type a path…" escape
-  // (for folders elsewhere, or when no projectsDir is set). So you don't type the path from memory.
+  // Folder picker for the service `path` field: the subfolders of servicesDir + a "type a path…" escape
+  // (for folders elsewhere, or when no servicesDir is set). So you don't type the path from memory.
   const TYPE_PATH = '✎ type a path…';
-  const projectDirs = () => { const d = machine.projectsDir; if (!d) return []; try { return readdirSync(resolvePath(d), { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name).sort(); } catch { return []; } };
+  const serviceDirs = () => { const d = machine.servicesDir; if (!d) return []; try { return readdirSync(resolvePath(d), { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name).sort(); } catch { return []; } };
   const editPath = () => { editing = true; buf = String(form.path || ''); caret = buf.length; }; // fall back to typing
   const openFolderPick = () => {
-    const dirs = projectDirs();
-    if (!dirs.length) return editPath(); // no projectsDir / no folders -> just type the path
+    const dirs = serviceDirs();
+    if (!dirs.length) return editPath(); // no servicesDir / no folders -> just type the path
     panelField = { key: 'path', pick: 'folder', label: 'pick a folder' };
     panel = makeFilterPanel([...dirs, TYPE_PATH], { paint, single: true, title: 'pick a folder' });
     panel.open(dirs.includes(form.path) ? form.path : null);
@@ -3185,7 +3196,7 @@ async function configForm(flags, opts = {}) {
       else if (mapEdit) parts = ['↑↓ row', '⏎ edit', 'd remove', 'esc done'];
       else if (ovEdit) parts = ovEdit.field.kind === 'match' ? ['↑↓ row', '⏎ edit host', 'esc done'] : ['↑↓ row', '←→ col', '⏎ edit', 'd remove', 'esc done'];
       else if (focus === 'left') parts = ['↑↓ move', '⏎ open', 'n new', 'd delete', 'esc quit'];
-      else { const fld = s.fields[fi]; const eh = (fld.key === 'path' && s.key === 'projects') ? '⏎ pick folder' : fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'list' || fld.kind === 'map' ? '⏎ rows' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew || s.fixed ? [] : ['d delete']), 'esc ← list'].filter(Boolean); }
+      else { const fld = s.fields[fi]; const eh = (fld.key === 'path' && s.key === 'services') ? '⏎ pick folder' : fld.kind === 'choice' || fld.kind === 'multiselect' ? '⏎ pick' : fld.kind === 'list' || fld.kind === 'map' ? '⏎ rows' : fld.kind === 'readonly' ? '' : '⏎ edit'; parts = ['↑↓ field', eh, 's save', ...(form.isNew || s.fixed ? [] : ['d delete']), 'esc ← list'].filter(Boolean); }
       if (msg) parts = [msg, ...parts];
       out += '\x1b[K' + shade(footerBar(footerText(parts), C));
       // ---- modal overlay (roomy, perfectly-centered box; captures all keys until a choice runs) ----
@@ -3211,7 +3222,7 @@ async function configForm(flags, opts = {}) {
     const openPanel = (fld) => { const items = optionsOf(fld); if (!items.length) { msg = `no ${fld.label} defined yet`; return; } panelField = fld; const single = fld.kind === 'choice'; panel = makeFilterPanel(items, { paint, title: fld.label, single }); panel.open(single ? form[fld.key] : (Array.isArray(form[fld.key]) ? form[fld.key] : [])); };
     const openItem = () => { focus = 'right'; fi = 0; }; // form already synced to sel[li] by loadForm — don't reload here (a col1→col2→col1→col2 round-trip would discard unsaved edits, e.g. a rename)
     const quit = () => { cleanup(); resolve(); return true; };
-    const openDelete = (name) => { const used = secOf().key === 'guards' ? usersOf(name) : []; modal = { title: 'Delete', lines: [`Delete '${name}'?`, ...(used.length ? [`${DIM}used by ${used.length} project(s)${UNDIM}`] : [])], choices: [{ keys: ['y', 'Y'], label: 'y delete', run: () => { doDelete(name); modal = null; return false; } }, { keys: ['\x1b', 'n', 'N'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
+    const openDelete = (name) => { const used = secOf().key === 'guards' ? usersOf(name) : []; modal = { title: 'Delete', lines: [`Delete '${name}'?`, ...(used.length ? [`${DIM}used by ${used.length} service(s)${UNDIM}`] : [])], choices: [{ keys: ['y', 'Y'], label: 'y delete', run: () => { doDelete(name); modal = null; return false; } }, { keys: ['\x1b', 'n', 'N'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
     const openUnsaved = () => { const n = drafts.size; modal = { title: 'Unsaved changes', lines: [`${n} unsaved change${n === 1 ? '' : 's'} — save all before leaving?`], choices: [{ keys: ['s', 'S'], label: 's save all & exit', run: () => (saveAll() ? ((modal = null), false) : quit()) }, { keys: ['d', 'D'], label: 'd discard all & exit', run: () => { discardAll(); return quit(); } }, { keys: ['\x1b'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
 
     const handleKey = (k) => {
@@ -3238,7 +3249,7 @@ async function configForm(flags, opts = {}) {
           else if (editTarget === 'ovVar') { ovEdit.rows[ovEdit.ri].var = buf.trim(); editing = false; editTarget = null; dirty = true; } // override VAR cell
           else if (editTarget === 'ovVal') { ovEdit.rows[ovEdit.ri].value = buf; editing = false; editTarget = null; dirty = true; } // override value cell
           else if (editTarget === 'meHost') { ovEdit.rows[ovEdit.ri].host = buf; editing = false; editTarget = null; dirty = true; } // match host cell
-          else { const fk = secOf().fields[fi].key; form[fk] = buf; editing = false; dirty = true; if (fk === 'path') maybeDetect(); else if (fk === 'projectsDir') syncProjectsDir(buf); } // path -> auto-fill; projectsDir -> live-apply in-session (see syncProjectsDir)
+          else { const fk = secOf().fields[fi].key; form[fk] = buf; editing = false; dirty = true; if (fk === 'path') maybeDetect(); else if (fk === 'servicesDir') syncServicesDir(buf); } // path -> auto-fill; servicesDir -> live-apply in-session (see syncServicesDir)
         }
         else if (k === '\x1b') { editing = false; editTarget = null; }                                       // bare esc cancels the edit
         else if (k === '\x1b[D') caret = Math.max(0, caret - 1);                                             // ← left
@@ -3281,8 +3292,8 @@ async function configForm(flags, opts = {}) {
           else if (F.ri === n) { F.rows.push({ var: '', value: '', peer: '' }); F.ri = F.rows.length - 1; F.ci = 0; editing = true; editTarget = 'ovVar'; buf = ''; caret = 0; } // + add -> type the VAR
           else if (F.ci === 0) { editing = true; editTarget = 'ovVar'; buf = String(F.rows[F.ri].var || ''); caret = buf.length; }
           else if (F.ci === 1) { editing = true; editTarget = 'ovVal'; buf = String(F.rows[F.ri].value || ''); caret = buf.length; }
-          else { // when-local peer -> single-select picker (projects minus self, plus "always")
-            const self = form.orig || form.name, peers = Object.keys(cfg.projects).filter((p) => p !== self);
+          else { // when-local peer -> single-select picker (services minus self, plus "always")
+            const self = form.orig || form.name, peers = Object.keys(cfg.services).filter((p) => p !== self);
             panelField = { ov: true, single: true, label: 'when local' };
             panel = makeFilterPanel([OV_NONE, ...peers], { paint, single: true, title: 'when local' });
             panel.open(F.rows[F.ri].peer || OV_NONE);
@@ -3316,7 +3327,7 @@ async function configForm(flags, opts = {}) {
       if (k === 'k' || k === '\x1b[A') fi = Math.max(0, fi - 1);
       else if (k === 'j' || k === '\x1b[B') fi = Math.min(fields.length - 1, fi + 1);
       else if (k === '\r' || k === '\n') {
-        if (fld.key === 'path' && secOf().key === 'projects') openFolderPick(); // pick a folder (or type)
+        if (fld.key === 'path' && secOf().key === 'services') openFolderPick(); // pick a folder (or type)
         else if (fld.kind === 'text' || fld.kind === 'name') { editing = true; buf = String(form[fld.key] || ''); caret = buf.length; }
         else if (fld.kind === 'choice' || fld.kind === 'multiselect') openPanel(fld);
         else if (fld.kind === 'map') { mapEdit = { field: fld, rows: toRows(form[fld.key]), ri: 0, list: false }; }
@@ -3341,19 +3352,19 @@ async function configForm(flags, opts = {}) {
   });
 }
 
-// Add/remove a guard name on a project, keeping `guards` absent when empty.
-function setProjectGuard(project, name, on) {
-  const set = new Set(project.guards || []);
+// Add/remove a guard name on a service, keeping `guards` absent when empty.
+function setServiceGuard(service, name, on) {
+  const set = new Set(service.guards || []);
   if (on) set.add(name);
   else set.delete(name);
   const list = [...set];
-  if (list.length) project.guards = list;
-  else delete project.guards;
+  if (list.length) service.guards = list;
+  else delete service.guards;
 }
 
 // ---------------------------------------------------------------------------
-// Env overrides — per-project env vars stored in config.json `overrides` (committable, no secrets).
-// Applied to a project's wired env when crew starts it (see overrideVarsFor/applyEnvOverrides).
+// Env overrides — per-service env vars stored in config.json `overrides` (committable, no secrets).
+// Applied to a service's wired env when crew starts it (see overrideVarsFor/applyEnvOverrides).
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -3375,26 +3386,26 @@ export function cmdCheck(flags) {
   if (cfg.guards != null && !isObj(cfg.guards)) E(`guards must be an object`);
   const guards = isObj(cfg.guards) ? cfg.guards : {};
 
-  // Projects.
-  if (!isObj(cfg.projects) || !Object.keys(cfg.projects).length) {
-    E(`projects: at least one project is required`);
+  // Services.
+  if (!isObj(cfg.services) || !Object.keys(cfg.services).length) {
+    E(`services: at least one service is required`);
   } else {
-    for (const [name, p] of Object.entries(cfg.projects)) {
-      const at = `project '${name}'`;
+    for (const [name, p] of Object.entries(cfg.services)) {
+      const at = `service '${name}'`;
       if (!isObj(p)) {
         E(`${at}: must be an object`);
         continue;
       }
-      for (const k of Object.keys(p)) if (!PROJECT_KEYS.has(k)) W(`${at}: unknown key '${k}'`);
+      for (const k of Object.keys(p)) if (!SERVICE_KEYS.has(k)) W(`${at}: unknown key '${k}'`);
       if (typeof p.path !== 'string' || !p.path.trim()) E(`${at}: 'path' (string) is required`);
       else
         try {
-          if (!pathExists(resolveProjectPath(p.path))) W(`${at}: path does not exist on disk: ${p.path}`);
+          if (!pathExists(resolveServicePath(p.path))) W(`${at}: path does not exist on disk: ${p.path}`);
         } catch (e) {
           W(`${at}: path cannot be resolved (${e.message})`);
         }
       if (p.type != null && typeof p.type !== 'string') E(`${at}: 'type' must be a string`);
-      else if (typeof p.type === 'string' && !PROJECT_TYPES.includes(p.type)) W(`${at}: unusual type '${p.type}' (known: ${PROJECT_TYPES.join(', ')})`);
+      else if (typeof p.type === 'string' && !SERVICE_TYPES.includes(p.type)) W(`${at}: unusual type '${p.type}' (known: ${SERVICE_TYPES.join(', ')})`);
       if (p.runner != null && typeof p.runner !== 'string') E(`${at}: 'runner' must be a string`);
       if (p.tasks != null) {
         if (!isObj(p.tasks)) E(`${at}: 'tasks' must be an object`);
@@ -3441,12 +3452,12 @@ export function cmdCheck(flags) {
     if (typeof g.comment !== 'string' || !g.comment.trim()) W(`${at}: 'comment' is required — it explains what the check verifies`);
     if (g.message != null && typeof g.message !== 'string') E(`${at}: 'message' must be a string`);
   }
-  const usedGuards = new Set(Object.values(cfg.projects || {}).flatMap((p) => (isObj(p) && Array.isArray(p.guards) ? p.guards : [])));
-  for (const name of Object.keys(guards)) if (!usedGuards.has(name)) W(`guard '${name}' is defined but used by no project`);
+  const usedGuards = new Set(Object.values(cfg.services || {}).flatMap((p) => (isObj(p) && Array.isArray(p.guards) ? p.guards : [])));
+  for (const name of Object.keys(guards)) if (!usedGuards.has(name)) W(`guard '${name}' is defined but used by no service`);
 
   // Env overrides — validate BOTH layers: config.json (committable; warn on secret-LOOKING keys) and the
   // local.json overlay (machine-local; secrets belong here, no warn). Same shape; whenLocal is reserved.
-  const projNames = new Set(Object.keys(cfg.projects || {}));
+  const projNames = new Set(Object.keys(cfg.services || {}));
   const SECRETISH = /(pass|pwd|secret|token|credential|private[_-]?key|api[_-]?key)/i;
   const checkOverrides = (src, label, warnSecret) => {
     if (src == null) return;
@@ -3457,13 +3468,13 @@ export function cmdCheck(flags) {
       if (warnSecret && SECRETISH.test(k)) W(`${where}.${k} looks secret — put it in local.json overrides (machine-local, gitignored), not the committable config`);
     };
     for (const [proj, vars] of Object.entries(src)) {
-      if (!projNames.has(proj)) W(`${label}: unknown project '${proj}'`);
+      if (!projNames.has(proj)) W(`${label}: unknown service '${proj}'`);
       if (!isObj(vars)) { E(`${label}['${proj}'] must be an object of VAR:value`); continue; }
       for (const [k, v] of Object.entries(vars)) {
         if (k === OVERRIDE_WHEN_LOCAL) {
-          if (!isObj(v)) { E(`${label}['${proj}'].whenLocal must be an object keyed by project`); continue; }
+          if (!isObj(v)) { E(`${label}['${proj}'].whenLocal must be an object keyed by service`); continue; }
           for (const [peer, pv] of Object.entries(v)) {
-            if (!projNames.has(peer)) W(`${label}['${proj}'].whenLocal: unknown project '${peer}'`);
+            if (!projNames.has(peer)) W(`${label}['${proj}'].whenLocal: unknown service '${peer}'`);
             if (!isObj(pv)) { E(`${label}['${proj}'].whenLocal['${peer}'] must be an object of VAR:value`); continue; }
             for (const [vk, vv] of Object.entries(pv)) checkVar(`${label}['${proj}'].whenLocal['${peer}']`, vk, vv);
           }
@@ -3476,8 +3487,8 @@ export function cmdCheck(flags) {
   const machine = loadMachine(flags);
   checkOverrides(cfg.overrides, 'overrides', true);
   checkOverrides(machine.overrides, 'local.json overrides', false);
-  if (Array.isArray(machine.lastSelection)) for (const n of machine.lastSelection) if (!projNames.has(n)) W(`local.json lastSelection: unknown project '${n}'`);
-  if (Array.isArray(machine.lastDebug)) for (const n of machine.lastDebug) if (!projNames.has(n)) W(`local.json lastDebug: unknown project '${n}'`);
+  if (Array.isArray(machine.lastSelection)) for (const n of machine.lastSelection) if (!projNames.has(n)) W(`local.json lastSelection: unknown service '${n}'`);
+  if (Array.isArray(machine.lastDebug)) for (const n of machine.lastDebug) if (!projNames.has(n)) W(`local.json lastDebug: unknown service '${n}'`);
 
   // Report.
   console.log(c.bold(`Checking ${tildify(userPath)}`) + (localPath ? c.dim(`  (+ ${tildify(localPath)})`) : ''));
@@ -3564,12 +3575,12 @@ export function help() {
   };
   const ACTIONS = [
     ['help', '', 'Show this help'],
-    ['list', '', 'List projects'],
-    ['start', 'env=<env>', 'Pick projects, wire + start them for that env'],
-    ['workspace', '', 'Pick projects, open one VSCode window'],
-    ['claude', '[session]', 'Pick projects, launch Claude Code'],
+    ['list', '', 'List services'],
+    ['start', 'env=<env>', 'Pick services, wire + start them for that env'],
+    ['workspace', '', 'Pick services, open one VSCode window'],
+    ['claude', '[session]', 'Pick services, launch Claude Code'],
     ['graph', '[list]', 'Show the dependency graph (list = text)'],
-    ['resolve', '<env> [proj…]', "Show each project's resolved env (dry-run)"],
+    ['resolve', '<env> [proj…]', "Show each service's resolved env (dry-run)"],
   ];
   const CONFIG = [
     ['config', '[path]', 'Visual config editor (path = print file path)'],
@@ -3599,7 +3610,7 @@ export function help() {
 }
 
 // ==================== main ====================
-// crew — run the slice of your local stack you care about (a selected group of projects, started
+// crew — run the slice of your local stack you care about (a selected group of services, started
 // together and wired to point at each other's local ports or the rest's deployed hosts), open them
 // as one VSCode workspace, or hand the set to Claude Code. Driven by one persistent config.
 //
@@ -3654,7 +3665,7 @@ async function main() {
       await cmdStart(flags, rest);
       return;
     case 'install':
-      fail("crew install was removed — `crew start` is the only run command; a project's other tasks aren't wired to a command yet");
+      fail("crew install was removed — `crew start` is the only run command; a service's other tasks aren't wired to a command yet");
       return;
     case 'workspace':
       await cmdWorkspace(flags, rest);
@@ -3663,13 +3674,13 @@ async function main() {
       await cmdClaude(flags, rest);
       return;
     case 'add':
-      fail('crew add was removed — create projects visually: crew config  (then the "+ New project" row)');
+      fail('crew add was removed — create services visually: crew config  (then the "+ New service" row)');
       return;
     case 'edit':
       fail('crew edit is now `crew config` — the two-pane visual editor');
       return;
     case 'remove':
-      fail('crew remove was removed — delete visually: crew config  (highlight the project, press d)');
+      fail('crew remove was removed — delete visually: crew config  (highlight the service, press d)');
       return;
     case 'guards':
       fail('crew guards was removed — view/edit guards in: crew config');
@@ -3678,7 +3689,7 @@ async function main() {
       fail('crew overrides was removed — view/edit overrides in: crew config');
       return;
     case 'dir':
-      fail('crew dir was removed — set the projects directory in Settings: crew config');
+      fail('crew dir was removed — set the services directory in Settings: crew config');
       return;
     case 'graph':
       await cmdGraph(flags, rest);

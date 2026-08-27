@@ -24,7 +24,7 @@ crew start env=staging     web   [x] on  → http://localhost:3000
 crew is a **zero-dependency** CLI for local dev on a distributed stack. Once a slice is running you
 can also open it as one VS Code workspace, or hand it to a single Claude Code session.
 
-> **Assumes each project ships at least one environment file** with its peers' URLs plus a deployed
+> **Assumes each service ships at least one environment file** with its peers' URLs plus a deployed
 > host those point at - that's what crew borrows for the services you leave off. Nothing deployed to
 > point at? A full-stack tool like Docker Compose fits your case better; see [Why not just use Docker?](#why-not-just-use-docker) below.
 
@@ -38,8 +38,8 @@ You have fifteen services. Today you're touching two. `crew start` opens a picke
 **dependency graph crew derived from your env files**, you tick the slice you care about, and
 crew:
 
-- runs each project's `start` task **natively** in parallel, with labelled, per-project-colored logs;
-- **wires the slice together** - rewrites the URLs in each project's env file so a running peer
+- runs each service's `start` task **natively** in parallel, with labelled, per-service-colored logs;
+- **wires the slice together** - rewrites the URLs in each service's env file so a running peer
   points at your local copy instead of the deployed one;
 - leaves everything you *didn't* pick on its resolved remote env (qa / staging / prod), so the
   rest of the stack is just… there.
@@ -55,12 +55,13 @@ The picked set is remembered, so the other two surfaces open the same thing:
 They're separate commands on purpose - each wants its own terminal tab and lifecycle. crew never
 spawns terminals for you.
 
-**Debug a service in the slice.** Give a project a `tasks.debug` (its debugger command - e.g.
-`node --inspect=:9230 server.js`, `python -m debugpy --listen :5678 -m app`, `next dev`). Then in the
+**Debug a service in the slice.** Give a service a **debug** command — the `debug` field in `crew config`
+(stored as `tasks.debug`), e.g. `node --inspect=:9230 server.js`, `python -m debugpy --listen :5678 -m app`,
+`next dev`. Then in the
 `crew start` picker, press **`d`** on a running node to flip it into debug mode - its box shows
 `[debug]` and crew launches `tasks.debug` instead of `tasks.start` for that one. Mix freely: run the
 whole slice, only the service you're stepping through under a debugger. `d` only appears for a node
-that's on (local) *and* has a `tasks.debug`; each project owns its own debugger + port.
+that's on (local) *and* has a `tasks.debug`; each service owns its own debugger + port.
 
 ### Install
 
@@ -86,24 +87,24 @@ parallel process runner. Self-update with `crew upgrade`.
 </p>
 
 **You don't hand-write the config.** `crew config` is a two-pane visual editor: pick a
-project's folder and crew fills in the mechanical parts it can read from your `package.json`,
+service's folder and crew fills in the mechanical parts it can read from your `package.json`,
 lockfiles and `.envs` - type, runner, start command and env-file path. The URLs are yours to add:
-the project's local URL/port and its deployed host per environment. Out comes one readable
+the service's local URL/port and its deployed host per environment. Out comes one readable
 `config.json` - committable, no secrets.
 
-A project entry holds just a few things (crew fills the first two, you fill the URLs):
+A service entry holds just a few things (crew fills the first two, you fill the URLs):
 
 - **`path`** + **`tasks.start`** - where the repo lives and how to run it (auto-filled from the
   folder). Drop **`{envfile}`** in the command and crew injects the wired env file it materializes.
-- **`local`** - the project's local URL/port. crew guesses it when it can spot a port; otherwise you
+- **`local`** - the service's local URL/port. crew guesses it when it can spot a port; otherwise you
   add it. This is what a peer's env gets rewritten to point at.
-- **`match`** - the host(s) the project is deployed under, per env. **Always entered by hand** - crew
+- **`match`** - the host(s) the service is deployed under, per env. **Always entered by hand** - crew
   never guesses it. It matches these against the URLs in your env files to **auto-discover who
   depends on whom**, so there's no manual edge list.
 
 ```json
 {
-  "projects": {
+  "services": {
     "web": {
       "path": "web",
       "type": "frontend",
@@ -131,10 +132,10 @@ A project entry holds just a few things (crew fills the first two, you fill the 
 ```
 
 From those hosts and env files crew derives the dependency graph - here `web` → `api` → `auth` -
-which drives the picker, connectivity warnings, and per-project env resolution. Preview it with
-`crew graph` (a drawn ASCII diagram) and `crew resolve <env>` (a dry-run of what env each project
+which drives the picker, connectivity warnings, and per-service env resolution. Preview it with
+`crew graph` (a drawn ASCII diagram) and `crew resolve <env>` (a dry-run of what env each service
 lands on). Because there are no secrets or machine paths in it, `config.json` is directly
-committable and shareable across your team; the machine-local bits (your projects directory,
+committable and shareable across your team; the machine-local bits (your services directory,
 remembered selection) live in a gitignored `local.json` beside it.
 
 The full field-by-field reference is in [Config reference](#config-reference) below.
@@ -174,12 +175,12 @@ loop of flipping a couple of services on and letting everything else stay remote
 ### Commands
 
 ```
-crew list                       list projects (remembered selection, per-folder status)
-crew start env=<env>            pick projects, wire + start them for that env
-crew workspace                  pick projects, open one VS Code window
-crew claude [name]              pick projects, launch one Claude Code session (--add-dir)
+crew list                       list services (remembered selection, per-folder status)
+crew start env=<env>            pick services, wire + start them for that env
+crew workspace                  pick services, open one VS Code window
+crew claude [name]              pick services, launch one Claude Code session (--add-dir)
 crew graph [list]               dependency graph derived from .envs files (drawn / adjacency)
-crew resolve <env> [proj…]      dry-run: the env each project resolves to for a selection
+crew resolve <env> [proj…]      dry-run: the env each service resolves to for a selection
 crew config [path]              two-pane visual editor for everything (or print the config path)
 crew check                      validate config + local.json; list errors / warnings
 crew pull <url>                 fetch a config.json from a URL and install it (backs up current)
@@ -187,18 +188,18 @@ crew upgrade                    self-update (npm i -g @pinkynrg/crew@latest)
 ```
 
 `start` / `workspace` / `claude` always open the interactive multiselect (preselected with your
-last pick) and the selection is remembered globally; projects are never named on the CLI there.
+last pick) and the selection is remembered globally; services are never named on the CLI there.
 `crew start` is the only command that runs anything. Global flags: `--config <path>`, `-v/--version`.
 
 ### The runner & tasks model
 
-`start` is the one core task crew runs. Its command per project, with no duplication:
+`start` is the one core task crew runs. Its command per service, with no duplication:
 
-1. `project.tasks.start` if present - an explicit command (in `crew config`, the **start** field);
-2. else `project.runner` with `{task}` substituted (e.g. `make {task}` → `make start`);
-3. else the project is **run-less** and skipped (it still shows up in `workspace` / `claude`).
+1. `service.tasks.start` if present - an explicit command (in `crew config`, the **start** field);
+2. else `service.runner` with `{task}` substituted (e.g. `make {task}` → `make start`);
+3. else the service is **run-less** and skipped (it still shows up in `workspace` / `claude`).
 
-A project's `tasks` map can hold **other** tasks too (e.g. `debug`, `install`), but they're just data
+A service's `tasks` map can hold **other** tasks too (e.g. `debug`, `install`), but they're just data
 for now — only `start` (and its per-node `debug` variant, below) has a command. `debug` runs under
 `crew start` via the selector's `d` toggle.
 
@@ -206,11 +207,11 @@ Resolved commands may contain `{name}` placeholders. `{task}` is filled from the
 `{envfile}` by crew (the wired env file), and everything else from your `key=value` args. Every
 placeholder must resolve or crew errors and runs nothing; an unused `key=value` is a yellow warning;
 substituted values are shell-quoted. `crew start` **requires** `env=<name>` - the base env the
-unselected projects point at.
+unselected services point at.
 
-`crew start` **always streams**: projects run in parallel with per-project-colored output, and
+`crew start` **always streams**: services run in parallel with per-service-colored output, and
 Ctrl-C - or any one process exiting - tears the whole group down. On a TTY this is a full-screen
-log viewer (`f` to filter which projects are shown, `esc`/`Ctrl-C` to stop).
+log viewer (`f` to filter which services are shown, `esc`/`Ctrl-C` to stop).
 
 Teardown is reliable because each command runs via `/bin/sh -c` in **its own process group**
 (`spawn` detached); crew signals the whole group by pgid - SIGTERM, then SIGKILL after a grace
@@ -219,12 +220,12 @@ period (`CREW_KILL_GRACE_MS`, default 5000ms). Reparented grandchildren (autorel
 
 ### Env derivation & the dependency graph
 
-You pass one env to the selection (`crew start env=pre`); crew works out what env each project
+You pass one env to the selection (`crew start env=pre`); crew works out what env each service
 *actually* runs at by following the graph. The **entry** (the thing nothing else in the selection
-depends on) runs at your selection env; every other project inherits the env-variant its consumer's
+depends on) runs at your selection env; every other service inherits the env-variant its consumer's
 env file points at - read straight from the files via the env-labeled `match`. So the same shared
 config serves multiple teams correctly, because the answer is context-dependent in a way a static
-per-project setting never could be. Disagreements, missing env files, and unreachable projects are
+per-service setting never could be. Disagreements, missing env files, and unreachable services are
 reported as warnings - never silently mis-resolved.
 
 `crew graph` renders the derived graph as a laid-out ASCII diagram (boxes, per-source colored edges,
@@ -232,14 +233,14 @@ solid dependency arrows, dashed reference arrows) - a zero-dep layered-DAG rende
 tool. On a TTY it opens in an alternate-screen pager (`f` filters nodes, `esc` quits leaving no
 scrollback); piped, it prints plainly. `crew resolve <env>` is the read-only dry-run.
 
-> A URL from a non-frontend into a `type: frontend` project (a backend embedding the app's public
+> A URL from a non-frontend into a `type: frontend` service (a backend embedding the app's public
 > URL) is treated as a **reference**, not a dependency - shown in the graph but excluded from
 > connectivity and env derivation.
 
 ### Env overrides
 
 URL swapping isn't always enough - sometimes a *value* must change when you run locally (a Temporal
-queue name, say). `overrides` upsert extra `KEY=value` lines into a project's wired env file. They
+queue name, say). `overrides` upsert extra `KEY=value` lines into a service's wired env file. They
 live as a top-level table in the committable `config.json` (keep secrets out):
 
 ```json
@@ -255,18 +256,18 @@ live as a top-level table in the committable `config.json` (keep secrets out):
 }
 ```
 
-- **bare `VAR: value`** - applied whenever that project starts (a value that's always different locally);
+- **bare `VAR: value`** - applied whenever that service starts (a value that's always different locally);
 - **`whenLocal: { "<peer>": { VAR: value } }`** - applied only when `<peer>` is also being started
   (e.g. point a URL at a local dependency's exact host **and** path, but only while it's up).
 
 Overrides win over the base env file and the localhost URL swap; `whenLocal` wins over bare. Manage
-them in `crew config` → a project's **Environment Overrides** block.
+them in `crew config` → a service's **Environment Overrides** block.
 
 ### Guards
 
-A project can require named **guards** - preconditions verified before `crew start` does anything.
+A service can require named **guards** - preconditions verified before `crew start` does anything.
 A guard is a shell command that passes iff it exits 0, with a required `comment` (what it checks)
-and a failure `message`. They live in a top-level registry and attach to projects many-to-many:
+and a failure `message`. They live in a top-level registry and attach to services many-to-many:
 
 ```json
 {
@@ -277,7 +278,7 @@ and a failure `message`. They live in a top-level registry and attach to project
       "message": "AWS SSO expired - run: aws sso login --profile pre_bee"
     }
   },
-  "projects": {
+  "services": {
     "backend": { "path": "~/code/backend", "type": "backend", "guards": ["aws"] }
   }
 }
@@ -290,13 +291,13 @@ starts. Manage them in `crew config` → the **Guards** section.
 ### Config files & sharing
 
 - **User-level:** `~/.config/crew/config.json` (v2 schema; v1 migrates on load).
-- **Project-local:** a `./.crew.json` in the current directory merges on top.
+- **Service-local:** a `./.crew.json` in the current directory merges on top.
 - **`--config <path>`** points at a specific file. `local.json` is always read from beside it.
 
-`config.json` never contains machine-specific data, so it's directly committable - keep project
-`path`s **relative** (they resolve against a machine-local **projects directory**, set once in
+`config.json` never contains machine-specific data, so it's directly committable - keep service
+`path`s **relative** (they resolve against a machine-local **services directory**, set once in
 `crew config` → Settings, stored in `local.json`). A teammate installs it - clone it to
-`~/.config/crew/config.json` or `crew pull <raw-url>` - sets their projects dir once, and everything
+`~/.config/crew/config.json` or `crew pull <raw-url>` - sets their services dir once, and everything
 resolves with no absolute paths ever shared. **Gitignore `local.json`** (plus `workspaces/`,
 `sessions/`, `tmp/`).
 
@@ -307,20 +308,20 @@ with no `local`, a path missing on disk) exit 0. A good pre-commit / CI gate for
 ### `crew workspace` & `crew claude` details
 
 `crew workspace` generates a multi-root `.code-workspace` inside crew's own config dir
-(`~/.config/crew/workspaces/<selection>.code-workspace`) - not your project, so it stays out of git -
+(`~/.config/crew/workspaces/<selection>.code-workspace`) - not your service, so it stays out of git -
 and opens it with `code`. A top-level `workspaceSettings` object is written verbatim into its
 `settings` (e.g. `{ "jest.enable": false }`).
 
 `crew claude` launches Claude Code with a stable, crew-managed working directory per selection
-(`~/.config/crew/sessions/<selection>/`), passing every project via `--add-dir`. Because the cwd is
+(`~/.config/crew/sessions/<selection>/`), passing every service via `--add-dir`. Because the cwd is
 the sorted set of names, history for a given set is stable regardless of pick order. Name it with an
 optional session name: `crew claude billing-work`.
 
 ## Known limitations (by design)
 
-- **No task dependency graph, no ordering.** crew just starts the selected projects in parallel;
+- **No task dependency graph, no ordering.** crew just starts the selected services in parallel;
   it doesn't sequence tasks. No caching, no build-system behavior - that's `make` / `turbo` / `nx` territory.
-- **No startup ordering within a run.** All projects start simultaneously; services must tolerate
+- **No startup ordering within a run.** All services start simultaneously; services must tolerate
   their dependencies coming up in any order.
 - No bundler command, no terminal/pane spawning, no tmux, no health-check / wait-for-ready, no
   port-conflict detection, no plugin system, no telemetry.
@@ -328,13 +329,13 @@ optional session name: `crew claude billing-work`.
 ## FAQ
 
 **Does crew modify my repos or my `.env` files?**
-No. It *reads* your env file and writes a wired **copy** to `~/.config/crew/tmp/<project>.env` (URLs
+No. It *reads* your env file and writes a wired **copy** to `~/.config/crew/tmp/<service>.env` (URLs
 swapped to `localhost` for the peers you're running), passes that path to your start command via
 `{envfile}`, and deletes it on teardown. Your checkout and its committed env files are never touched.
 
 **Where do my secrets live?**
 In your own env files, same as today - crew only reads them. The committable `config.json` holds no
-secrets; machine-local bits (projects dir, remembered selection) live in a gitignored `local.json`.
+secrets; machine-local bits (services dir, remembered selection) live in a gitignored `local.json`.
 The temporary wired copy under `~/.config/crew/tmp/` is the only materialized secret, and it's
 regenerated per run and removed on exit.
 

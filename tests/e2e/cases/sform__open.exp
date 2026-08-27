@@ -6,6 +6,6 @@ send "k"
 sleep 1
 must {Settings}
 must {workspaceName}
-must {projectsDir}
+must {servicesDir}
 send "\033"
 want_exit 0

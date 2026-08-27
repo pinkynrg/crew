@@ -15,10 +15,10 @@ Guidance for working in this repo.
 ## What crew is
 
 A single-file macOS/Linux CLI that runs the **slice of your local stack you care about** — `crew
-start` a selected group of projects together, in parallel, each auto-wired to point at the others'
+start` a selected group of services together, in parallel, each auto-wired to point at the others'
 local ports (or the rest's deployed hosts when left off). Also opens the set as one VSCode workspace,
 or hands it to Claude Code. crew owns the fan-out (parallelism, labelled output, exit-code
-aggregation, lifecycle); each **project** owns its `start` command. crew never interprets a command
+aggregation, lifecycle); each **service** owns its `start` command. crew never interprets a command
 beyond `{placeholder}` substitution.
 
 ## Layout
@@ -61,17 +61,19 @@ beyond `{placeholder}` substitution.
 
 ## Config
 
-- User-level: `~/.config/crew/config.json` (v2 schema). Project-local `./.crew.json`
-  merges on top. v1 configs migrate to v2 on load (`start.command` -> `tasks.start`).
+- User-level: `~/.config/crew/config.json` (v2 schema). Service-local `./.crew.json`
+  merges on top. v1 configs migrate to v2 on load (`start.command` -> `tasks.start`). Key renames also
+  auto-migrate on load: top-level `projects` -> `services`, and `projectsDir` -> `servicesDir` (in both
+  `config.json` and `local.json`).
   `crew pull <url>` fetches a `config.json` from a URL (zero-dep `node:http(s)`, follows
-  redirects, validates it has `projects`) and installs it, backing up the current one to
+  redirects, validates it has `services`) and installs it, backing up the current one to
   `config.json.bak`; `local.json` is untouched.
-- `projectsDir` (machine-local — stored in `local.json` beside the config, set via
-  `crew config` → Settings, never in the committable `config.json`): relative project
+- `servicesDir` (machine-local — stored in `local.json` beside the config, set via
+  `crew config` → Settings, never in the committable `config.json`): relative service
   `path`s resolve against it; `~`/absolute paths are used as-is. Changing it can orphan every relative-path
-  project, so both setters WARN (`missingProjectFolders(cfg, dir)` → `⚠ N/M project folder(s) not found`)
-  but never touch the config — the fix is correcting the dir/paths, never bulk-deleting projects. So `config.json`
-  (projects/guards, relative paths) is directly committable; a legacy `projectsDir`
+  service, so both setters WARN (`missingServiceFolders(cfg, dir)` → `⚠ N/M service folder(s) not found`)
+  but never touch the config — the fix is correcting the dir/paths, never bulk-deleting services. So `config.json`
+  (services/guards, relative paths) is directly committable; a legacy `servicesDir`
   in `config.json` auto-migrates to `local.json` on load. `local.json` reads from beside
   the resolved config (works with `--config`); gitignore it when committing. `local.json`
   also holds `lastSelection` (the remembered picker selection) + `lastDebug` (the remembered debug set,
@@ -79,28 +81,28 @@ beyond `{placeholder}` substitution.
   `logWrap`/`hiddenLog`). (`overrides` USED to live here; it moved into the committable `config.json` —
   a legacy `local.json.overrides` auto-migrates up on load, see below.)
 - **Missing-folder gate** (NON-blocking): the folder-consuming commands (`start`/`workspace`/`claude`/
-  `graph`/`resolve`) run `warnMissing(cfg)` then `presentCfg(cfg)` — a project whose `path`
+  `graph`/`resolve`) run `warnMissing(cfg)` then `presentCfg(cfg)` — a service whose `path`
   folder is absent is EXCLUDED (as if it didn't exist) from the graph AND the selector, so you can't draw
   or pick a phantom, and the SHARED config is never mutated. `warnMissing` is **direction-aware**: no
-  projects dir or a MAJORITY missing → "check your projects dir: crew config › Settings › config
-  › projectsDir"; a minority → "fix each path (or remove it): name → path". If NOTHING is left,
-  `emptyProjectsState` prints a friendly message — actions (`start`/…) also `exit 1`; views (`graph`/
-  `resolve`) exit 0. `crew check` keeps its own full report (never gated); `crew list` shows all projects
+  services dir or a MAJORITY missing → "check your services dir: crew config › Settings › config
+  › servicesDir"; a minority → "fix each path (or remove it): name → path". If NOTHING is left,
+  `emptyServicesState` prints a friendly message — actions (`start`/…) also `exit 1`; views (`graph`/
+  `resolve`) exit 0. `crew check` keeps its own full report (never gated); `crew list` shows all services
   (red/green dot per folder) plus the `warnMissing` banner. So a pulled config on a machine that hasn't
-  cloned everything self-explains instead of erroring cryptically — no "set projectsDir" warning needed.
-- `overrides`: extra env vars upserted into a project's **wired** env file (the one crew materializes for
-  `{envfile}`; a project without `{envfile}` can't be overridden). **TWO layers**, merged by
-  `mergeOverrides(cfgOv, localOv)` with the **local layer WINNING** per project / var / whenLocal-peer-var:
+  cloned everything self-explains instead of erroring cryptically — no "set servicesDir" warning needed.
+- `overrides`: extra env vars upserted into a service's **wired** env file (the one crew materializes for
+  `{envfile}`; a service without `{envfile}` can't be overridden). **TWO layers**, merged by
+  `mergeOverrides(cfgOv, localOv)` with the **local layer WINNING** per service / var / whenLocal-peer-var:
   the **shared** layer is top-level `overrides` in the committable `config.json` (no secrets — shared like the
   rest); the **local** layer is `local.json.overrides` (machine-local, gitignored — the home for per-user /
   secret values, e.g. a DB password). A legacy `local.json.overrides` is NO LONGER migrated up into
   `config.json` — it IS the overlay now (the old migrate-up in `loadUserConfig` was removed).
-  `overrides["<project>"]` has two entry kinds: bare `VAR:val` applied whenever `<project>`
+  `overrides["<service>"]` has two entry kinds: bare `VAR:val` applied whenever `<service>`
   starts (self/unconditional — e.g. a Temporal queue so the local worker consumes `foo-local`
   not shared `foo`); and `whenLocal: {"<peer>": {VAR:val}}` applied only when `<peer>` is also
   being started (`running` set in `wireRun`) — e.g. point a URL at a local dependency's exact
   host+path (which the host-only URL swap can't do), but only while it's up. Resolved by
-  `overrideVarsFor(overrides, name, running, off)` — `off` is a per-project disabled Set (keys `VAR` or
+  `overrideVarsFor(overrides, name, running, off)` — `off` is a per-service disabled Set (keys `VAR` or
   `peer.VAR`) from the graph-selector `e` toggle (persisted machine-local as `local.json.overridesOff`), so a
   user can enable/disable individual overrides for one run; `whenLocal` wins over bare; reserved key
   `OVERRIDE_WHEN_LOCAL` — and applied by `applyEnvOverrides` in `wireRun`, after `wireText`;
@@ -108,14 +110,14 @@ beyond `{placeholder}` substitution.
   VAR=` line in place, else append; values quoted only when unsafe (non-string values skipped
   with a warning). Also the escape hatch for cross-env wiring (inject a key an env lacks) when
   env derivation + the URL swap don't cover a case. crew stays agnostic — a plain
-  per-project table. Edited in `crew config` as **TWO inline Environment Overrides blocks** at the END of each
-  project's form (both `kind: 'overrides'`, same row editor, distinguished only by `field.key`): **· shared
+  per-service table. Edited in `crew config` as **TWO inline Environment Overrides blocks** at the END of each
+  service's form (both `kind: 'overrides'`, same row editor, distinguished only by `field.key`): **· shared
   (config)** → `cfg.overrides` (written by `persist()`) and **· local (wins · machine-only)** →
   `machine.overrides` (written by `writeMachine`, loaded via `localOverrides`). Each is an INLINE list, one line
   per override — `VAR = value   when <peer> local` (peer blank = unconditional/bare). Bare `VAR:val` and
   `whenLocal` are flattened into ONE flat row list `{var, value, peer}` (`overridesToRows`) and rebuilt to the
   stored shape on save (`rowsToOverrides`) — so `whenLocal` is a per-row OPTION (the `when local` column, a
-  single-select picker of the other projects + an "always" choice), NOT a separate field. `⏎` on a block enters
+  single-select picker of the other services + an "always" choice), NOT a separate field. `⏎` on a block enters
   in-place row-edit (`ovEdit = {field, rows, ri, ci}`, `ci` 0=VAR 1=value 2=when): `↑↓` rows, `←→` columns, `⏎`
   edits the focused cell (VAR/value inline, `when` opens the picker), `d` removes, `esc` commits to
   `form[field.key]`. Both blocks move on rename and clear on delete (shared via `persist`, local via
@@ -123,15 +125,15 @@ beyond `{placeholder}` substitution.
   stored forms in BOTH files (`checkOverrides` — a secret-looking key in the shared `config.json` layer WARNs;
   the local layer doesn't).
 - No groups, no `run` command. `start`/`workspace`/`claude` act on a **multiselect selection**
-  (`selectMembers`, preselected with `lastSelection`); projects are never named on the CLI there
+  (`selectMembers`, preselected with `lastSelection`); services are never named on the CLI there
   (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
   `lastSelection` (global, machine-local) and reused across the three. There is NO `install` (or any
   other) run command — `start` is the sole core task (see Task resolution below); `crew install` now
   errors as a retired command. A legacy `groups` key is dropped on load.
-- Env derivation (replaces the old `envMap`): `{env}` is NOT a static per-project map — it's
+- Env derivation (replaces the old `envMap`): `{env}` is NOT a static per-service map — it's
   **derived from the chain** by `resolveEnvs(cfg, selection, selEnv)`. The **entry clusters**
-  (source SCCs of the dependency graph — projects nothing else in the selection depends on) run
-  at the selection env; every other project inherits the env-variant its consumer's env file
+  (source SCCs of the dependency graph — services nothing else in the selection depends on) run
+  at the selection env; every other service inherits the env-variant its consumer's env file
   actually points at (host → env via the labeled `match`, below). BFS from the seeds, so the
   claim CLOSEST to an entry wins; within one file the MAJORITY label wins. Cycles (e.g. a
   frontend↔backend URL reference loop) collapse into one entry cluster via `stronglyConnected`
@@ -142,13 +144,13 @@ beyond `{placeholder}` substitution.
   `crew resolve`), never silently mis-resolved. `crew resolve <env> [proj…]` is the read-only
   dry-run. Feeds the start command, the `env` file path, and wiring. crew stays agnostic — env
   names are free-form; no hardcoded env list.
-- `match` (per project): an **env-labeled map** `{ "<env>": host | [hosts] }` of the project's
+- `match` (per service): an **env-labeled map** `{ "<env>": host | [hosts] }` of the service's
   deployed host(s) — exact strings, each optionally narrowed by a **path** (`host` or
   `host/path/prefix`; `tokenMatchLen`, no globs, no collisions: `api.getbee.io` never matches
-  `rge-api.getbee.io`). Partial/free-form keys OK (label only the envs a project has — the loader
+  `rge-api.getbee.io`). Partial/free-form keys OK (label only the envs a service has — the loader
   has just `qa`/`pro`). Edited in `crew config` as an INLINE `match` field (one `env = host` line per env),
-  with the env keys DERIVED from the project's env files (see the `match` field-kind below) — you fill hosts,
-  you don't invent env labels. `projectIdentity` flattens the values into identity `tokens` (edges +
+  with the env keys DERIVED from the service's env files (see the `match` field-kind below) — you fill hosts,
+  you don't invent env labels. `serviceIdentity` flattens the values into identity `tokens` (edges +
   wiring) and builds `envOf` (host → env label — the basis for env derivation). A host-only token
   swaps just the origin in wiring (path preserved); a **host+path** token matches only URLs on
   that host under that path AND replaces the WHOLE URL with the peer's full `local` — so two
@@ -167,7 +169,7 @@ beyond `{placeholder}` substitution.
   → `f`/`r` toggles → action → exit) which returns `footerText(parts)`; the caller paints it with the
   shared `footerBar(inner, cols)` (full-width reverse-video). The guards editor uses the same two helpers,
   so ALL raw-mode footers are one treatment. The pager shows one `shown/total` count; the selector shows TWO —
-  `sel/total sel` (projects picked to run) then `vis/total shown` (nodes left visible after the `f` filter).
+  `sel/total sel` (services picked to run) then `vis/total shown` (nodes left visible after the `f` filter).
   Any count that isn't full turns RED (via `\x1b[31m…\x1b[39m`, so it survives the reverse-video bar). Both
   UIs share one ref filter (`e => showRef || !e.ref`) and one node-visibility filter: `f` overlays a
   right-anchored multiselect panel (`makeFilterPanel`) ON the graph's rightmost columns — the graph stays
@@ -182,24 +184,25 @@ beyond `{placeholder}` substitution.
   Both prefs are machine-local (`local.json`) and shared across the two UIs: `graphRefs` (show-refs) +
   `graphShown` (node filter) — see `loadGraphRefs`/`saveGraphRefs`/`loadGraphShown`/`saveGraphShown`,
   mirroring `loadLogWrap`.
-- Reference edges (`isReferenceEdge`): a URL from a **non-frontend into a `type: frontend`** project
+- Reference edges (`isReferenceEdge`): a URL from a **non-frontend into a `type: frontend`** service
   is a **reference** (link-back / allowed-origin / redirect base — a backend embedding the app's
   public URL), NOT a dependency. It's still shown by `crew graph` (marked `⇢ … (ref)`) but excluded
   from connectivity AND env derivation — so a backend that merely links to the frontend can't make an
   unrelated selection look "connected" nor seed the frontend's env. Only `frontend→frontend` edges
   (one app embedding another) stay real. Uses the declared `type` only; no per-edge config/marker.
-- `env` (per project): the env-file path template — the SINGLE source of truth for env-file location
-  (drives `{envfile}` wiring AND graph/derivation discovery). `projectEnvFiles` resolves it by globbing
+- `env` (per service): the env-file path template — the SINGLE source of truth for env-file location
+  (drives `{envfile}` wiring AND graph/derivation discovery). `serviceEnvFiles` resolves it by globbing
   `{env}` (captured consistently across every occurrence, so `.envs/{env}`, `.envs/{env}-slug.env`,
   `.envs/.env.{env}`, and nested `../.envs/<app>/{env}/{env}-foo.env` monorepo layouts all enumerate
   their variants). No `env` (or a static path with no `{env}`) → the default `<dir>/.envs` scan (`envFilesFor`).
-- `defaultBranch` (optional, per project): the branch new work is cut from (repos differ —
+- `defaultBranch` (optional, per service): the branch new work is cut from (repos differ —
   `main`/`master`/`develop`/`trunk`). Pure metadata crew records/displays (`crew list` shows a
-  `branch` line); crew runs no git with it. Set it in `crew config` (the `branch` field of a project).
-- Task resolution per project: `tasks[task]` -> `runner` with `{task}` -> skip. `crew start` (`cmdStart`)
-  is the ONLY core run command — task `start`, plus its per-node `debug` variant; a project's OTHER `tasks`
+  `branch` line); crew runs no git with it. Set it in `crew config` (the `branch` field of a service).
+- Task resolution per service: `tasks[task]` -> `runner` with `{task}` -> skip. `crew start` (`cmdStart`)
+  is the ONLY core run command — task `start`, plus its per-node `debug` variant; a service's OTHER `tasks`
   are just data with no core command yet (a future generic runner will funnel them). In `crew config`,
-  `start` is a **dedicated text field** (stored as `tasks.start`); the `tasks` map holds only the OTHER tasks.
+  `start` AND `debug` are **dedicated text fields** (stored as `tasks.start` / `tasks.debug`); the `tasks`
+  map holds only the OTHER tasks. `debug` is optional — filling it is what enables the per-node `d` toggle.
 - **Per-node debug toggle** (`crew start` only): in the graph selector, `d` flips the focused node into
   debug mode — it launches `tasks.debug` instead of `tasks.start`. Only offered when the node is running
   locally (ON) AND has a `tasks.debug` (`canDebug`); the `d` hint + `[debug]` box sublabel appear only
@@ -209,39 +212,39 @@ beyond `{placeholder}` substitution.
   the run selection (deselecting/hiding a node clears its debug flag); the set is remembered in
   `local.json.lastDebug`. Gated by `opts.debugToggle` so it's start-only — the shared selector shows
   nothing debug-related for `workspace`/`claude` (which don't run tasks) and never clobbers `lastDebug`.
-  Each project owns its debugger command + port (`node --inspect=:9230 …`, `python -m debugpy …`, `next
+  Each service owns its debugger command + port (`node --inspect=:9230 …`, `python -m debugpy …`, `next
   dev`), so it's language-agnostic. The graph selector is the ONLY picker now (`--list` and its flat
   multiselect were retired — `crew start --list` errors as an unknown flag).
-- `guards`: top-level `guards: {name: {comment, command, message}}` registry; a project lists
-  names in `project.guards` (many-to-many). `comment` is required and states what the check
+- `guards`: top-level `guards: {name: {comment, command, message}}` registry; a service lists
+  names in `service.guards` (many-to-many). `comment` is required and states what the check
   verifies — it's printed in faint gray beside each result when guards run. Before a run, the
   target's guards are deduped by name, run once each in parallel (pass = exit 0); any failure
   prints its message and aborts. Run before `crew start`. Managed via
   the **visual editor** below (`crew config` → Guards section: create/update/delete/link).
 - **Visual editor (`configForm`, TTY-only)**: `crew config` is the SOLE config command — one two-pane raw-mode
-  editor for everything. Left column stacks the SECTIONS (Settings + Projects + Guards) as a
+  editor for everything. Left column stacks the SECTIONS (Settings + Services + Guards) as a
   name list, each item-section ending in a green `+ New …` row; scroll (`↑↓`) to reach a section. The right
   column is the highlighted item's form. The three actions fall out of
   position + key — CREATE = a `+ New` row (blank form), UPDATE = edit fields then `s` save, DELETE = `d` +
   confirm. **Settings** is a `fixed` section (one synthetic `config` item, NO `+ New`/`d` — you only edit
   values): the top-level config keys (`workspaceName`/`workspaceSettings`) +
-  machine-local `projectsDir`, so `crew config` covers EVERY key (and editing `projectsDir` shows a live
-  `⚠ N/M project folders not found` warning via `missingProjectFolders`, never auto-deleting anything).
+  machine-local `servicesDir`, so `crew config` covers EVERY key (and editing `servicesDir` shows a live
+  `⚠ N/M service folders not found` warning via `missingServiceFolders`, never auto-deleting anything).
   Field KINDS: `text` (a real inline line-editor with a block caret — `←/→` move, Option/Ctrl+arrow
   word-jump, Home/End or Ctrl-A/E, Ctrl-W/U/K, forward-delete, mid-string insert; pre-fills current value),
   `name` (the item key, rename-aware, same editor),
-  `choice` (SINGLE-select — radio `(•)`, `↑↓`+`⏎`, e.g. project `type`),
-  `multiselect` (MULTI — checkboxes `[x]`, `space`/`a` toggle, e.g. a project's guard links),
+  `choice` (SINGLE-select — radio `(•)`, `↑↓`+`⏎`, e.g. service `type`),
+  `multiselect` (MULTI — checkboxes `[x]`, `space`/`a` toggle, e.g. a service's guard links),
   `map` (a **row editor** — `key → value` rows + a green `+ add`; `⏎` on a row edits its value via the same
-  line-editor, `+ add` chains key→value, `d` removes; e.g. project `tasks` (task→cmd); the form carries these
+  line-editor, `+ add` chains key→value, `d` removes; e.g. service `tasks` (task→cmd); the form carries these
   as objects, serialized on `save`; a `json`
   map (`workspaceSettings`) parses each value so `false`/`3` keep their type), `list` (the same row editor
   minus the key column — one value per row, carried as a string array; no field currently uses this kind),
   `overrides` + `match` (two INLINE row editors — rendered in the form, NOT a full-pane takeover, and edited
-  in place via the shared `ovEdit` mode; `⏎` enters row-edit, `↑↓` rows). `overrides` = a project's Environment
+  in place via the shared `ovEdit` mode; `⏎` enters row-edit, `↑↓` rows). `overrides` = a service's Environment
   Overrides, 3 columns `VAR / value / when <peer> local` (`←→` between columns, `+ add`, `d` removes; the
   when-column opens a single-select peer picker). `match` = env-labeled hosts, 2 columns `env = host` with
-  **FIXED keys** — the env labels are DERIVED from the project's env files (`matchLabels` = `projectEnvFiles`
+  **FIXED keys** — the env labels are DERIVED from the service's env files (`matchLabels` = `serviceEnvFiles`
   unioned with any stored labels), so rows can't be added/removed, only each host value filled (blank = no
   match; space-separate for several hosts → array via `matchCommit`). `readonly` (display only). Editing any of choice/multiselect/map **TAKES OVER the whole right pane**
   (full width + height, left column stays for context) rather than a cramped popup — so long task commands /
@@ -250,24 +253,24 @@ beyond `{placeholder}` substitution.
   graph views still use its boxed `.rows()` overlay. Every editor write goes through `persist()` =
   `writeUserConfig(path, pruneConfig(cfg))` — a WHOLE-FILE rewrite of the one in-memory `cfg` (loaded once at
   open; last-writer-wins over external edits) that also **strips unknown keys** (`pruneConfig` whitelists
-  top-level to `TOP_KEYS`, per-project to `PROJECT_KEYS`, per-guard to `GUARD_KEYS`), so a save normalizes the
+  top-level to `TOP_KEYS`, per-service to `SERVICE_KEYS`, per-guard to `GUARD_KEYS`), so a save normalizes the
   file. (The migration write-back in `loadUserConfig` does NOT prune — load never silently strips.) Each
-  section owns `load/save/del`: Projects/Guards write the user config via `persist()`; the Settings
-  `projectsDir` field AND each project's **local** overrides block write `local.json` via `writeMachine`.
-  Env **overrides live on the PROJECT form** as the TWO inline **Environment Overrides** blocks described above
+  section owns `load/save/del`: Services/Guards write the user config via `persist()`; the Settings
+  `servicesDir` field AND each service's **local** overrides block write `local.json` via `writeMachine`.
+  Env **overrides live on the SERVICE form** as the TWO inline **Environment Overrides** blocks described above
   (`kind: 'overrides'`; `overridesToRows`/`rowsToOverrides` round-trip) — the **shared** block
-  (`cfg.overrides[project]`, `persist()`) and the **local** block (`machine.overrides[project]`,
-  `writeMachine`); both move on a rename and are deleted with the project, so there's no separate Overrides
-  section. **Semi-auto add**: `⏎` on a project's `path` field opens
-  a **folder picker** (`openFolderPick` — the subfolders of `projectsDir` via `projectDirs()`, single-select,
+  (`cfg.overrides[service]`, `persist()`) and the **local** block (`machine.overrides[service]`,
+  `writeMachine`); both move on a rename and are deleted with the service, so there's no separate Overrides
+  section. **Semi-auto add**: `⏎` on a service's `path` field opens
+  a **folder picker** (`openFolderPick` — the subfolders of `servicesDir` via `serviceDirs()`, single-select,
   plus a `✎ type a path…` escape that drops to the inline editor). Picking a folder (or committing a typed
-  path) for a NEW project runs `detectProject(abs)` and prefills only the still-EMPTY fields — `name`
+  path) for a NEW service runs `detectService(abs)` and prefills only the still-EMPTY fields — `name`
   (basename), `type`/`runner`/`env`/`local`/`start` — from package.json / lockfiles / manifests /
   `.envs` / dev scripts. `match` (the deployed host) is deliberately NOT derived — the guess was too weak,
   so it's always filled by hand. Path-driven,
-  not a separate "auto" mode: works with no `projectsDir` (type an absolute/`~` path via the escape) and for
+  not a separate "auto" mode: works with no `servicesDir` (type an absolute/`~` path via the escape) and for
   folders outside it; non-destructive (blanks only). Renaming a guard migrates its key AND every
-  `project.guards` link; deleting a guard unlinks it everywhere (warns if in use). A `readonly` field with a
+  `service.guards` link; deleting a guard unlinks it everywhere (warns if in use). A `readonly` field with a
   `.hint` shows it as a status message on `⏎`. Every field can carry a `desc` string — the FOCUSED field's
   `desc` is word-wrapped and rendered as an always-visible dim help block pinned under the form (no keypress;
   hidden during a sub-editor takeover). `↑↓` move, `tab`/`←→` switch pane, `s` writes (that item, to
@@ -293,13 +296,14 @@ beyond `{placeholder}` substitution.
   byte-for-byte the same treatment. `crew config` (no args) is the only entry. The whole old config surface —
   `crew add`, `crew remove`, `crew guards` (+ `add/remove/link/unlink`), `crew overrides` (+ `set/remove`)
   and the sequential wizard — was RETIRED into this editor; those verbs now error with a pointer to `crew
-  edit` (the `cmdGuards`/`cmdOverrides`/`guardList`/`overrideList`/`makePrompter`/`confirm`/`collectProject`/
+  edit` (the `cmdGuards`/`cmdOverrides`/`guardList`/`overrideList`/`makePrompter`/`confirm`/`collectService`/
   `detectDefaultBranch` code was all deleted). The
-  v1 `checks` key auto-migrates to `guards` on load.
+  v1 `checks` key auto-migrates to `guards` on load; `projects`->`services` and `projectsDir`->`servicesDir`
+  renames migrate too; a legacy `longRunning` is stripped.
 - `workspaceSettings` (optional top-level object): written verbatim into the generated
   `.code-workspace` `settings` (e.g. `{"jest.enable": false}` to stop the Jest extension
   auto-running per folder). crew injects nothing by default. Edited in `crew config` → Settings (a `json` map).
-- `crew start` always STREAMS: each project spawns and the first exit (any) or Ctrl-C tears the whole
+- `crew start` always STREAMS: each service spawns and the first exit (any) or Ctrl-C tears the whole
   group down (`runFanout` `killOthers`). There is NO run-to-completion mode and no `longRunning` config —
   `start` is the one core command and is always a service (see `cmdStart`). (`runFanout` still supports a
   non-kill-others / wait-all mode, but nothing calls it now that `install` is gone.)
@@ -307,26 +311,26 @@ beyond `{placeholder}` substitution.
   signals the group by pgid (`kill(-pgid)`) with SIGTERM -> grace -> SIGKILL escalation, so
   reparented grandchildren (autoreload children, supervisord) die too — unlike a ppid
   tree-kill. Grace via `CREW_KILL_GRACE_MS` (default 5000). Colored `[name]` prefixes reuse
-  the `crew list` per-project colors; `FORCE_COLOR` is set for children when the parent is a
+  the `crew list` per-service colors; `FORCE_COLOR` is set for children when the parent is a
   TTY. `emit` routes each proc's output to the interactive viewer (below) when active, else
   streams it straight through with per-line prefixes.
 - Interactive log viewer (`runFanout` with `interactive`, set by `cmdRun` only for streamed
   mode on a TTY): a `viewer` object on an **alternate screen** (`\x1b[?1049h`) that keeps a
   tagged line `history` (cap `CREW_LOG_HISTORY`, default 5000) and `repaint`s a filtered view —
   `emit` routes to `viewer.feed` (splits on `\n`, buffers partials in `pending`, live-`render`s
-  a line only when its project is in `shown`). `feed` caps each line's length at `MAX_LINE`
+  a line only when its service is in `shown`). `feed` caps each line's length at `MAX_LINE`
   (`CREW_MAX_LINE`, default 4000) and flushes an unterminated remainder longer than that — so a
   newline-less spew (minified bundle, base64/binary) can't grow `pending` unbounded or make
   `splitRows`/`repaint` explode into hundreds of thousands of rows (which previously wedged the viewer). Pre-run
   messages — task **skips** + **warnings** (from `resolveRun`: the unused-arg + env-derivation warnings; AND from
   `wireRun`: env-override warnings) — are passed to `runFanout` as `notices` and **seeded into `history` as
-  `{notice:true}` rows** (unprefixed, ignore the `f` project filter, honor `/` search, excluded from `c` copy).
+  `{notice:true}` rows** (unprefixed, ignore the `f` service filter, honor `/` search, excluded from `c` copy).
   This is the anti-**"spirit"** rule: in interactive mode those messages must NOT be `console.log`/`warn`ed to the
   MAIN screen (they'd survive the viewer's alt-screen exit as scrollback residue) — so `cmdStart` prints skips/warnings
   inline ONLY when `!interactive` (piped, no alt screen). `resolveRun` and `applyEnvOverrides`
   therefore COLLECT their warnings into their return value instead of printing. `f` opens the `menu` multiselect (preselected =
   `shown`); applying repaints from history, so **select none = blank screen** and re-showing a
-  project brings its recent lines back. Footer pinned to row R via a DECSTBM scroll region
+  service brings its recent lines back. Footer pinned to row R via a DECSTBM scroll region
   (`\x1b[1;R-1r`). `Ctrl-C`/`esc` -> `requestStop` (shared graceful-stop; raw mode swallows
   SIGINT). `menu()` pauses stdin + drops raw mode on close, so `openFilter` re-asserts
   `setRawMode(true)`+`resume()` after or keys go dead. `detachKeys` (called in `settle`) resets
@@ -339,7 +343,7 @@ affordance (a selector key, a picker, a footer state) SHIPS WITH a `tests/e2e` c
 and a `tests/snapshots` golden if it alters a graph render. A feature without a test is not done — add a
 fixture under `tests/e2e/fixtures/<fx>/` + a `cases/<fx>__<scenario>.exp` that drives it in the PTY and
 asserts the observable result (not internals). Adding a config field also means updating
-`TOP_KEYS`/`PROJECT_KEYS`/`GUARD_KEYS` + `cmdCheck` + `pruneConfig`. Run the full suite (`npm test`) and
+`TOP_KEYS`/`SERVICE_KEYS`/`GUARD_KEYS` + `cmdCheck` + `pruneConfig`. Run the full suite (`npm test`) and
 keep it green before calling anything finished.
 
 No unit-test framework. Two suites, both run by `npm test`:
@@ -351,7 +355,7 @@ No unit-test framework. Two suites, both run by `npm test`:
   tmp dir (sed `__DIR__`→tmp in `local.json`) and runs each `cases/<fx>__<scenario>.exp`; `lib.exp`
   gives the helpers `crun`/`must`/`want_exit`/`want_done`/`config_has`/`local_has`. Covers check (+error/exit
   codes), v1 migration (asserts the rewritten config), graph/resolve/list, dir (+ orphan warning)/config
-  (path + removed `edit`), the visual editor (`crew config`, scrolling to the Settings/Projects/Guards
+  (path + removed `edit`), the visual editor (`crew config`, scrolling to the Settings/Services/Guards
   sections: create/update/delete/map-rows/pick panels), the retired-command errors
   (`add`/`remove`/`guards`/`overrides`/`install`), and the runner: `crew start`
   (picker → streamed viewer + teardown),
@@ -378,7 +382,7 @@ node bin/crew.js --config /tmp/x.json check            # validate; exit 1 on err
 `crew check` (`cmdCheck`) is the hand-rolled, zero-dep config validator — NO JSON-Schema
 library (would break the zero-deps constraint) and NO separate schema file (would break the
 single-file constraint). It validates the merged config + `local.json`: known-key sets
-(`TOP_KEYS`/`PROJECT_KEYS`/`GUARD_KEYS`), types, and cross-references a schema can't express
+(`TOP_KEYS`/`SERVICE_KEYS`/`GUARD_KEYS`), types, and cross-references a schema can't express
 (guard names must exist; `{envfile}` needs `env`; `match` must be an env-labeled object of bare hosts, not globs;
 `match` without `local` is a dangling wiring target). Errors exit 1; warnings don't. Keep its
 key sets in sync when adding a config field.

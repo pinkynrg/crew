@@ -1,0 +1,20 @@
+# debug is a first-class optional field on a service (stored back as tasks.debug), like start.
+source tests/e2e/lib.exp
+crun config
+must {api}
+sleep 1
+send "l"
+sleep 1
+# name(0) path(1) type(2) runner(3) start(4) debug(5) -> 5 j's to the debug field
+send "jjjjj"
+sleep 1
+send "\r"
+send "node --inspect app.js"
+send "\r"
+sleep 1
+send "s"
+must {saved}
+send "\033"
+send "\033"
+want_exit 0
+config_has {"debug": "node --inspect app.js"}

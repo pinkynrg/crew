@@ -3,5 +3,5 @@ crun graph list
 must {web}
 must {api}
 must {worker}
-must {no crew-project edges}
+must {no crew-service edges}
 want_exit 0
