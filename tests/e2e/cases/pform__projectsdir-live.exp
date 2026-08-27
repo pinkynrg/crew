@@ -12,7 +12,11 @@ sleep 1
 # Settings fields: workspaceName(0) workspaceSettings(1) projectsDir(2)
 send "jj"
 sleep 1
+# ⏎ opens the folder browser; `t` drops to typing (a not-yet-existing path)
 send "\r"
+sleep 1
+send "t"
+sleep 1
 send "\025"
 send "/nope-dir"
 send "\r"
@@ -23,7 +27,7 @@ send "j"
 sleep 1
 send "l"
 sleep 1
-must {path not found}
+must {not found}
 send "\033"
 send "\033"
 must {Unsaved changes}

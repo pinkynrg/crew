@@ -272,10 +272,22 @@ beyond `{placeholder}` substitution.
   `.envs` / dev scripts. `match` (the deployed host) is deliberately NOT derived — the guess was too weak,
   so it's always filled by hand. Path-driven,
   not a separate "auto" mode: works with no `servicesDir` (type an absolute/`~` path via the escape) and for
-  folders outside it; non-destructive (blanks only). Renaming a guard migrates its key AND every
+  folders outside it; non-destructive (blanks only). A service's `path` field VALUE renders the RESOLVED
+  absolute location (servicesDir + relative), or a red "not found — check your services dir" when the folder
+  is absent (the fix is almost always the machine-local servicesDir, not the shared `path`). **servicesDir
+  browser**: `⏎` on the Settings `servicesDir` field opens a multi-column (Miller/Finder-style) navigator
+  (`openBrowse` → `browse = {cols:[{dir,entries,cursor,scroll}], ci}`): the FULL ancestry chain from `/` down
+  to the current dir, one column per level; `←/→` move between columns (right = into the highlighted folder,
+  left = up), `↑↓` within the active column (the next column live-previews the highlight via `browsePreview`),
+  `⏎` SELECTS the highlighted folder (stored tildified), `t` drops to typing a path, `esc` cancels. Columns
+  scroll vertically (cursor-follow) and horizontally (window shows the rightmost that fit; `‹ ›` in the header
+  mark scrolled-off levels); a dim `│` divides columns. NB: inside the `configForm` Promise executor `resolve`
+  is the Promise resolver (shadowing `node:path.resolve`) — use `join`/`dirname` there.
+  Renaming a guard migrates its key AND every
   `service.guards` link; deleting a guard unlinks it everywhere (warns if in use). A `readonly` field with a
   `.hint` shows it as a status message on `⏎`. Every field can carry a `desc` string — the FOCUSED field's
-  `desc` is word-wrapped and rendered as an always-visible dim help block pinned under the form (no keypress;
+  `desc` is word-wrapped and rendered as a dim help block pinned under the form (only while the RIGHT pane is
+  focused; no keypress;
   hidden during a sub-editor takeover). `↑↓` move, `tab`/`←→` switch pane, `s` writes (that item, to
   disk). A `dirty` flag is set on any field/map/pick mutation. **Edits are a whole-session working copy**: a
   `drafts` Map (keyed by section+item, a NEW item uses a sentinel slot) holds every edited-but-unsaved form —

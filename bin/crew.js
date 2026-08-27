@@ -2838,7 +2838,7 @@ async function configForm(flags, opts = {}) {
     names: () => Object.keys(cfg.services),
     fields: [
       { key: 'name', label: 'name', kind: 'name', req: true, desc: 'A short, unique name for this service.' },
-      { key: 'path', label: 'path', kind: 'text', req: true, desc: "The service's folder. Type it, or press ⏎ to pick from your services dir." },
+      { key: 'path', label: 'path', kind: 'text', req: true, desc: "Where the repo lives, relative to your services dir. Shared with the team — if it shows 'not found', fix YOUR services dir in Settings, don't change this. Press ⏎ to pick from your services dir." },
       { key: 'type', label: 'type', kind: 'choice', options: SERVICE_TYPES, desc: 'What this service is: a frontend app, a backend service, or other.' },
       { key: 'runner', label: 'runner', kind: 'text', desc: 'Optional. A command template with {task} (e.g. "npm run {task}"). You can usually skip this and just fill start below.' },
       // start: the core command, entered as a plain string (stored as tasks.start). The `tasks` map below
@@ -2972,6 +2972,7 @@ async function configForm(flags, opts = {}) {
   let form = null, msg = '', panel = null, panelField = null, leftTop = 0, dirty = false;
   let mapEdit = null, editTarget = null, newKey = ''; // mapEdit = {field, rows:[[k,v]], ri}; editTarget routes an inline edit's commit (null=field, 'val'/'newkey'/'newval'=map cell, 'ovVar'/'ovVal'=override cell)
   let ovEdit = null; // Environment Overrides editor: {field, rows:[{var,value,peer}], ri, ci} — ci 0=VAR 1=value 2=when-local; full-pane row editor like mapEdit
+  let browse = null; // servicesDir Miller-columns navigator: {cols:[{dir,entries,cursor,scroll}], ci}
   const OV_NONE = '— always (no condition) —'; // the "no peer" choice in the when-local picker
   // A MODAL captures every key until a choice runs: {title, lines[], choices:[{keys[], label, run()->doneBool}]}.
   // Used for the delete confirm and the unsaved-changes-on-exit prompt. `run` returns true if it resolved.
@@ -3042,6 +3043,27 @@ async function configForm(flags, opts = {}) {
     panel = makeFilterPanel([...dirs, TYPE_PATH], { paint, single: true, title: 'pick a folder' });
     panel.open(dirs.includes(form.path) ? form.path : null);
   };
+  // servicesDir: a multi-column (Miller/Finder-style) folder navigator. Each column lists a directory's
+  // subfolders; `←/→` move between columns (right = into the highlighted folder, left = up to the parent),
+  // `↑↓` move within the active column (the column to its right live-previews the highlight), `⏎` SELECTS the
+  // highlighted folder, `esc` cancels. Columns scroll: vertically (cursor-follow) and horizontally (the window
+  // shows the rightmost columns that fit). Stores the chosen dir tildified (~/…).
+  const baseName = (p) => String(p).split(/[/\\]/).filter(Boolean).pop() || '';
+  const listSubdirs = (abs) => { try { return readdirSync(abs, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name).sort(); } catch { return []; } };
+  const mkCol = (dir, cursorName) => { const entries = listSubdirs(dir); const i = cursorName ? entries.indexOf(cursorName) : -1; return { dir, entries, cursor: i >= 0 ? i : 0, scroll: 0 }; };
+  const browseChild = (col) => (col.entries.length ? resolve(col.dir, col.entries[col.cursor]) : null); // the highlighted subfolder
+  const browsePreview = () => { browse.cols = browse.cols.slice(0, browse.ci + 1); const child = browseChild(browse.cols[browse.ci]); if (child) browse.cols.push(mkCol(child)); }; // trim deeper stale cols + preview the highlight
+  const openBrowse = () => {
+    let start; try { start = resolve(expandHome(machine.servicesDir || '~')); } catch { start = homedir(); }
+    if (!pathExists(start)) start = homedir();
+    // Build the FULL ancestry chain from filesystem root down to `start`, one column per ancestor (cursor on
+    // the next path element). The render window shows the rightmost columns that fit and only scrolls the
+    // leftmost (/, /Users, …) off when there are too many to fit.
+    const chain = []; { let d = start; for (;;) { chain.unshift(d); const p = dirname(d); if (p === d) break; d = p; } }
+    const cols = chain.length > 1 ? chain.slice(0, -1).map((d, i) => mkCol(d, baseName(chain[i + 1]))) : [mkCol(start)];
+    browse = { cols, ci: cols.length - 1 };
+    browsePreview();
+  };
 
   return new Promise((resolve) => {
     const w = (x) => stdout.write(x);
@@ -3080,7 +3102,31 @@ async function configForm(flags, opts = {}) {
       // ---- right column ---- (a `map` field editor TAKES OVER the whole right pane — full width/height —
       // rather than a cramped popup, so long task commands / match hosts have room; left column stays for context)
       const Rn = [];
-      if (mapEdit && !panel) {
+      if (browse) {
+        const colH = Math.max(1, body - 3), COLW = 22, DIV = `${DIM}│${UNDIM}`;
+        const maxCols = Math.max(1, Math.floor((RW + 1) / (COLW + 1)));       // as many columns as fit; scroll only past that
+        const startC = Math.max(0, browse.ci - maxCols + 1);                  // window ends on the active column
+        const win = browse.cols.slice(startC, startC + maxCols);
+        const more = startC + win.length < browse.cols.length;
+        Rn.push(`\x1b[1mservices dir\x1b[22m ${DIM}· ${startC > 0 ? '‹ ' : ''}${tildify(browse.cols[browse.ci].dir)}${more ? ' ›' : ''}${UNDIM}`);
+        Rn.push('');
+        const cell = (c, ei, isActive) => {
+          if (ei >= c.entries.length) return ' '.repeat(COLW);
+          const name = padP(' ' + clipP(c.entries[ei], COLW - 3) + (browseChild(c) && ei === c.cursor ? ' ›' : ''), COLW);
+          if (isActive && ei === c.cursor) return rev(name);                  // active highlight
+          if (ei === c.cursor) return `\x1b[36m${name}\x1b[39m`;              // the trail (highlighted in a non-active column)
+          return name;
+        };
+        win.forEach((c) => { if (c.cursor < c.scroll) c.scroll = c.cursor; else if (c.cursor >= c.scroll + colH) c.scroll = c.cursor - colH + 1; });
+        for (let r = 0; r < colH; r++) {
+          const cells = win.map((c, idx) => {
+            const isActive = startC + idx === browse.ci;
+            if (!c.entries.length) return r === 0 ? padP(`${DIM} (empty)${UNDIM}`, COLW) : ' '.repeat(COLW);
+            return cell(c, c.scroll + r, isActive);
+          });
+          Rn.push(cells.join(DIV));                                           // dark-grey divider between columns
+        }
+      } else if (mapEdit && !panel) {
         const F = mapEdit, fld = F.field;
         Rn.push(`\x1b[1m${fld.label}\x1b[22m ${DIM}· ${s.noun} ${form.name || form.orig}${UNDIM}`);
         Rn.push('');
@@ -3175,19 +3221,34 @@ async function configForm(flags, opts = {}) {
           }
           if (fld.groupTitle) { Rn.push(''); Rn.push(`  ${DIM}${fld.groupTitle}${UNDIM}`); } // a titled block separator before this field
           const editText = editing && on && (fld.kind === 'text' || fld.kind === 'name');
+          const labStyled = (l) => `  ${on && !editing ? rev(' ' + l + ' ') : DIM + ' ' + l + ' ' + UNDIM}`;
+          // `path` (a service): the value IS the RESOLVED absolute location (servicesDir + relative), so you see
+          // exactly where it lands — or a red "not found" when the folder is absent (usually a wrong servicesDir,
+          // not a wrong path; the help nudges fixing servicesDir, since `path` is shared/committed). Editing shows
+          // the raw stored value (relative) via editCell. Colour is applied AFTER clip so it never breaks mid-SGR.
+          if (!editText && s.key === 'services' && fld.key === 'path' && String(form.path).trim()) {
+            const rel = String(form.path).trim();
+            let abs; try { abs = resolveServicePath(rel); } catch { abs = null; }
+            const cell = !abs ? '\x1b[31mno services dir set — set one in Settings\x1b[39m'
+              : pathExists(abs) ? clipP(tildify(abs), vW)
+              : `\x1b[31m${clipP('not found · ' + tildify(abs), vW)}\x1b[39m`;
+            Rn.push(`${labStyled(padP(fld.label, labW))} ${cell}`);
+            return;
+          }
           let val;
           if (editText) val = editCell(vW); // block caret, scrolls if long
           else if (fld.kind === 'multiselect' || fld.kind === 'list') { const a = form[fld.key] || []; val = a.length ? a.join(', ') : `${DIM}(none)${UNDIM}`; }
           else if (fld.kind === 'map') { const o = form[fld.key] || {}, ks = Object.keys(o); val = ks.length ? Object.entries(o).map(([k, v]) => `${k}=${v}`).join('  ') : `${DIM}(none)${UNDIM}`; }
           else val = String(form[fld.key]) ? String(form[fld.key]) : `${DIM}(${fld.req ? 'required' : 'optional'})${UNDIM}`;
-          const lab = padP(fld.label, labW);
-          Rn.push(`  ${on && !editing ? rev(' ' + lab + ' ') : DIM + ' ' + lab + ' ' + UNDIM} ${editText ? val : clipP(val, vW)}`);
+          Rn.push(`${labStyled(padP(fld.label, labW))} ${editText ? val : clipP(val, vW)}`);
         });
-        const info = s.info ? s.info(form) : '';
+        // Section-level info at the foot — for settings (missing-folder warning) + guards (used-by); the
+        // services path-status is shown inline under `path` above instead.
+        const info = (s.info && s.key !== 'services') ? s.info(form) : '';
         if (info) { Rn.push(''); Rn.push('  ' + info); }
-        // Per-field help: the focused field's `desc`, word-wrapped, pinned under the form in dim. Always
-        // visible so hovering a field explains it (no keypress needed). Hidden during a sub-editor takeover.
-        const fdesc = s.fields[fi] && s.fields[fi].desc;
+        // Per-field help: the FOCUSED field's `desc`, word-wrapped, in dim. Only while the right pane is
+        // focused (not when browsing the left list). Hidden during a sub-editor takeover.
+        const fdesc = focus === 'right' && s.fields[fi] && s.fields[fi].desc;
         if (fdesc) {
           const lines = []; let line = '';
           for (const w of String(fdesc).split(/\s+/)) { if (line && line.length + 1 + w.length > RW - 4) { lines.push(line); line = w; } else line = line ? `${line} ${w}` : w; }
@@ -3205,6 +3266,7 @@ async function configForm(flags, opts = {}) {
       // ---- footer ----
       let parts;
       if (modal) parts = modal.choices.map((c) => c.label);
+      else if (browse) parts = ['↑↓ move', '→ open', '← up', '⏎ select this folder', 't type', 'esc cancel'];
       else if (panel) parts = (panelField.kind === 'choice' || panelField.single) ? ['↑↓ pick', '⏎ apply', 'esc cancel'] : ['space toggle', 'a all', '⏎ apply', 'esc cancel'];
       else if (editing) parts = ['type', '←→ move', '⌥← word', '⏎ commit', 'esc cancel'];
       else if (mapEdit) parts = ['↑↓ row', '⏎ edit', 'd remove', 'esc done'];
@@ -3242,6 +3304,21 @@ async function configForm(flags, opts = {}) {
     const handleKey = (k) => {
       msg = '';
       if (modal) { const ch = modal.choices.find((c) => c.keys.includes(k)); if (ch && ch.run()) return true; repaint(); return false; } // modal captures all keys
+      if (browse) { // Miller-columns folder navigator: ↑↓ within · →/← between columns · ⏎ select · esc cancel
+        const col = browse.cols[browse.ci];
+        if (k === '\x03') return quit();
+        else if (k === '\x1b') browse = null;
+        else if ((k === 'j' || k === '\x1b[B') && col.entries.length) { col.cursor = Math.min(col.entries.length - 1, col.cursor + 1); browsePreview(); }
+        else if ((k === 'k' || k === '\x1b[A') && col.entries.length) { col.cursor = Math.max(0, col.cursor - 1); browsePreview(); }
+        else if (k === 't') { browse = null; editing = true; buf = String(form.servicesDir || ''); caret = buf.length; } // type a path instead (for a not-yet-existing / ~ path)
+        else if (k === 'l' || k === '\x1b[C') { if (browse.cols[browse.ci + 1]) { browse.ci++; browsePreview(); } } // → into the highlighted folder's column
+        else if (k === 'h' || k === '\x1b[D') { // ← up a level
+          if (browse.ci > 0) { browse.ci--; browsePreview(); }
+          else { const cur = browse.cols[0].dir, par = dirname(cur); if (par !== cur) { browse.cols.unshift(mkCol(par, baseName(cur))); browsePreview(); } }
+        }
+        else if (k === '\r' || k === '\n') { const c = browse.cols[browse.ci]; const sel = c.entries.length ? join(c.dir, c.entries[c.cursor]) : c.dir; form.servicesDir = tildify(sel); dirty = true; syncServicesDir(form.servicesDir); browse = null; } // SELECT the highlighted folder (join, NOT the shadowed Promise `resolve`)
+        repaint(); return false;
+      }
       if (panel) {
         const r = panel.key(k);
         if (r === 'apply') {
@@ -3342,6 +3419,7 @@ async function configForm(flags, opts = {}) {
       else if (k === 'j' || k === '\x1b[B') fi = Math.min(fields.length - 1, fi + 1);
       else if (k === '\r' || k === '\n') {
         if (fld.key === 'path' && secOf().key === 'services') openFolderPick(); // pick a folder (or type)
+        else if (fld.key === 'servicesDir' && secOf().key === 'settings') openBrowse(); // multi-column folder navigator
         else if (fld.kind === 'text' || fld.kind === 'name') { editing = true; buf = String(form[fld.key] || ''); caret = buf.length; }
         else if (fld.kind === 'choice' || fld.kind === 'multiselect') openPanel(fld);
         else if (fld.kind === 'map') { mapEdit = { field: fld, rows: toRows(form[fld.key]), ri: 0, list: false }; }

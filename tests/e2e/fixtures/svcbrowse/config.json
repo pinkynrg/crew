@@ -1,0 +1,1 @@
+{ "version": 2, "services": { "svc": { "path": "root/alpha", "type": "backend" } } }
