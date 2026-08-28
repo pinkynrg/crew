@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>crew · one command for your whole local stack</title>
-<meta name="description" content="Run a slice of your services locally, wired to the rest; open the set as one VS Code workspace or hand it to Claude Code; and see how everything connects. Zero-dependency CLI.">
+<meta name="description" content="Run a slice of your services locally, wired to the rest; open the set in your editor or hand it to Claude Code; and see how everything connects. Zero-dependency CLI.">
 <link rel="canonical" href="https://pinkynrg.github.io/crew/">
 <!-- Open Graph / Twitter card -->
 <meta property="og:type" content="website">
@@ -283,11 +283,11 @@
   <div class="wrap">
     <p class="kicker">the config file</p>
     <h2>You don't hand-write it.</h2>
-    <p class="intro cfg-intro"><code>crew config</code> is a visual editor: pick a project's folder and crew fills in the mechanical parts it can read from your <code>package.json</code>, lockfiles and <code>.envs</code> &mdash; type, runner, start command and env-file path. The URLs are yours to add: the project's local URL/port, and its deployed host for each environment. Out comes one readable <code>config.json</code>, committable, no secrets.</p>
+    <p class="intro cfg-intro"><code>crew config</code> is a visual editor: pick a service's folder and crew fills in the mechanical parts it can read from your <code>package.json</code>, lockfiles and <code>.envs</code> &mdash; type, start command and env-file path. The URLs are yours to add: the service's local URL/port, and its deployed host for each environment. Out comes one readable <code>config.json</code>, committable, no secrets.</p>
     <figure class="cfg-cast">
       <div class="term">
         <div class="bar"><i></i><i></i><i></i><span>crew config</span></div>
-        <img class="cast" src="media/crew-config.gif" style="background-image:url('media/crew-config-poster.png');background-position:top left" alt="crew config: add a frontend and a backend by picking their folders (crew auto-fills type, runner, env and start command), add each one's local URL and deployed host per env, and create a guard" loading="lazy" decoding="async">
+        <img class="cast" src="media/crew-config.gif" style="background-image:url('media/crew-config-poster.png');background-position:top left" alt="crew config: add a frontend and a backend by picking their folders (crew auto-fills type, env and start command), add each one's local URL and deployed host per env, and create a guard" loading="lazy" decoding="async">
       </div>
       <figcaption>add a frontend &amp; a backend from their folders (scaffolding auto-filled), fill their URLs, then a guard</figcaption>
     </figure>
@@ -328,7 +328,7 @@
       <div class="term">
         <div class="bar"><i></i><i></i><i></i><span>config.json</span></div>
         <pre><span class="jk">{
-  "projects"</span>: {
+  "services"</span>: {
     <span class="jk">"web"</span>: {
       <span class="jk">"path"</span>: <span class="js">"web"</span>,
       <span class="jk">"type"</span>: <span class="js">"frontend"</span>,
@@ -410,7 +410,7 @@
       <span>no images, no rebuilds</span>
       <span>wiring from your <b>env files</b></span>
     </div>
-    <p class="assume"><b>Assumes each project ships at least one environment file</b> with its peers' URLs, plus a deployed host those point at. That's what crew borrows for the services you leave off. Nothing deployed to point at? A full-stack tool like Compose fits your case better.</p>
+    <p class="assume"><b>Assumes each service ships at least one environment file</b> with its peers' URLs, plus a deployed host those point at. That's what crew borrows for the services you leave off. Nothing deployed to point at? A full-stack tool like Compose fits your case better.</p>
   </div>
 </section>
 
@@ -422,11 +422,11 @@
     <div class="faq-grid">
       <details>
         <summary>Does crew modify my repos or my <code>.env</code> files?</summary>
-        <p class="a">No. It <em>reads</em> your env file and writes a wired <b>copy</b> to <code>~/.config/crew/tmp/&lt;project&gt;.env</code> (URLs swapped to <code>localhost</code> for the peers you're running), passes that path to your start command via <code>{envfile}</code>, and deletes it on teardown. Your checkout and its committed env files are never touched.</p>
+        <p class="a">No. It <em>reads</em> your env file and writes a wired <b>copy</b> to <code>~/.config/crew/tmp/&lt;service&gt;.env</code> (URLs swapped to <code>localhost</code> for the peers you're running), passes that path to your start command via <code>{envfile}</code>, and deletes it on teardown. Your checkout and its committed env files are never touched.</p>
       </details>
       <details>
         <summary>Where do my secrets live?</summary>
-        <p class="a">In your own env files, same as today &mdash; crew only reads them. The committable <code>config.json</code> holds no secrets; machine-local bits (projects dir, remembered selection) live in a gitignored <code>local.json</code>. The temporary wired copy under <code>~/.config/crew/tmp/</code> is the only materialized secret, and it's regenerated per run and removed on exit.</p>
+        <p class="a">In your own env files, same as today &mdash; crew only reads them. The committable <code>config.json</code> holds no secrets; machine-local bits (services dir, your editor, remembered selection) live in a gitignored <code>local.json</code>. The temporary wired copy under <code>~/.config/crew/tmp/</code> is the only materialized secret, and it's regenerated per run and removed on exit.</p>
       </details>
       <details>
         <summary>What if a remote environment is down?</summary>
@@ -458,9 +458,9 @@
       </li>
       <li>
         <div>
-          <span class="t">Register your projects, or write the config file manually</span>
+          <span class="t">Register your services, or write the config file manually</span>
           <pre class="step-cmd"><span class="p">$</span> crew config</pre>
-          <p>A two-pane visual editor: pick a folder and crew prefills each project (path, start command, type), or write the <code>config.json</code> yourself, as shown above.</p>
+          <p>A two-pane visual editor: pick a folder and crew prefills each service (path, start command, type), or write the <code>config.json</code> yourself, as shown above.</p>
         </div>
       </li>
       <li>
@@ -502,7 +502,7 @@
   // the 3 buttons just cycle their description (the GIF above is always `crew start` — the only real recording)
   const tails = [
     'Pick a connected slice in the <b>dependency graph</b>; crew runs it locally, <b>wired from your env files</b>.',
-    'Open the whole picked set as <b>one VS Code workspace</b>, every repo side by side in a single window.',
+    'Open the whole picked set in <b>your editor</b> — VS Code, Cursor, JetBrains, Zed or Neovim — every repo in one window.',
     'Hand the picked set to <b>one Claude Code session</b>, named, with history kept per group of repos.'
   ];
   const tabs = [...document.querySelectorAll('.tabs button')];
