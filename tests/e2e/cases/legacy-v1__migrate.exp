@@ -8,3 +8,5 @@ config_has {"start": "make run"}
 config_has {"guards"}
 config_hasnt {"checks"}
 config_hasnt {"groups"}
+config_hasnt {"workspaceName"}
+config_hasnt {"workspaceSettings"}

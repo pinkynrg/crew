@@ -1,4 +1,6 @@
 {
+  "workspaceName": "legacy-name",
+  "workspaceSettings": { "jest.enable": false },
   "projects": {
     "app": {
       "path": "app",

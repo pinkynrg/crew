@@ -9,8 +9,8 @@ send "k"
 sleep 1
 send "l"
 sleep 1
-# Settings fields: workspaceName(0) workspaceSettings(1) projectsDir(2)
-send "jj"
+# Settings fields: editor(0) servicesDir(1)
+send "j"
 sleep 1
 # ⏎ opens the folder browser; `t` drops to typing (a not-yet-existing path)
 send "\r"

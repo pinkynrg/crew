@@ -9,8 +9,8 @@ sleep 1
 must {Settings}
 send "l"
 sleep 1
-# Settings fields: workspaceName(0) workspaceSettings(1) servicesDir(2)
-send "jj"
+# Settings fields: editor(0) servicesDir(1)
+send "j"
 sleep 1
 send "\r"
 must {services dir}

@@ -1,0 +1,5 @@
+{ "version": 2, "longRunning": [],
+  "projects": {
+    "a": { "path": "a", "type": "backend", "tasks": { "start": "echo A-started" } },
+    "b": { "path": "b", "type": "backend", "tasks": { "start": "echo B-started" } }
+  } }

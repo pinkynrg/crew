@@ -18,8 +18,8 @@ Guidance for working in this repo.
 
 A single-file macOS/Linux CLI that runs the **slice of your local stack you care about** — `crew
 start` a selected group of services together, in parallel, each auto-wired to point at the others'
-local ports (or the rest's deployed hosts when left off). Also opens the set as one VSCode workspace,
-or hands it to Claude Code. crew owns the fan-out (parallelism, labelled output, exit-code
+local ports (or the rest's deployed hosts when left off). Also opens the set in your editor (VS Code
+family, JetBrains, Zed, Neovim, …), or hands it to Claude Code. crew owns the fan-out (parallelism, labelled output, exit-code
 aggregation, lifecycle); each **service** owns its `start` command. crew never interprets a command
 beyond `{placeholder}` substitution.
 
@@ -227,9 +227,11 @@ beyond `{placeholder}` substitution.
   column is the highlighted item's form. The three actions fall out of
   position + key — CREATE = a `+ New` row (blank form), UPDATE = edit fields then `s` save, DELETE = `d` +
   confirm. **Settings** is a `fixed` section (one synthetic `config` item, NO `+ New`/`d` — you only edit
-  values): the top-level config keys (`workspaceName`/`workspaceSettings`) +
-  machine-local `servicesDir`, so `crew config` covers EVERY key (and editing `servicesDir` shows a live
+  values): the machine-local `editor` (a `choice`) + `servicesDir` (both live in `local.json`, not the shared
+  config), so `crew config` covers every machine-local key (and editing `servicesDir` shows a live
   `⚠ N/M service folders not found` warning via `missingServiceFolders`, never auto-deleting anything).
+  The `editor` picker grays out (dims) editors whose binary isn't on PATH via a per-field `paint`
+  (`onPath` + `editorPaint`; `openPanel` honors `fld.paint || paint`). `(none)` sentinel clears it.
   Field KINDS: `text` (a real inline line-editor with a block caret — `←/→` move, Option/Ctrl+arrow
   word-jump, Home/End or Ctrl-A/E, Ctrl-W/U/K, forward-delete, mid-string insert; pre-fills current value),
   `name` (the item key, rename-aware, same editor),
@@ -237,8 +239,8 @@ beyond `{placeholder}` substitution.
   `multiselect` (MULTI — checkboxes `[x]`, `space`/`a` toggle, e.g. a service's guard links),
   `map` (a **row editor** — `key → value` rows + a green `+ add`; `⏎` on a row edits its value via the same
   line-editor, `+ add` chains key→value, `d` removes; e.g. service `tasks` (task→cmd); the form carries these
-  as objects, serialized on `save`; a `json`
-  map (`workspaceSettings`) parses each value so `false`/`3` keep their type), `list` (the same row editor
+  as objects, serialized on `save`; a `json` map (parses each value so `false`/`3` keep their type — no
+  field currently uses this kind since `workspaceSettings` was retired), `list` (the same row editor
   minus the key column — one value per row, carried as a string array; no field currently uses this kind),
   `overrides` + `match` (INLINE row editors — drawn as a bordered BOX in the form, NOT a full-pane takeover,
   so each reads as a distinct container you `⏎` INTO; focused = reversed title bar + bright border, else dim.
@@ -314,10 +316,21 @@ beyond `{placeholder}` substitution.
   edit` (the `cmdGuards`/`cmdOverrides`/`guardList`/`overrideList`/`makePrompter`/`confirm`/`collectService`/
   `detectDefaultBranch` code was all deleted). The
   v1 `checks` key auto-migrates to `guards` on load; `projects`->`services` and `projectsDir`->`servicesDir`
-  renames migrate too; legacy `longRunning` (top-level) and per-service `runner`/`defaultBranch` are stripped.
-- `workspaceSettings` (optional top-level object): written verbatim into the generated
-  `.code-workspace` `settings` (e.g. `{"jest.enable": false}` to stop the Jest extension
-  auto-running per folder). crew injects nothing by default. Edited in `crew config` → Settings (a `json` map).
+  renames migrate too; legacy `longRunning` (top-level), per-service `runner`/`defaultBranch`, and the retired
+  top-level `workspaceName`/`workspaceSettings` are stripped.
+- **`crew workspace` — editor abstraction.** The editor is **machine-local** (`local.json.editor`, per-developer
+  like `servicesDir`) with **NO default**: unset ⇒ `crew workspace` is disabled with a "no editor configured"
+  error (gated BEFORE the picker). `resolveEditor` maps a built-in id (`EDITORS`: vscode/cursor/codium/
+  vscode-insiders → `workspace-file`; zed/intellij/pycharm/goland/webstorm/nvim → `folders`) OR an escape-hatch
+  object `{bin, kind}` to `{bin, kind, label}`. TWO kinds: **`workspace-file`** (VS Code family) materializes a
+  `.code-workspace` (`{folders, settings}`) and opens THAT file; **`folders`** (Zed/JetBrains/Neovim) passes the
+  resolved dirs straight as CLI args (no file). The `.code-workspace` **filename IS the VS Code title** (it reads
+  no `name` key), so it's the short **auto-label** `workspaceLabel(members)` — strips the `xxx-` prefix all picked
+  services share, first 2 names, `+Nmore` for the rest (`bee-auth+bee-cloudstorage+bee-fsp-x` → `auth+cloudstorage+1more`).
+  Its `settings` are the **baked** `VSCODE_WORKSPACE_SETTINGS` constant (`{ 'jest.enable': false }`) — deliberately
+  NOT a config field (the `.code-workspace` is crew-owned, touches no repo file); edit the constant to change it.
+  `workspaceName` + `workspaceSettings` config keys are RETIRED (migrate-stripped). `crew claude` is separate
+  (Claude Code, not an editor) and untouched.
 - `crew start` always STREAMS: each service spawns and the first exit (any) or Ctrl-C tears the whole
   group down (`runFanout` `killOthers`). There is NO run-to-completion mode and no `longRunning` config —
   `start` is the one core command and is always a service (see `cmdStart`). (`runFanout` still supports a

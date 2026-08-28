@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, statSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, accessSync, constants as fsConstants } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, isAbsolute, dirname } from 'node:path';
 import { spawnSync, spawn } from 'node:child_process';
@@ -271,7 +271,6 @@ export const STREAMED_TASKS = new Set(['start', 'debug']);
 export function defaultConfig() {
   return {
     version: 2,
-    workspaceName: 'crew',
     services: {},
   };
 }
@@ -343,10 +342,11 @@ export function migrate(cfg) {
     delete cfg.groups;
     changed = true;
   }
-  if (!cfg.workspaceName) {
-    cfg.workspaceName = 'crew';
-    changed = true;
-  }
+  // `workspaceName` + `workspaceSettings` are retired: the workspace title is now an auto-label and the
+  // VS Code settings are baked (VSCODE_WORKSPACE_SETTINGS). Strip any legacy values so `check` doesn't
+  // warn "unknown key" and a save normalizes them away.
+  if (cfg.workspaceName != null) { delete cfg.workspaceName; changed = true; }
+  if (cfg.workspaceSettings != null) { delete cfg.workspaceSettings; changed = true; }
   // Rename the short-lived `checks` feature to `guards` (top-level registry + per-service).
   if (cfg.checks && typeof cfg.checks === 'object') {
     cfg.guards = { ...cfg.checks, ...(cfg.guards || {}) };
@@ -434,7 +434,6 @@ export function loadMerged(flags) {
     } catch {
       fail(`service-local config is not valid JSON: ${localPath}`);
     }
-    if (local.workspaceName) merged.workspaceName = local.workspaceName;
     Object.assign(merged.services, local.services || {});
     merged.guards = { ...(merged.guards || {}), ...(local.guards || {}) };
     localUsed = localPath;
@@ -681,10 +680,59 @@ function makeFilterPanel(items, { paint, title = 'Show nodes', single = false } 
 
 export const SERVICE_TYPES = ['frontend', 'backend', 'fullstack', 'other'];
 
+// The editor `crew workspace` opens the selected set in. TWO kinds cover every editor:
+//  - 'workspace-file': write a VS Code `.code-workspace` (folders + settings) and open THAT file.
+//    VS Code and its forks (Cursor, VSCodium, Insiders) all read `.code-workspace` — same generator,
+//    only the binary differs. `workspaceSettings` applies here.
+//  - 'folders': pass the resolved service dirs straight as CLI args. Zed opens one multi-root window;
+//    JetBrains / Neovim open the folder(s). No workspace file, so `workspaceSettings` doesn't apply.
+// The choice is machine-local (`local.json.editor`) — the IDE is per-developer, like servicesDir, never
+// committed. UNSET => `crew workspace` is disabled (a "configure your editor" error); there is NO default.
+export const EDITORS = {
+  vscode:            { bin: 'code',          kind: 'workspace-file', label: 'VS Code' },
+  cursor:            { bin: 'cursor',        kind: 'workspace-file', label: 'Cursor' },
+  codium:            { bin: 'codium',        kind: 'workspace-file', label: 'VSCodium' },
+  'vscode-insiders': { bin: 'code-insiders', kind: 'workspace-file', label: 'VS Code Insiders' },
+  zed:               { bin: 'zed',           kind: 'folders',        label: 'Zed' },
+  intellij:          { bin: 'idea',          kind: 'folders',        label: 'IntelliJ IDEA' },
+  pycharm:           { bin: 'pycharm',       kind: 'folders',        label: 'PyCharm' },
+  goland:            { bin: 'goland',        kind: 'folders',        label: 'GoLand' },
+  webstorm:          { bin: 'webstorm',      kind: 'folders',        label: 'WebStorm' },
+  nvim:              { bin: 'nvim',          kind: 'folders',        label: 'Neovim' },
+};
+export const EDITOR_KINDS = ['workspace-file', 'folders'];
+// Settings crew bakes into the generated `.code-workspace` for the VS Code family. The file is crew-owned
+// (crew's home dir, rewritten every run) — this touches NO file in your repos. Deliberately NOT a config
+// field: it's one narrow, near-universal QoL default (quiet the Jest extension's per-folder auto-run in a
+// big multi-root workspace). Edit HERE to change it. Folders-kind editors (Zed/JetBrains/…) never see it.
+export const VSCODE_WORKSPACE_SETTINGS = { 'jest.enable': false };
+// Is `bin` an executable on PATH? Zero-dep PATH scan (no subprocess). Absolute/relative path -> checked
+// directly. Used to gray out editors that aren't installed in the config picker.
+export function onPath(bin) {
+  if (!bin || typeof bin !== 'string') return false;
+  const X = fsConstants.X_OK;
+  if (bin.includes('/')) { try { accessSync(bin, X); return true; } catch { return false; } }
+  for (const d of (process.env.PATH || '').split(':')) {
+    if (!d) continue;
+    try { accessSync(join(d, bin), X); return true; } catch {}
+  }
+  return false;
+}
+// Resolve `local.json.editor` -> { bin, kind, label } or null (unset/invalid, => workspace disabled).
+// Accepts a built-in id (string) OR an escape-hatch object { bin, kind } for any editor not in the
+// registry — so crew stays agnostic (emacs, helix, a wrapper script all work by declaring a kind).
+export function resolveEditor(val) {
+  if (!val) return null;
+  if (typeof val === 'string') return EDITORS[val] || null;
+  if (isObj(val) && typeof val.bin === 'string' && val.bin.trim() && EDITOR_KINDS.includes(val.kind))
+    return { bin: val.bin.trim(), kind: val.kind, label: typeof val.label === 'string' && val.label ? val.label : val.bin.trim() };
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Config-validation key sets (used by `crew check`).
 // ---------------------------------------------------------------------------
-export const TOP_KEYS = new Set(['version', 'workspaceName', 'workspaceSettings', 'services', 'guards', 'overrides']);
+export const TOP_KEYS = new Set(['version', 'services', 'guards', 'overrides']);
 export const SERVICE_KEYS = new Set(['path', 'type', 'env', 'local', 'match', 'tasks', 'guards']);
 export const GUARD_KEYS = new Set(['comment', 'command', 'message']);
 export const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -2165,8 +2213,36 @@ function selectionLabel(members) {
   return sanitize(members.map((m) => m.name).sort().join('+')) || 'selection';
 }
 
+// A SHORT, readable title for the opened workspace (VS Code shows the `.code-workspace` filename as the
+// title, so this IS the title). Strips the `xxx-` prefix the picked services all share (bee-, sdk-, …),
+// shows the first CAP names, and appends `+N` for the rest — so `bee-auth+bee-cloudstorage+bee-fsp-x`
+// becomes `auth+cloudstorage +1` instead of an unreadable wall. Deterministic (same set => same title).
+export function workspaceLabel(members, cap = 2) {
+  const names = members.map((m) => m.name).sort();
+  if (!names.length) return 'workspace';
+  // Longest shared prefix ending at a '-' boundary, only if ALL share it and it leaves a non-empty rest.
+  let prefix = '';
+  if (names.length > 1) {
+    const parts = names[0].split('-');
+    for (let i = 1; i < parts.length; i++) {
+      const cand = parts.slice(0, i).join('-') + '-';
+      if (names.every((n) => n.startsWith(cand) && n.length > cand.length)) prefix = cand; else break;
+    }
+  }
+  // sanitize each NAME (fs-safe) but keep '+' as the join — it's legal in filenames and VS Code shows it
+  // fine, so the title reads `auth+cloudstorage+1more` rather than a sanitized `auth_cloudstorage__1`.
+  const short = names.map((n) => sanitize(n.slice(prefix.length)));
+  const head = short.slice(0, cap).join('+');
+  const extra = short.length > cap ? `+${short.length - cap}more` : '';
+  return (head + extra) || 'workspace';
+}
+
 export async function cmdWorkspace(flags, rest) {
   let { cfg, userPath } = loadMerged(flags);
+  // The editor is machine-local (local.json) and has NO default — you must pick one first. Gate BEFORE
+  // the picker so an unconfigured machine fails fast instead of making the user select a set for nothing.
+  const editor = resolveEditor(loadMachine(flags).editor);
+  if (!editor) fail('no editor configured — set one first:  crew config › Settings › editor');
   warnMissing(cfg); cfg = presentCfg(cfg);
   if (!Object.keys(cfg.services).length) { emptyServicesState('Nothing to open — no service folders found.'); process.exit(1); }
   if (rest.length) warn(`ignoring '${rest.join(' ')}' — services are chosen in the picker`);
@@ -2175,17 +2251,19 @@ export async function cmdWorkspace(flags, rest) {
   validateMemberPaths(members);
   const dirs = dirList(members);
 
+  // 'folders' editors (Zed, JetBrains, Neovim, …) take the dirs straight as args — no workspace file.
+  if (editor.kind === 'folders') { launch(editor.bin, dirs); return; }
+
+  // 'workspace-file' editors (VS Code family): materialize a `.code-workspace` and open it. The FILENAME
+  // is the workspace TITLE VS Code shows (it reads no `name` key), so use the short auto-label. Settings
+  // are the baked VSCODE_WORKSPACE_SETTINGS (crew-owned file, not your repo) — see that constant.
   const wsDir = join(crewHomeFor(userPath), 'workspaces');
-  const wsFile = join(wsDir, `${selectionLabel(members)}.code-workspace`);
-  // Workspace-level VSCode settings from config (e.g. quiet the Jest extension's per-folder
-  // auto-run: { "jest.enable": false } or { "jest.runMode": "on-demand" }). crew injects
-  // nothing by default — fully agnostic.
-  const settings = cfg.workspaceSettings && typeof cfg.workspaceSettings === 'object' ? cfg.workspaceSettings : {};
-  const wsJson = { folders: dirs.map((p) => ({ path: p })), settings };
+  const wsFile = join(wsDir, `${workspaceLabel(members)}.code-workspace`);
+  const wsJson = { folders: dirs.map((p) => ({ path: p })), settings: { ...VSCODE_WORKSPACE_SETTINGS } };
 
   mkdirSync(wsDir, { recursive: true });
   writeFileSync(wsFile, JSON.stringify(wsJson, null, 2) + '\n');
-  launch('code', [wsFile]);
+  launch(editor.bin, [wsFile]);
 }
 
 export async function cmdClaude(flags, rest) {
@@ -2940,14 +3018,13 @@ async function configForm(flags, opts = {}) {
     info: (f) => f.isNew ? '' : `${DIM}used by${UNDIM}  ${usersOf(f.orig).join(', ') || `${DIM}(no services)${UNDIM}`}`,
   };
 
-  // Top-level (global) config + machine-local servicesDir. A FIXED section: one synthetic item, no +New
-  // row and no create/delete — you only edit the values. workspaceSettings values are JSON-typed (so
-  // `false`/`3` keep their type), stringified for the row editor and parsed back on save.
-  const mapStringify = (o) => { const r = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) r[k] = typeof v === 'string' ? v : JSON.stringify(v); return r; };
-  const jsonParseVals = (o) => { const r = {}; for (const [k, v] of Object.entries(o || {})) { let val = v; try { val = JSON.parse(v); } catch {} r[k] = val; } return r; };
+  // Machine-local settings (editor + servicesDir — both live in local.json, never in the shared config).
+  // A FIXED section: one synthetic item, no +New/delete — you only edit the values. The editor picker
+  // grays out editors whose binary isn't on PATH (via editorPaint) so unavailable ones read as such.
+  const EDITOR_NONE = '(none — workspace disabled)'; // sentinel choice: clears local.json.editor
+  const editorPaint = { get: (id) => { const e = EDITORS[id]; return e && !onPath(e.bin) ? (s) => c.dim(s) : null; } };
   const loadSettings = () => ({
-    workspaceName: cfg.workspaceName || '',
-    workspaceSettings: mapStringify(cfg.workspaceSettings),
+    editor: machine.editor && EDITORS[machine.editor] ? machine.editor : EDITOR_NONE,
     servicesDir: machine.servicesDir || '',
     isNew: false, orig: 'config',
   });
@@ -2955,16 +3032,14 @@ async function configForm(flags, opts = {}) {
     key: 'settings', title: 'SETTINGS', noun: 'settings', fixed: true,
     names: () => ['config'],
     fields: [
-      { key: 'workspaceName', label: 'workspaceName', kind: 'text', desc: 'A name for the VS Code workspace crew opens.' },
-      { key: 'workspaceSettings', label: 'wsSettings', kind: 'map', json: true, kLabel: 'setting', vLabel: 'value', desc: 'Optional VS Code settings for that workspace, e.g. jest.enable = false.' },
+      { key: 'editor', label: 'editor', kind: 'choice', options: [EDITOR_NONE, ...Object.keys(EDITORS)], paint: editorPaint, desc: 'Which editor `crew workspace` opens the picked services in. Left as none, workspace is off. Dimmed = not installed. Machine-local (each dev picks their own).' },
       { key: 'servicesDir', label: 'servicesDir', kind: 'text', desc: 'The folder your services live in. Service paths you enter as relative are looked up here.' },
     ],
     load: loadSettings,
     blank: loadSettings,
     save: (f) => {
-      setOrDel(cfg, 'workspaceName', String(f.workspaceName).trim());
-      setOrDel(cfg, 'workspaceSettings', jsonParseVals(f.workspaceSettings), f.workspaceSettings && Object.keys(f.workspaceSettings).length > 0);
-      persist();
+      persist();   // Settings edits only machine values now, but keep the "save normalizes the shared config" invariant (strips any unknown keys)
+      if (EDITORS[f.editor]) machine.editor = f.editor; else delete machine.editor; // sentinel/unknown -> unset
       syncServicesDir(f.servicesDir);   // in-memory + SERVICES_DIR (idempotent with the live edit)
       writeMachine(flags, machine);
       return null;
@@ -3303,7 +3378,7 @@ async function configForm(flags, opts = {}) {
       w(out);
     };
 
-    const openPanel = (fld) => { const items = optionsOf(fld); if (!items.length) { msg = `no ${fld.label} defined yet`; return; } panelField = fld; const single = fld.kind === 'choice'; panel = makeFilterPanel(items, { paint, title: fld.label, single }); panel.open(single ? form[fld.key] : (Array.isArray(form[fld.key]) ? form[fld.key] : [])); };
+    const openPanel = (fld) => { const items = optionsOf(fld); if (!items.length) { msg = `no ${fld.label} defined yet`; return; } panelField = fld; const single = fld.kind === 'choice'; panel = makeFilterPanel(items, { paint: fld.paint || paint, title: fld.label, single }); panel.open(single ? form[fld.key] : (Array.isArray(form[fld.key]) ? form[fld.key] : [])); };
     const openItem = () => { focus = 'right'; fi = 0; }; // form already synced to sel[li] by loadForm — don't reload here (a col1→col2→col1→col2 round-trip would discard unsaved edits, e.g. a rename)
     const quit = () => { cleanup(); resolve(); return true; };
     const openDelete = (name) => { const used = secOf().key === 'guards' ? usersOf(name) : []; modal = { title: 'Delete', lines: [`Delete '${name}'?`, ...(used.length ? [`${DIM}used by ${used.length} service(s)${UNDIM}`] : [])], choices: [{ keys: ['y', 'Y'], label: 'y delete', run: () => { doDelete(name); modal = null; return false; } }, { keys: ['\x1b', 'n', 'N'], label: 'esc cancel', run: () => { modal = null; return false; } }] }; };
@@ -3481,8 +3556,6 @@ export function cmdCheck(flags) {
   // Top level.
   for (const k of Object.keys(cfg)) if (!TOP_KEYS.has(k)) W(`top-level: unknown key '${k}'`);
   if (cfg.version != null && typeof cfg.version !== 'number') E(`version must be a number`);
-  if (cfg.workspaceName != null && typeof cfg.workspaceName !== 'string') E(`workspaceName must be a string`);
-  if (cfg.workspaceSettings != null && !isObj(cfg.workspaceSettings)) E(`workspaceSettings must be an object`);
   if (cfg.guards != null && !isObj(cfg.guards)) E(`guards must be an object`);
   const guards = isObj(cfg.guards) ? cfg.guards : {};
 
@@ -3587,6 +3660,7 @@ export function cmdCheck(flags) {
   checkOverrides(machine.overrides, 'local.json overrides', false);
   if (Array.isArray(machine.lastSelection)) for (const n of machine.lastSelection) if (!projNames.has(n)) W(`local.json lastSelection: unknown service '${n}'`);
   if (Array.isArray(machine.lastDebug)) for (const n of machine.lastDebug) if (!projNames.has(n)) W(`local.json lastDebug: unknown service '${n}'`);
+  if (machine.editor != null && !resolveEditor(machine.editor)) E(`local.json editor: unknown editor '${typeof machine.editor === 'string' ? machine.editor : JSON.stringify(machine.editor)}' (known: ${Object.keys(EDITORS).join(', ')}, or an object { bin, kind:${EDITOR_KINDS.map((k) => `'${k}'`).join('|')} })`);
 
   // Report.
   console.log(c.bold(`Checking ${tildify(userPath)}`) + (localPath ? c.dim(`  (+ ${tildify(localPath)})`) : ''));
@@ -3675,7 +3749,7 @@ export function help() {
     ['help', '', 'Show this help'],
     ['list', '', 'List services'],
     ['start', 'env=<env>', 'Pick services, wire + start them for that env'],
-    ['workspace', '', 'Pick services, open one VSCode window'],
+    ['workspace', '', 'Pick services, open them in your editor'],
     ['claude', '[session]', 'Pick services, launch Claude Code'],
     ['graph', '[list]', 'Show the dependency graph (list = text)'],
     ['resolve', '<env> [proj…]', "Show each service's resolved env (dry-run)"],

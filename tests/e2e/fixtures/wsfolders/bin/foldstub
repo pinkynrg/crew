@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "STUB-FOLD args: $*"
+exit 0
