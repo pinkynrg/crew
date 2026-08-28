@@ -1,10 +1,6 @@
 {
-  "longRunning": [
-    "start",
-    "dev",
-    "watch"
-  ],
-  "projects": {
+  "version": 2,
+  "services": {
     "web": {
       "path": "web",
       "type": "frontend",
@@ -137,7 +133,5 @@
       },
       "local": "http://localhost:3009"
     }
-  },
-  "version": 2,
-  "workspaceName": "crew"
+  }
 }

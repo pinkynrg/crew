@@ -8,6 +8,8 @@
 #   vhs demo/start.tape
 #   ffmpeg -i docs/media/crew-start.gif -vf "fps=10,scale=880:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=3" -loop 0 /tmp/crew-start.gif -y
 #   gifsicle -O3 --lossy=60 --colors 80 /tmp/crew-start.gif -o docs/media/crew-start.gif
+#   # poster (a frame with the full graph selector — adjust -ss to taste):
+#   ffmpeg -ss 6 -i docs/media/crew-start.mp4 -frames:v 1 -y docs/media/crew-start-poster.png
 #
 # Framerate 12 is load-bearing rather than cosmetic: vhs captures each frame
 # through the browser, and at this size the default rate outruns the capture,
@@ -24,7 +26,7 @@ Set Padding 16
 Set TypingSpeed 45ms
 
 Hide
-Type 'printf %s "{\"projectsDir\":\"demo/projects\"}" > demo/local.json'
+Type 'printf %s "{\"servicesDir\":\"demo/projects\",\"editor\":\"vscode\"}" > demo/local.json'
 Enter
 Type 'crew() { node bin/crew.js --config demo/config.json "$@"; }'
 Enter

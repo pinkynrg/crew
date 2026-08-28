@@ -9,6 +9,8 @@
 #   vhs demo/config.tape
 #   ffmpeg -i docs/media/crew-config.gif -vf "fps=10,scale=880:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=3" -loop 0 /tmp/crew-config.gif -y
 #   gifsicle -O3 --lossy=60 --colors 80 /tmp/crew-config.gif -o docs/media/crew-config.gif
+#   # poster (a representative late frame — adjust -ss to taste):
+#   ffmpeg -sseof -3 -i docs/media/crew-config.gif -frames:v 1 -y docs/media/crew-config-poster.png
 #
 # Framerate 12 is load-bearing rather than cosmetic: vhs captures each frame
 # through the browser, and at this size the default rate outruns the capture,
@@ -24,9 +26,9 @@ Set Padding 16
 Set TypingSpeed 42ms
 
 Hide
-Type 'printf %s "{\"projectsDir\":\"demo/projects\"}" > demo/local.json'
+Type 'printf %s "{\"servicesDir\":\"demo/projects\",\"editor\":\"vscode\"}" > demo/local.json'
 Enter
-Type 'printf %s "{\"version\":2,\"projects\":{}}" > demo/.scratch-config.json'
+Type 'printf %s "{\"version\":2,\"services\":{}}" > demo/.scratch-config.json'
 Enter
 Type 'crew() { node bin/crew.js --config demo/.scratch-config.json "$@"; }'
 Enter
@@ -38,11 +40,38 @@ Type "crew config"
 Enter
 Sleep 1500ms
 
-# ---- 1) a FRONTEND: pick the alerts/ folder -> crew auto-fills type/runner/env/local/start ----
+# ---- 0) servicesDir: the multi-column (Miller) folder picker ----
+# jump to the top (Settings), open it, focus the servicesDir field, open the browser
+Up
+Sleep 400ms
+Up
+Sleep 400ms
 Enter
-Sleep 1000ms
+Sleep 700ms
 Down
 Sleep 600ms
+Enter
+Sleep 1400ms
+Left
+Sleep 900ms
+Left
+Sleep 900ms
+Right
+Sleep 800ms
+Down
+Sleep 800ms
+Escape
+Sleep 700ms
+Escape
+Sleep 700ms
+
+# ---- 1) a FRONTEND: new service -> pick the alerts/ folder -> crew auto-fills type/env/local/start ----
+Down
+Sleep 500ms
+Enter
+Sleep 900ms
+Down
+Sleep 500ms
 Enter
 Sleep 900ms
 Down
@@ -64,8 +93,8 @@ Sleep 500ms
 Type "s"
 Sleep 1500ms
 
-# ---- 2) a BACKEND: new project -> pick the payments/ folder -> auto-filled as backend ----
-Left
+# ---- 2) a BACKEND: new service -> pick the payments/ folder -> auto-filled as backend ----
+Escape
 Sleep 400ms
 Down
 Sleep 400ms
@@ -74,8 +103,8 @@ Sleep 900ms
 Down
 Sleep 500ms
 Enter
-Sleep 800ms
-Down@100ms 7
+Sleep 900ms
+Down@130ms 7
 Sleep 500ms
 Enter
 Sleep 2600ms
@@ -83,7 +112,7 @@ Type "s"
 Sleep 1500ms
 
 # ---- 3) a GUARD: scroll to Guards -> + New guard -> fill it ----
-Left
+Escape
 Sleep 400ms
 Down
 Sleep 300ms

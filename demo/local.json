@@ -1,1 +1,14 @@
-{"projectsDir":"demo/projects"}
+{
+  "servicesDir": "demo/projects",
+  "editor": "vscode",
+  "lastSelection": [
+    "web",
+    "api",
+    "auth",
+    "queue",
+    "worker",
+    "db",
+    "cache"
+  ],
+  "lastDebug": []
+}
