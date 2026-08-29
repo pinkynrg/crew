@@ -1,8 +1,8 @@
 #!/bin/sh
-# Portable black-box E2E for crew, driven by expect (real PTY). Runs the crew BINARY ($CREW) — never
-# imports internals — so a port to another language keeps the suite: `CREW=./crew-rs sh tests/e2e/run.sh`.
-# Coverage flows through automatically: expect spawns the binary, which inherits NODE_V8_COVERAGE (Node),
-# GOCOVERDIR (Go -cover), or coverage.py's env — so `npm run test:cov` measures whatever $CREW is.
+# Portable black-box E2E for crew, driven by expect (real PTY). Runs the crew BINARY ($CREW,
+# default .build/crew — `make test` builds it first) and never imports internals, so any
+# implementation that behaves the same passes. Coverage flows through automatically: expect spawns
+# the binary, which inherits GOCOVERDIR (go build -cover) — `make cov` measures it.
 #
 # Each cases/<group>_<scenario>.exp declares its fixture in-file ("# fixture: <name>") and runs against
 # a FRESH copy of fixtures/<name>/. Interactive raw-mode cases (the config editor, the graph selector)
@@ -21,7 +21,7 @@
 # Usage: sh tests/e2e/run.sh [-u] [name…]   — names filter cases by substring.
 set -u
 cd "$(dirname "$0")/../.." || exit 2
-export CREW="${CREW:-node $(pwd)/bin/crew.js}"
+export CREW="${CREW:-$(pwd)/.build/crew}"
 update=0; filters=""
 for a in "$@"; do
   if [ "$a" = "-u" ]; then update=1; else filters="$filters $a"; fi

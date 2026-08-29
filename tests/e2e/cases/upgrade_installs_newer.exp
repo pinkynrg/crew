@@ -1,10 +1,36 @@
-# `crew upgrade` with a newer version available: resolves it, installs, verifies the global tree.
+# `crew upgrade` with a newer version available: the fake releases API offers a tar.gz asset for
+# this OS/arch; crew downloads it and atomically replaces its own binary. The case upgrades a COPY
+# of the binary (never the shared test binary) and proves the replacement by running it.
 # fixture: upgrade
 source tests/e2e/utils/lib.exp
-set env(PATH) "$env(TMP)/bin:$env(PATH)"
-set env(CREW_TEST_LATEST) "99.9.9"
-crun upgrade
+# work on a copy — upgrade replaces the running executable in place
+exec cp [lindex $CREWBIN 0] $env(TMP)/crew-copy
+# the "new version": a script that answers --version with 99.9.9, packed as the release tar.gz
+exec mkdir -p $env(TMP)/rel
+set f [open $env(TMP)/rel/crew w]; puts $f "#!/bin/sh"; puts $f "echo 99.9.9"; close $f
+exec chmod +x $env(TMP)/rel/crew
+exec tar -C $env(TMP)/rel -czf $env(TMP)/asset.tgz crew
+set os [exec go env GOOS]
+set arch [exec go env GOARCH]
+# throwaway releases server: /releases/latest -> v99.9.9 with the matching asset; /dl -> the tar.gz
+spawn -noecho node -e "
+  const fs = require('fs');
+  const s = require('http').createServer((q, r) => {
+    if (q.url === '/dl') return r.end(fs.readFileSync(process.argv\[1\]));
+    r.end(JSON.stringify({ tag_name: 'v99.9.9', assets: \[{ name: 'crew_99.9.9_$os\_$arch.tar.gz', browser_download_url: 'http://127.0.0.1:' + s.address().port + '/dl' }\] }));
+  });
+  s.listen(0, '127.0.0.1', () => process.stdout.write('PORT ' + s.address().port + String.fromCharCode(10)));
+" $env(TMP)/asset.tgz
+expect -re {PORT (\d+)} { set port $expect_out(1,string) }
+set srv $spawn_id
+set env(CREW_RELEASES_API) "http://127.0.0.1:$port"
+spawn -noecho $env(TMP)/crew-copy --config $env(CONFIG) upgrade
 must {upgrading}
+must {99.9.9}
 must {upgraded}
+want_exit 0
+close -i $srv
+# the binary on disk IS the new version now
+spawn -noecho $env(TMP)/crew-copy --version
 must {99.9.9}
 want_exit 0

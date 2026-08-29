@@ -1,0 +1,93 @@
+name: Release
+
+# Runs when the SHIPPED code changes (Go source / module files / the release config). Pushes that
+# touch just docs, the website, tests, or *.md do NOT cut a release. Want one anyway? Trigger this
+# workflow manually (workflow_dispatch, Actions tab).
+#
+# ONE test execution, strictly ordered: test (instrumented, black-box coverage) → badge from THAT
+# number → tag → GoReleaser publishes GitHub Release binaries. The suite runs exactly once — its
+# pass/fail IS the release gate, and its percentage feeds the badge.
+# Commits pushed by CI (coverage badge) are marked [skip ci] so they don't retrigger.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+      - .goreleaser.yaml
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.cov.outputs.pct }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: stable }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install expect (the e2e PTY driver)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq expect
+      - name: Test with coverage (graph goldens + E2E incl. screen snapshots — the one and only suite run)
+        id: cov
+        run: |
+          set -o pipefail
+          make cov | tee cov.txt
+          PCT=$(grep -o 'total:.*[0-9.]*%' cov.txt | grep -o '[0-9.]*%' | tail -1 | tr -d '%')
+          echo "pct=${PCT%.*}" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with: { go-version: stable }
+      - name: Update coverage badge
+        run: |
+          PCT='${{ needs.test.outputs.coverage }}'
+          [ -n "$PCT" ] || exit 0
+          COLOR=red; [ "$PCT" -ge 50 ] && COLOR=yellow; [ "$PCT" -ge 75 ] && COLOR=brightgreen
+          sed -i -E "s|(coverage-)[0-9]+(%25|%)-[a-z]+|\1${PCT}\2-${COLOR}|" README.md || true
+          if ! git diff --quiet README.md; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            git commit -m "ci: coverage badge ${PCT}% [skip ci]"
+            for i in 1 2 3; do
+              git push origin "HEAD:${GITHUB_REF_NAME}" && break
+              [ "$i" = 3 ] && exit 1
+              git pull --rebase origin "${GITHUB_REF_NAME}"
+            done
+          fi
+      - name: Tag next version
+        id: tag
+        run: |
+          git fetch --tags
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          LAST=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          LAST=${LAST:-v1.0.84}
+          NEXT="v$(echo "${LAST#v}" | awk -F. '{print $1"."$2"."$3+1}')"
+          git tag "$NEXT"
+          git push origin "$NEXT"
+          echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

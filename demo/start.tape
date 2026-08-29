@@ -28,7 +28,7 @@ Set TypingSpeed 45ms
 Hide
 Type 'printf %s "{\"servicesDir\":\"demo/projects\",\"editor\":\"vscode\"}" > demo/local.json'
 Enter
-Type 'crew() { node bin/crew.js --config demo/config.json "$@"; }'
+Type 'crew() { .build/crew --config demo/config.json "$@"; }'
 Enter
 Type "clear"
 Enter

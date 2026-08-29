@@ -16,7 +16,7 @@ Guidance for working in this repo.
 
 ## What crew is
 
-A single-file macOS/Linux CLI that runs the **slice of your local stack you care about** — `crew
+A macOS/Linux CLI (one static Go binary) that runs the **slice of your local stack you care about** — `crew
 start` a selected group of services together, in parallel, each auto-wired to point at the others'
 local ports (or the rest's deployed hosts when left off). Also opens the set in your editor (VS Code
 family, JetBrains, Zed, Neovim, …), or hands it to Claude Code. crew owns the fan-out (parallelism, labelled output, exit-code
@@ -25,17 +25,24 @@ beyond `{placeholder}` substitution.
 
 ## Layout
 
-- `bin/crew.js` — the CLI. ESM executable, `#!/usr/bin/env node`. Hand-authored; no build step
-  (edit-and-run). This is what `bin.crew` points at.
-- `bin/graph.js` — zero-dep layered-DAG ASCII renderer for `crew graph` (exports
-  `renderAsciiGraph`; crew.js imports it). Also runnable standalone (`node bin/graph.js file.mmd`,
-  or pipe mermaid on stdin) with its own small mermaid-subset parser. The one allowed split from the
-  single-file rule (see below).
-- `package.json` — `bin.crew`, `type:module`, `engines.node >=18`, zero deps (no build tooling).
-  `files: ["bin/crew.js","bin/graph.js","README.md"]` (graph.js MUST stay listed or installs crash
-  on the import). `npm test` runs both suites.
-- `.github/workflows/publish.yml` — npm publish CI (push to main; auto-bump patch; OIDC trusted
-  publishing, npm@11, `--provenance`; no NPM_TOKEN).
+crew is a Go CLI shipped as a single static binary. `make build` → `.build/crew` (+ `.build/crew-graph`).
+
+- `cmd/crew/main.go` — thin entry; everything lives in `internal/crew`.
+- `internal/crew/` — the CLI, one file per concern: `json.go` (OM: insertion-ordered JSON — config
+  round-trips preserve the author's key order), `ansi.go` (every escape/key byte under a readable
+  name), `colors.go`, `util.go`, `config.go` (load/migrate/prune + machine-local prefs),
+  `wiring.go` (env discovery, identity/match, env derivation, overrides, task resolution),
+  `check.go`, `commands.go` (dispatch + list/resolve/graph-list/pull/help), `term.go` (raw mode,
+  splitKeys, footer, pick panel, pager), `selector.go` (the graph picker), `runner.go` (process-
+  group fanout + the log viewer), `start.go` (start/workspace/claude), `editor.go` (the two-pane
+  config editor), `upgrade.go` (self-update from GitHub Releases), `graphview.go`.
+- `internal/graph/` — the layered-DAG ASCII renderer + mermaid-subset parser; `cmd/graph` is its
+  standalone binary (the black-box contract tests/graph drives).
+- `Makefile` — `build` / `test` / `test-update` / `cov`. Node and `expect` are dev-only tools the
+  harness uses (golden rasterizers + PTY driver); there is no package.json and no npm.
+- `.github/workflows/release.yml` — CI: one instrumented suite run gates the release → coverage
+  badge → auto-tag → GoReleaser publishes GitHub Release binaries (`.goreleaser.yaml`;
+  `install.sh` is the curl installer).
 - `tests/` — dev-only (NOT shipped). `graph/` = renderer goldens (`run.mjs [-u] [name…]`; `cases/`
   holds `<name>.mmd` + optional `.opts.json` + its `.snap.txt` golden side by side); `e2e/` = portable
   expect-driven CLI tests incl. screen
@@ -46,17 +53,18 @@ beyond `{placeholder}` substitution.
 
 ## Hard constraints (do not break)
 
-- **Zero runtime dependencies.** Node built-ins only (`node:fs`, `node:path`, `node:os`,
-  `node:child_process`, `node:https`, `node:readline` + `readline/promises`). The parallel
-  runner is our own (`runFanout`). No build step, no bundler — the source IS what runs.
-- **Two files, no bundler.** The CLI lives in `bin/crew.js`; the only other source file is
-  `bin/graph.js` (the self-contained ASCII graph renderer — cleanly separable, standalone-usable,
-  and big enough to warrant its own file). Don't split `crew.js` further into modules or add a
-  bundler. (We tried an esbuild/`src/` split + Ink for a TUI; both were reverted — the no-build,
-  hackable-install simplicity is worth more for a zero-dep tool this size.)
-- **POSIX only (macOS + Linux).** The runner relies on `/bin/sh`, `spawn` `detached:true`
-  (setsid), and `process.kill(-pgid)`. No Windows.
-- No raw stack traces on expected errors: throw `CrewError`, exit non-zero, one-line msg.
+- **Single static binary; micro-deps only.** stdlib + `golang.org/x/term` + `golang.org/x/sys`.
+  NO frameworks (no bubbletea/cobra/lipgloss): the hand-rolled renderers (graph, viewer, editor)
+  are golden-snapshot-tested down to the byte and are the product. The parallel runner is our own
+  (`runFanout`).
+- **Node/JS runtime quirks are load-bearing.** The TUI goldens were pinned by the original
+  implementation, so keep: insertion-ordered maps for anything rendered or persisted (OM/oset,
+  never a bare map range), `sort.SliceStable` where ties exist, half-up rounding (`jsRound`),
+  raw mode = input-only (OPOST|ONLCR restored after MakeRaw), ONE process-wide stdin reader with
+  a swappable handler (a goroutine blocked in Read can't be cancelled).
+- **POSIX only (macOS + Linux).** The runner relies on `/bin/sh`, `Setpgid` process groups, and
+  `kill(-pgid)`. No Windows.
+- No raw stack traces on expected errors: `fail()` panics a `CrewError`, Main recovers, one-line msg, exit non-zero.
 - `~` expansion + relative-to-cwd resolution everywhere; dedupe dir lists by resolved
   absolute path.
 - Placeholders: every `{name}` must resolve (else red error, nothing runs); an unknown
@@ -70,8 +78,7 @@ beyond `{placeholder}` substitution.
   merges on top. v1 configs migrate to v2 on load (`start.command` -> `tasks.start`). Key renames also
   auto-migrate on load: top-level `projects` -> `services`, and `projectsDir` -> `servicesDir` (in both
   `config.json` and `local.json`).
-  `crew pull <url>` fetches a `config.json` from a URL (zero-dep `node:http(s)`, follows
-  redirects, validates it has `services`) and installs it, backing up the current one to
+  `crew pull <url>` fetches a `config.json` from a URL (follows redirects, validates it has `services`) and installs it, backing up the current one to
   `config.json.bak`; `local.json` is untouched.
 - `servicesDir` (machine-local — stored in `local.json` beside the config, set via
   `crew config` → Settings, never in the committable `config.json`): relative service
@@ -163,7 +170,7 @@ beyond `{placeholder}` substitution.
   the deployed one (e.g. `…-app-rsrc…/plugin/v2/BeePlugin.js` → `localhost:8088/v2/api/loader`;
   for a path token, set `local` to the full local URL incl. path). `crew graph` derives edges
   from `.envs/*` URLs (incl. dotfile `.env.<env>`); `crew start` warns when a co-running set isn't
-  connected. `crew graph` (`collectGraphEdges` → `renderAsciiGraph` in `bin/graph.js`) draws the
+  connected. `crew graph` (`collectGraphEdges` → `graph.Render` in `internal/graph`) draws the
   graph as a laid-out ASCII diagram (boxes, per-source colored double-line dep edges, thin single
   reference edges, `╦╤` box-connect T-junctions) — our own zero-dep layered-DAG renderer, no external
   tool. On a TTY it's shown in an alternate-screen pager (`pagerView`: `↑↓` scroll — shown only when the
@@ -374,20 +381,20 @@ affordance (a selector key, a picker, a footer state) SHIPS WITH a `tests/e2e` c
 and a `tests/graph/cases` golden if it alters a graph render. A feature without a test is not done —
 add a fixture under `tests/e2e/fixtures/<name>/` + a `cases/<group>_<scenario>.exp` that drives it in the
 PTY and asserts the observable result (not internals). Adding a config field also means updating
-`TOP_KEYS`/`SERVICE_KEYS`/`GUARD_KEYS` + `cmdCheck` + `pruneConfig`. Run the full suite (`npm test`) and
+`TOP_KEYS`/`SERVICE_KEYS`/`GUARD_KEYS` + `cmdCheck` + `pruneConfig`. Run the full suite (`make test`) and
 keep it green before calling anything finished. `tests/README.md` is the full layout/convention reference.
 
-No unit-test framework. TWO suites, both run by `npm test`:
+No unit-test framework. TWO suites, both run by `make test` (which builds `.build/crew` + `.build/crew-graph` first):
 - `tests/graph/` — the ASCII graph renderer, BLACK-BOX like e2e: `run.mjs` spawns the `$GRAPH` binary
-  (default `node bin/graph.js` — its standalone entry IS the contract: `<mmd> [--opts <json>] [--color]
-  [--check-overlaps]`, overlaps → stderr + exit 3), so a port swaps in its renderer via `GRAPH=…`. Each
+  (default `.build/crew-graph` — `cmd/graph` IS the contract: `<mmd> [--opts <json>] [--color]
+  [--check-overlaps]`, overlaps → stderr + exit 3), so any renderer swaps in via `GRAPH=…`. Each
   `cases/<name>.mmd` (+ optional `.opts.json` cursor/sublabel render options) renders mono and diffs
   against the adjacent `<name>.snap.txt`; `-u [name…]` accepts; the colour `gallery.html` (the binary's
   `--color` output) rewrites on full runs.
 - `tests/e2e/` — **portable black-box E2E driven by `expect`** (a real PTY, so the interactive picker,
   config editor, and log viewer are exercised as a user would). Every case runs the crew BINARY (`$CREW`,
-  default `node bin/crew.js`) — it imports NOTHING from the source, so a port to another language keeps
-  the whole suite: `CREW=./crew-rs sh tests/e2e/run.sh`. Cases are named `group_subgroup_scenario.exp`
+  default `.build/crew`) — it imports NOTHING from the source, so any implementation that behaves
+  the same passes: `CREW=<other-binary> sh tests/e2e/run.sh`. Cases are named `group_subgroup_scenario.exp`
   (full words — `check_` `config_` `graph_` `start_` `viewer_` `workspace_` …) and declare their fixture
   in-file (`# fixture: <name>` above the `source` line); `run.sh` copies `fixtures/<name>/` to a fresh
   short-rooted tmp dir (sed `__DIR__`→tmp in `local.json`) per attempt, with ONE retry on PTY flake.
@@ -410,8 +417,8 @@ No unit-test framework. TWO suites, both run by `npm test`:
   are raw-mode alt-screen so quit them (`$ESC`/Ctrl-C) or they hang; `crew start` ALWAYS streams, so a
   start case must drive the viewer (assert its output, then `send $ESC` + `want_done` — the viewer holds
   open once every child exits); `crew start` REQUIRES `env=<name>` (errors before the picker without it —
-  pass `env=x`). Coverage: `npm run test:cov` (c8 over `NODE_V8_COVERAGE`); it's black-box so it works
-  per-language (Go `-cover`+`GOCOVERDIR`, Python coverage.py) — same tests.
+  pass `env=x`). Coverage: `make cov` (black-box: `go build -cover` + `GOCOVERDIR`, the binary writes profiles
+  while the suites drive it).
 
 Harness gotchas learned the hard way (apply to new e2e cases too): keystrokes sent back-to-back
 coalesce into one stdin chunk — the viewer's search input deliberately ignores multi-char chunks, so
@@ -425,25 +432,25 @@ token from the same output, or bridge the char with a regex (`overrides .{0,4}lo
 Audit notes (for a port): `crew start` requires a full TTY for the picker, so the piped/non-interactive
 branches in cmdStart/runGuards/render are UNREACHABLE from the CLI today (defensive code, not spec);
 resolveEnvs' unreached-node re-seed loop is likewise defensive (ref edges are skipped entirely, so
-source-seeding reaches everything). `crew upgrade` is e2e-tested via an `npm` stub on PATH driven by
-`CREW_TEST_LATEST`; `crew pull` via a throwaway node http server spawned inside the case.
+source-seeding reaches everything). `crew upgrade` is e2e-tested against a throwaway
+node http server (a fake GitHub releases API via `CREW_RELEASES_API`) serving a tar.gz asset built
+inside the case; `crew pull` via the same in-case http-server technique.
 
 
 Also verify manually against a throwaway config (no build — run the file):
 
 ```sh
-node --check bin/crew.js
-node bin/crew.js --config /tmp/x.json list
-node bin/crew.js --config /tmp/x.json graph            # read-only, no TTY needed
-node bin/crew.js --config /tmp/x.json check            # validate; exit 1 on errors
+make build
+.build/crew --config /tmp/x.json list
+.build/crew --config /tmp/x.json graph            # read-only, no TTY needed
+.build/crew --config /tmp/x.json check            # validate; exit 1 on errors
 ```
 
 `start`/`workspace`/`claude` open the picker, so they need an interactive TTY
 (non-TTY = clear error); `list`/`graph`/`check`/`resolve` work non-interactively.
 
 `crew check` (`cmdCheck`) is the hand-rolled, zero-dep config validator — NO JSON-Schema
-library (would break the zero-deps constraint) and NO separate schema file (would break the
-single-file constraint). It validates the merged config + `local.json`: known-key sets
+library and NO separate schema file — the shape crew accepts is defined in one place, in code. It validates the merged config + `local.json`: known-key sets
 (`TOP_KEYS`/`SERVICE_KEYS`/`GUARD_KEYS`), types, and cross-references a schema can't express
 (guard names must exist; `{envfile}` needs `env`; `match` must be an env-labeled object of bare hosts, not globs;
 `match` without `local` is a dangling wiring target). Errors exit 1; warnings don't. Keep its

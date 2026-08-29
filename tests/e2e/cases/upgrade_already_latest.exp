@@ -1,11 +1,19 @@
-# `crew upgrade` when already at the latest version (npm stubbed; latest = current).
+# `crew upgrade` when already at the latest version: a fake releases API (CREW_RELEASES_API)
+# reports a tag equal to the binary's own --version, so nothing is downloaded.
 # fixture: upgrade
 source tests/e2e/utils/lib.exp
-set env(PATH) "$env(TMP)/bin:$env(PATH)"
 spawn -noecho sh -c "$env(CREW) --version"
 expect -re {(\d+\.\d+\.\d+[^\r\n]*)} { set cur $expect_out(1,string) }
 catch wait
-set env(CREW_TEST_LATEST) $cur
+# throwaway releases server: /releases/latest -> current version, no assets
+spawn -noecho node -e "
+  const s = require('http').createServer((q, r) => r.end(JSON.stringify({ tag_name: 'v$cur', assets: \[\] })));
+  s.listen(0, '127.0.0.1', () => process.stdout.write('PORT ' + s.address().port + String.fromCharCode(10)));
+"
+expect -re {PORT (\d+)} { set port $expect_out(1,string) }
+set srv $spawn_id
+set env(CREW_RELEASES_API) "http://127.0.0.1:$port"
 crun upgrade
 must {already up to date}
 want_exit 0
+close -i $srv

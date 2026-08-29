@@ -1,15 +1,15 @@
 # crew test suites
 
-Two suites, both run by `npm test`. No test framework, no runtime deps — the suites are the
-portability contract: a port to another language must pass them unchanged
-(`CREW=./crew-go GRAPH="./crew-go graph-render" npm test`).
+Two suites, both run by `make test` (which builds `.build/crew` + `.build/crew-graph` first).
+No test framework — the suites are black-box: they drive the built binaries and assert bytes, so
+any implementation that behaves the same passes (`CREW=<bin> sh tests/e2e/run.sh`,
+`GRAPH=<bin> node tests/graph/run.mjs`).
 
 ```
 tests/
   utils/keys.exp        key constants shared by every expect case — the "what key does what" reference
   graph/                ASCII graph renderer goldens — BLACK-BOX like e2e: cases are rendered by the
-                        $GRAPH binary (default `node bin/graph.js`), so a port swaps in its own renderer:
-                        GRAPH="./crew-go graph-render" node tests/graph/run.mjs
+                        $GRAPH binary (default .build/crew-graph, built by `make test`)
                         contract: $GRAPH <mmd> [--opts <json>] [--color] [--check-overlaps] (see run.mjs)
     run.mjs             runner: render each case in mono, diff against the golden (-u accepts)
     gallery.html        every case rendered in colour (regenerated on full runs)
@@ -57,7 +57,7 @@ open it in an editor and you see the TUI at that moment. Rules for snapping case
 - snaps are DELIBERATE capture points at meaningful states, not per-keystroke: each one drains the PTY
   (~1s) and becomes a reviewed golden — snap the states worth guarding
 
-**Updating goldens** — `npm run test:update` (or `sh tests/e2e/run.sh -u` / `node tests/graph/run.mjs -u`).
+**Updating goldens** — `make test-update` (or `sh tests/e2e/run.sh -u` / `node tests/graph/run.mjs -u`).
 
 ## Harness gotchas (hard-won — read before writing a case)
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Snapshot tests for the ASCII graph renderer — BLACK-BOX like tests/e2e: every case is rendered by
-// the $GRAPH binary (default `node bin/graph.js`), never by importing renderer code, so a port to
-// another language keeps the suite: `GRAPH="./crew-go graph-render" node tests/graph/run.mjs`.
+// Snapshot tests for the ASCII graph renderer — BLACK-BOX like tests/e2e: every case is rendered
+// by the $GRAPH binary (default .build/crew-graph — `make test` builds it), never by importing
+// renderer code, so any implementation honoring the contract passes.
 //
-// Binary contract (what a port must honor — see bin/graph.js standalone entry):
+// Binary contract (see cmd/graph):
 //   $GRAPH <file.mmd> [--opts <file.json>] [--color|--no-color] [--check-overlaps]
 //   stdout = the render (mono when piped; --color forces the palette even piped)
 //   --opts: {cursor, sublabel:{node:suffix}} — the selector rendering mode (cursor marker + [env] tags)
@@ -29,7 +29,7 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const gdir = join(root, 'tests', 'graph', 'cases');
-const GRAPH = (process.env.GRAPH || `node ${join(root, 'bin', 'graph.js')}`).split(' ');
+const GRAPH = (process.env.GRAPH || join(root, '.build', 'crew-graph')).split(' ');
 
 const argv = process.argv.slice(2);
 const update = argv.includes('-u') || argv.includes('--update');

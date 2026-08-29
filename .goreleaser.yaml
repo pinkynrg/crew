@@ -1,0 +1,40 @@
+# GoReleaser — builds the release matrix on a tag and publishes to GitHub Releases.
+# Run locally with: goreleaser release --snapshot --clean
+version: 2
+
+project_name: crew
+
+builds:
+  - id: crew
+    main: ./cmd/crew
+    binary: crew
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/pinkynrg/crew/internal/crew.Version={{.Version}}
+
+archives:
+  - id: crew
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^style", "^ci:", "^docs"]
+
+# Homebrew tap — enable once the pinkynrg/homebrew-tap repo exists and the workflow has a
+# TAP_GITHUB_TOKEN secret (a PAT with repo scope on the tap). Until then leave commented.
+# brews:
+#   - name: crew
+#     repository:
+#       owner: pinkynrg
+#       name: homebrew-tap
+#       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+#     homepage: https://github.com/pinkynrg/crew
+#     description: "Run the slice of your stack you care about — locally, wired to the rest."
+#     license: MIT

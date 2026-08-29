@@ -265,7 +265,7 @@
       <p class="tail" id="tail" aria-live="polite"></p>
       <div class="hero-cta">
         <div class="cmd">
-          <span class="p">$</span><code id="install">npm install -g @pinkynrg/crew</code>
+          <span class="p">$</span><code id="install">curl -fsSL https://raw.githubusercontent.com/pinkynrg/crew/main/install.sh | sh</code>
           <button id="copy">copy</button>
         </div>
         <a class="star" href="https://github.com/pinkynrg/crew" target="_blank" rel="noopener"><span class="s">★</span> Star on GitHub</a>
@@ -452,8 +452,8 @@
       <li>
         <div>
           <span class="t">Install</span>
-          <pre class="step-cmd"><span class="p">$</span> npx @pinkynrg/crew</pre>
-          <p>Zero dependencies, so it lands instantly. Or install it globally with <code>npm i -g @pinkynrg/crew</code>.</p>
+          <pre class="step-cmd"><span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/pinkynrg/crew/main/install.sh | sh</pre>
+          <p>One static binary, so it lands instantly. Or grab it from <a href="https://github.com/pinkynrg/crew/releases">GitHub Releases</a>.</p>
         </div>
       </li>
       <li>
@@ -480,7 +480,7 @@
     <span>Quickly select &amp; run the slice of your stack you're interested in locally, wired to the rest.</span>
     <nav>
       <a href="https://github.com/pinkynrg/crew">★ Star on GitHub</a>
-      <a href="https://www.npmjs.com/package/@pinkynrg/crew">npm</a>
+      <a href="https://github.com/pinkynrg/crew/releases">releases</a>
       <a href="https://github.com/pinkynrg/crew/blob/main/README.md">Docs</a>
     </nav>
   </div>
@@ -496,7 +496,7 @@
     root.setAttribute('data-theme', next); localStorage.setItem(TK, next);
   });
   document.getElementById('copy').addEventListener('click', async (e) => {
-    try { await navigator.clipboard.writeText('npm install -g @pinkynrg/crew'); e.target.textContent='copied'; setTimeout(()=>e.target.textContent='copy',1400);} catch(_){}
+    try { await navigator.clipboard.writeText('curl -fsSL https://raw.githubusercontent.com/pinkynrg/crew/main/install.sh | sh'); e.target.textContent='copied'; setTimeout(()=>e.target.textContent='copy',1400);} catch(_){}
   });
 
   // the 3 buttons just cycle their description (the GIF above is always `crew start` — the only real recording)

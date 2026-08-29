@@ -1,9 +1,8 @@
 # crew
 
-[![npm version](https://img.shields.io/npm/v/@pinkynrg/crew)](https://www.npmjs.com/package/@pinkynrg/crew)
-[![downloads](https://img.shields.io/npm/dm/@pinkynrg/crew)](https://www.npmjs.com/package/@pinkynrg/crew)
-[![node](https://img.shields.io/node/v/@pinkynrg/crew)](https://www.npmjs.com/package/@pinkynrg/crew)
-[![license](https://img.shields.io/npm/l/@pinkynrg/crew)](#license)
+[![release](https://img.shields.io/github/v/release/pinkynrg/crew)](https://github.com/pinkynrg/crew/releases)
+[![go](https://img.shields.io/badge/go-%E2%89%A51.22-00ADD8)](go.mod)
+[![license](https://img.shields.io/github/license/pinkynrg/crew)](#license)
 ![coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)
 
 **Quickly select and run the slice of your stack you're interested in - locally, wired to the rest.**
@@ -65,20 +64,17 @@ that's on (local) *and* has a `tasks.debug`; each service owns its own debugger 
 
 ### Install
 
-```sh
-npx @pinkynrg/crew          # zero deps, lands instantly - nothing to install
-```
-
-Or install it globally (then the command is `crew`):
+crew is a **single static binary** (Go) — nothing else to install, no runtime.
 
 ```sh
-npm i -g @pinkynrg/crew
+curl -fsSL https://raw.githubusercontent.com/pinkynrg/crew/main/install.sh | sh
 crew --version
 ```
 
-Requires Node ≥ 18 on macOS or Linux, with `code` (the VS Code CLI) and `claude` on your PATH
-for those two surfaces. **Zero runtime dependencies** - Node built-ins only, including crew's own
-parallel process runner. Self-update with `crew upgrade`.
+Or grab a binary from [GitHub Releases](https://github.com/pinkynrg/crew/releases), or build from
+source with `go install github.com/pinkynrg/crew/cmd/crew@latest`. macOS + Linux (arm64/amd64);
+`code` (the VS Code CLI) and `claude` on your PATH for those two surfaces. Self-update with
+`crew upgrade`.
 
 ## How it's configured
 
@@ -184,7 +180,7 @@ crew resolve <env> [proj…]      dry-run: the env each service resolves to for 
 crew config [path]              two-pane visual editor for everything (or print the config path)
 crew check                      validate config + local.json; list errors / warnings
 crew pull <url>                 fetch a config.json from a URL and install it (backs up current)
-crew upgrade                    self-update (npm i -g @pinkynrg/crew@latest)
+crew upgrade                    self-update (downloads the latest release binary)
 ```
 
 `start` / `workspace` / `claude` always open the interactive multiselect (preselected with your
