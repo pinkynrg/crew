@@ -1,0 +1,40 @@
+ crew  ·  config editor
+ SETTINGS  1                    │ Service · api
+   config                       │
+                                │    name             api
+ SERVICES  2                    │    path             __TMP__/projects/api
+   web                          │    type             backend
+ ▸ api                          │    start            make run
+   + New service                │    debug            (optional)
+                                │    env              .envs/{env}.env
+ GUARDS  1                      │    tasks (other)    (none)
+   vpn                          │    guards           vpn
+   + New guard                  │    local            http://localhost:4000
+                                │
+                                │ ┌─ Environment hosts ───────────────────────────────────────────┐
+                                │ │   x   = api.demo.dev                                          │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · shared ──────────────────────────────┐
+                                │ │   QUEUE       = api-local  always                             │
+                                │ │   CORS_ORIGIN = http://localhost:3000  when web local         │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · local ───────────────────────────────┐
+                                │ │   DB_PASSWORD = hunter2  always                               │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+ ↑↓ move · ⏎ open · n new · d delete · esc quit

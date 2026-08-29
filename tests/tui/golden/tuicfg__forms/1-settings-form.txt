@@ -1,0 +1,40 @@
+ crew  ·  config editor
+ SETTINGS  1                    │ Settings · config
+ ▸ config                       │
+                                │    editor       vscode
+ SERVICES  2                    │    servicesDir  __TMP__/projects
+   web                          │
+   api                          │
+   + New service                │
+                                │
+ GUARDS  1                      │
+   vpn                          │
+   + New guard                  │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+ ↑↓ move · ⏎ open · n new · d delete · esc quit

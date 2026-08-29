@@ -7,7 +7,7 @@ set timeout 60
 # a pattern could be sliced out of the ring buffer mid-frame — the root of the interactive flakes.
 match_max 100000
 # fixed geometry: goldens are rendered at exactly this size
-set stty_init "rows 30 cols 100"
+set stty_init "rows 40 cols 100"
 set CREWBIN [split $env(CREW)]
 set snapN 0
 

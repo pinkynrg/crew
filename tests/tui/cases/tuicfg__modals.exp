@@ -1,0 +1,28 @@
+# the two modal prompts: delete-confirm (d on a list item) and unsaved-changes (quitting dirty).
+source tests/tui/lib.exp
+crun config
+must {config editor}
+sleep 0.5
+send "d"
+must {Delete}
+sleep 0.3
+snap "delete-modal"
+send "\033"
+sleep 0.3
+send "\r"
+must {esc ← list}
+send "\r"
+sleep 0.3
+send "x"
+sleep 0.3
+send "\r"
+sleep 0.3
+send "\033"
+sleep 0.3
+send "\033"
+must {Unsaved changes}
+sleep 0.3
+snap "unsaved-modal"
+snapend
+send "d"
+want_done

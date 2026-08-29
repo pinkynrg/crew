@@ -1,0 +1,40 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                           ╔═════════════╗
+                                           ║ web [debug] ║
+                                           ╚══════╦══════╝
+                                                  ║
+                                                  ▼
+                                           ╔═════════════╗
+                                           ║ api [local] ║
+                                           ╚═════════════╝
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 2/2 sel · 2/2 shown · ↑↓←→ move · space pick · d debug · a all · f filter · enter run · esc cancel

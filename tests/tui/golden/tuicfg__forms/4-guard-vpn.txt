@@ -1,0 +1,40 @@
+ crew  ·  config editor
+ SETTINGS  1                    │ Guard · vpn
+   config                       │
+                                │    name     vpn
+ SERVICES  2                    │    comment  VPN is connected
+   web                          │    command  true
+   api                          │    message  connect the VPN first
+   + New service                │
+                                │   used by  api
+ GUARDS  1                      │
+ ▸ vpn                          │
+   + New guard                  │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+ ↑↓ move · ⏎ open · n new · d delete · esc quit

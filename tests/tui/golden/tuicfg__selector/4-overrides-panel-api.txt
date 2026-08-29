@@ -1,0 +1,40 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                      ┌─ overrides · api ───────────────────────────────────┐
+                      │  global (shared config)                             │
+                      │ ▸[x] QUEUE = api-local                              │
+                      │  [x] CORS_ORIGIN = http://localhost:3000  (when web)│
+                      │  local (wins · machine-only)                        │
+                      │  [x] DB_PASSWORD = hunter2                          │
+                      ├─────────────────────────────────────────────────────┤
+                      │ space·a·↵·esc                                       │
+                      └─────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 2/2 sel · 2/2 shown · ↑↓←→ move · space pick · e env · a all · f filter · enter run · esc cancel

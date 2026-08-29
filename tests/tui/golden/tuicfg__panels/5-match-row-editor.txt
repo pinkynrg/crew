@@ -1,0 +1,40 @@
+ crew  ·  config editor
+ SETTINGS  1                    │ Service · web
+   config                       │
+                                │    name             web
+ SERVICES  2                    │    path             __TMP__/projects/web
+ ▸ web                          │    type             frontend
+   api                          │    start            vite --port 3000
+   + New service                │    debug            vite --port 3000 --debug
+                                │    env              .envs/{env}.env
+ GUARDS  1                      │    tasks (other)    lint=eslint .
+   vpn                          │    guards           (none)
+   + New guard                  │    local            http://localhost:3000
+                                │
+                                │ ┌─ Environment hosts ───────────────────────────────────────────┐
+                                │ │ ▸ x   = web.demo.dev                                          │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · shared ──────────────────────────────┐
+                                │ │ (none)                                                        │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · local ───────────────────────────────┐
+                                │ │ (none)                                                        │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │   This service's deployed host per environment (e.g. pre =
+                                │   api.pre.example.com). Fill in the host for each env.
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+ ↑↓ row · ⏎ edit host · esc done

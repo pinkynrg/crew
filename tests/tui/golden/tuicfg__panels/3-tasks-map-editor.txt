@@ -1,0 +1,40 @@
+ crew  ·  config editor
+ SETTINGS  1                    │ tasks (other) · service web
+   config                       │
+                                │  ▸ lint  eslint .
+ SERVICES  2                    │     + add task
+ ▸ web                          │
+   api                          │
+   + New service                │
+                                │
+ GUARDS  1                      │
+   vpn                          │
+   + New guard                  │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+ ↑↓ row · ⏎ edit · d remove · esc done

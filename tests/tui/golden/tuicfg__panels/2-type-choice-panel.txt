@@ -1,0 +1,40 @@
+ crew  ·  config editor
+ SETTINGS  1                    │ type · service web
+   config                       │
+                                │  ▸ (•) frontend
+ SERVICES  2                    │    ( ) backend
+ ▸ web                          │    ( ) fullstack
+   api                          │    ( ) other
+   + New service                │
+                                │
+ GUARDS  1                      │
+   vpn                          │
+   + New guard                  │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+ ↑↓ pick · ⏎ apply · esc cancel

@@ -3,7 +3,7 @@ source tests/tui/lib.exp
 crun graph
 must {esc}
 sleep 0.5
-snap
+snap "graph-pager"
 snapend
 send "\033"
 want_done

@@ -5,7 +5,7 @@ must {enter run}
 send "\r"
 must {gamma line}
 sleep 0.5
-snap
+snap "viewer-streaming"
 snapend
 send "\033"
 want_done

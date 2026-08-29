@@ -1,0 +1,40 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                     ╔═══════════╗ ╔═══════════╗
+                                     ║ a   [x]   ║ ║ b [local] ║
+                                     ╚═══════════╝ ╚═══════════╝
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 1/2 sel · 2/2 shown · ↑↓←→ move · space pick · a all · f filter · enter run · esc cancel

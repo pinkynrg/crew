@@ -1,0 +1,8 @@
+{
+  // TUI screen goldens (tests/tui/golden/**) are character grids: 1 char = 1 cell. Fonts with an
+  // "fi" ligature fuse those two chars into one glyph, pulling the rest of any row containing e.g.
+  // "config" one cell left. Plaintext-scoped so code files keep their ligatures.
+  "[plaintext]": {
+    "editor.fontLigatures": false
+  }
+}

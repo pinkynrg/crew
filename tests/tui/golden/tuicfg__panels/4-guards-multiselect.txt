@@ -1,0 +1,40 @@
+ crew  ·  config editor
+ SETTINGS  1                    │ guards · service web
+   config                       │
+                                │  ▸ [ ] vpn
+ SERVICES  2                    │
+ ▸ web                          │
+   api                          │
+   + New service                │
+                                │
+ GUARDS  1                      │
+   vpn                          │
+   + New guard                  │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+ space toggle · a all · ⏎ apply · esc cancel

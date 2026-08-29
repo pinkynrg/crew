@@ -7,18 +7,18 @@ must {config editor}
 sleep 0.5
 send "k"
 sleep 0.5
-snap "Settings form (editor + servicesDir)"
+snap "settings-form"
 send "j"
 sleep 0.5
-snap "Service form · web (envs, match, both override layers)"
+snap "service-web"
 send "j"
 sleep 0.5
-snap "Service form · api (guard linked, shared+local overrides)"
+snap "service-api-overrides"
 send "j"
 sleep 0.5
 send "j"
 sleep 0.5
-snap "Guard form · vpn"
+snap "guard-vpn"
 snapend
 send "\033"
 want_done

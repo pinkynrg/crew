@@ -19,25 +19,29 @@ for exp in tests/tui/cases/*.exp; do
     fail=$((fail + 1)); echo "FAIL $name (driver)"; sed 's/^/    /' "$tmp/log" | tail -8
     command rm -rf "$tmp"; continue
   fi
-  got="$tmp/got"; : > "$got"
-  n=1
+  # one snap = one golden FILE: golden/<case>/<n>-<label>.txt — the file IS the screenshot
+  # (pure rendered grid, no headers), so opening it in an editor shows the TUI at that moment.
+  gdir="tests/tui/golden/$name"
+  [ "$update" = 1 ] && rm -rf "$gdir"
+  mkdir -p "$gdir"
+  bad=0; n=1
   while [ -f "$tmp/raw.$n" ]; do
     if [ ! -s "$tmp/raw.$n" ]; then n=$((n + 1)); continue; fi
-    cap=""; [ -f "$tmp/cap.$n" ] && cap=" · $(cat "$tmp/cap.$n")"
-    printf '── screen %s%s ──\n' "$n" "$cap" >> "$got"
-    node tests/tui/render.mjs 100x30 < "$tmp/raw.$n" | sed "s|$tmp|__TMP__|g" >> "$got"
+    cap="screen"; [ -f "$tmp/cap.$n" ] && cap=$(cat "$tmp/cap.$n" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9-')
+    shot="$gdir/$n-$cap.txt"
+    node tests/tui/render.mjs 100x40 < "$tmp/raw.$n" | sed "s|$tmp|__TMP__|g" > "$tmp/shot.$n"
+    if [ "$update" = 1 ]; then
+      cp "$tmp/shot.$n" "$shot"
+    elif [ ! -f "$shot" ]; then
+      bad=1; echo "FAIL $name: missing golden $shot (run with -u)"
+    elif ! diff -u "$shot" "$tmp/shot.$n" > "$tmp/diff.$n" 2>&1; then
+      bad=1; echo "FAIL $name: $(basename "$shot") differs"; sed 's/^/    /' "$tmp/diff.$n" | head -25
+    fi
     n=$((n + 1))
   done
-  gold="tests/tui/golden/$name.txt"
-  if [ "$update" = 1 ]; then
-    cp "$got" "$gold"; echo "UPDATED $name"
-  elif [ ! -f "$gold" ]; then
-    fail=$((fail + 1)); echo "FAIL $name (no golden — run with -u)"
-  elif diff -u "$gold" "$got" > "$tmp/diff" 2>&1; then
-    pass=$((pass + 1))
-  else
-    fail=$((fail + 1)); echo "FAIL $name"; sed 's/^/    /' "$tmp/diff" | head -30
-  fi
+  if [ "$update" = 1 ]; then echo "UPDATED $name ($(ls "$gdir" | wc -l | tr -d ' ') screenshots)"
+  elif [ "$bad" = 0 ]; then pass=$((pass + 1))
+  else fail=$((fail + 1)); fi
   command rm -rf "$tmp"
 done
 [ "$update" = 1 ] && exit 0

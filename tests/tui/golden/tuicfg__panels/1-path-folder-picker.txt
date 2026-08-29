@@ -1,0 +1,40 @@
+ crew  ·  config editor
+ SETTINGS  1                    │ pick a folder · service web
+   config                       │
+                                │    ( ) api
+ SERVICES  2                    │  ▸ (•) web
+ ▸ web                          │    ( ) ✎ type a path…
+   api                          │
+   + New service                │
+                                │
+ GUARDS  1                      │
+   vpn                          │
+   + New guard                  │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+ space toggle · a all · ⏎ apply · esc cancel
