@@ -1,0 +1,1 @@
+{ "services": { "b": { "path": "b", "tasks": { "start": "echo B" } } } }
