@@ -66,13 +66,13 @@
     background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:.4rem .6rem; cursor:pointer; transition:all .15s; }
   .tabs button:hover { color:var(--fg); }
   .tabs button[aria-selected="true"] { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
-  .tail { min-height:3.2em; margin:0 0 1.5rem; font-size:1.12rem; color:var(--muted); max-width:40ch; }
+  .tail { min-height:3.2em; margin:0 0 .6rem; font-size:1.12rem; color:var(--muted); max-width:40ch; }
   .tail b { color:var(--fg); font-weight:600; }
   .tail .fast { color:var(--accent); font-weight:700; }
 
   .cmd { display:flex; align-items:center; gap:.6rem; background:var(--term-bg); border:1px solid var(--line);
-    border-radius:10px; padding:.75rem 1rem; font-family:ui-monospace,Menlo,monospace; font-size:.94rem; color:var(--term-fg); box-shadow:var(--shadow); max-width:27rem; }
-  .cmd .p { color:var(--accent); } .cmd code { flex:1; white-space:nowrap; }
+    border-radius:10px; padding:.75rem 1rem; font-family:ui-monospace,Menlo,monospace; font-size:.86rem; color:var(--term-fg); box-shadow:var(--shadow); max-width:100%; min-width:0; }
+  .cmd .p { color:var(--accent); } .cmd code { flex:1; min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; }
   .cmd button { background:none; border:1px solid #2a3040; color:#8a93a8; border-radius:6px; padding:.26rem .55rem; font:inherit; font-size:.76rem; cursor:pointer; }
   .cmd button:hover { color:#fff; border-color:#3a4152; }
   .subnote { margin:.85rem 0 0; font-size:.85rem; color:var(--muted); }
@@ -160,7 +160,7 @@
   ol.steps li:hover { border-color:color-mix(in srgb, var(--accent) 45%, var(--line)); transform:translateY(-2px); box-shadow:var(--shadow); }
   ol.steps li::before { content:counter(s); font-family:ui-monospace,Menlo,monospace; font-weight:700; color:var(--accent); background:var(--accent-soft); border:1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); width:34px; height:34px; border-radius:9px; display:grid; place-items:center; font-size:.95rem; }
   ol.steps .t { font-weight:650; display:block; margin-bottom:.6rem; font-size:1.02rem; }
-  ol.steps .step-cmd { margin:0 0 .5rem; background:var(--term-bg); color:var(--term-fg); border:1px solid var(--line); border-radius:8px; padding:.6rem .85rem; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.9rem; overflow-x:auto; }
+  ol.steps .step-cmd { margin:0 0 .5rem; background:var(--term-bg); color:var(--term-fg); border:1px solid var(--line); border-radius:8px; padding:.6rem .85rem; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.9rem; white-space:pre-wrap; overflow-wrap:anywhere; }
   ol.steps .step-cmd .p { color:var(--accent); }
   ol.steps code { font-family:ui-monospace,Menlo,monospace; background:var(--term-bg); color:var(--term-fg); padding:.12rem .4rem; border-radius:5px; font-size:.86em; }
   ol.steps p { margin:0; color:var(--muted); font-size:.94rem; }
@@ -174,7 +174,7 @@
   #top .top-grid { display:grid; grid-template-columns:0.8fr 1.2fr; gap:clamp(1.6rem,4vw,3.2rem); align-items:stretch; } /* GIF defines the row height; pitch stretches to match */
   #top .pitch-col { display:flex; flex-direction:column; justify-content:center; }
   #top .pitch-col h1 { font-size:clamp(1.5rem,2.9vw,2.1rem); line-height:1.15; margin:.2rem 0 1.1rem; } /* smaller so the pitch fits inside the GIF's height */
-  #top .tail { min-height:4.9em; }                             /* reserve 3 lines (the longest description wraps to 3) so switching the tab never changes the page height */
+  #top .tail { min-height:4.8em; }                             /* reserve 3 lines at 1.6 line-height so switching the tab never changes the page height */                             /* reserve 3 lines (the longest description wraps to 3) so switching the tab never changes the page height */
 
   /* config section: explanation (left) + sample config.json (right) */
   #config .config-grid { display:grid; grid-template-columns:0.9fr 1.1fr; gap:clamp(1.6rem,4vw,3rem); align-items:start; }
@@ -270,7 +270,7 @@
         </div>
         <a class="star" href="https://github.com/pinkynrg/crew" target="_blank" rel="noopener"><span class="s">★</span> Star on GitHub</a>
       </div>
-      <p class="subnote">Zero dependencies · macOS &amp; Linux · <a href="https://github.com/pinkynrg/crew">MIT on GitHub</a></p>
+      <p class="subnote">One static binary · macOS &amp; Linux · <a href="https://github.com/pinkynrg/crew">MIT on GitHub</a></p>
     </div>
     <div class="term">
       <div class="bar"><i></i><i></i><i></i><span>crew start</span></div>
@@ -438,7 +438,7 @@
       </details>
       <details>
         <summary>Which platforms are supported?</summary>
-        <p class="a">macOS and Linux. It's POSIX-only &mdash; teardown relies on process groups (<code>setsid</code> / <code>kill(-pgid)</code>) &mdash; and needs Node&nbsp;&ge;&nbsp;18.</p>
+        <p class="a">macOS and Linux (arm64 and amd64). It's POSIX-only &mdash; teardown relies on process groups (<code>setsid</code> / <code>kill(-pgid)</code>). One static binary, no runtime to install.</p>
       </details>
     </div>
   </div>
