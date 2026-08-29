@@ -1,0 +1,22 @@
+# Regression: filtering EVERY node out in the start selector used to crash (empty layout ->
+# layout.text.split on undefined). Now it renders a blank graph live (0/N) without throwing.
+# fixture: run
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+sleep 1
+send $FILTER
+must {Show nodes}
+sleep 1
+send $ALL
+sleep 1
+must {0/2}
+send $UP
+send $DOWN
+send $RIGHT
+send $LEFT
+sleep 1
+send $ESC
+sleep 1
+send $ESC
+want_done

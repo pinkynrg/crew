@@ -1,0 +1,14 @@
+# a service form shows its Environment Overrides box with the stored rows summarized.
+# fixture: overrides-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $ENTER
+sleep 1
+# collapsed project form shows the titled block + the override summary (VAR=value, @peer)
+must {Environment overrides}
+must {AWS_PROFILE}
+send $ESC
+send $ESC
+want_exit 0

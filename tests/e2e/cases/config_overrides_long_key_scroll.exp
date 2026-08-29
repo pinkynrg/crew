@@ -1,0 +1,32 @@
+# a long VAR must be fully visible both while typing (full-width edit) and after confirm (not clipped)
+# fixture: overrides-form
+source tests/e2e/utils/lib.exp
+set stty_init "rows 44 cols 110"
+crun config
+must {config editor}
+sleep 1
+send $ENTER
+sleep 1
+send [string repeat $DOWN 10]
+send $ENTER
+must {Environment overrides}
+sleep 1
+send [string repeat $DOWN 2]
+send $ENTER
+send "REACT_APP_BEEPLUGIN_LOADER_URL"
+send $ENTER
+sleep 1
+must {REACT_APP_BEEPLUGIN_LOADER_URL}
+send $RIGHT
+send $ENTER
+send "localhost8088"
+send $ENTER
+sleep 1
+send $ESC
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {"REACT_APP_BEEPLUGIN_LOADER_URL"}

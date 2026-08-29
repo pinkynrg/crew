@@ -1,0 +1,35 @@
+# the shared Environment Overrides box: `+ add` chains VAR -> value; save persists to cfg.overrides.
+# fixture: overrides-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $ENTER
+sleep 1
+send [string repeat $DOWN 10]
+sleep 1
+send $ENTER
+must {Environment overrides}
+sleep 1
+# to the "+ add override" row (2 existing rows), append + type the VAR
+send [string repeat $DOWN 2]
+sleep 1
+send $ENTER
+send "DEBUG"
+send $ENTER
+sleep 1
+# move to the value column, edit it
+send $RIGHT
+send $ENTER
+send "1"
+send $ENTER
+sleep 1
+send $ESC
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {"DEBUG"}
+config_has {"QUEUE"}

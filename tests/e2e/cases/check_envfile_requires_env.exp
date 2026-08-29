@@ -1,0 +1,6 @@
+# crew check: a task using {envfile} without an `env` field is an error (exit 1).
+# fixture: broken-envfile
+source tests/e2e/utils/lib.exp
+crun check
+must {envfile}
+want_exit 1

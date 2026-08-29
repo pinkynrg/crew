@@ -1,7 +1,0 @@
-# no config file at all: crew list shows the friendly empty state and does NOT create a file.
-source tests/e2e/lib.exp
-crun list
-must {No services configured yet}
-must {crew config}
-want_exit 0
-if {[file exists $env(CONFIG)]} { puts "!! config was scaffolded on disk"; exit 5 }

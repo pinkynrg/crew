@@ -1,0 +1,6 @@
+# crew check: overrides.whenLocal that isn't an object is an error (exit 1).
+# fixture: broken-whenlocal
+source tests/e2e/utils/lib.exp
+crun check
+must {whenLocal must be an object}
+want_exit 1

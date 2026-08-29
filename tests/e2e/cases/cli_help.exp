@@ -1,0 +1,7 @@
+# crew help lists the commands.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun help
+must {USAGE}
+must {graph}
+want_exit 0

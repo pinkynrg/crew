@@ -1,0 +1,6 @@
+{
+  // workspace recommendations — VS Code offers these on open
+  "recommendations": [
+    "rashwell.tcl"
+  ]
+}

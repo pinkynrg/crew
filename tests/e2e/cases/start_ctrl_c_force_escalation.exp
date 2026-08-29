@@ -1,0 +1,17 @@
+# a child that traps SIGTERM: first Ctrl-C starts graceful teardown, a quick second one nudges,
+# and after CREW_FORCE_AFTER_MS a third force-kills the group.
+# fixture: stubborn
+source tests/e2e/utils/lib.exp
+set env(CREW_FORCE_AFTER_MS) 1200
+set env(CREW_KILL_GRACE_MS) 30000
+crun start env=x
+must {enter run}
+send $ENTER
+must {hold}
+send $CTRL_C
+sleep 0.3
+send $CTRL_C
+must {press Ctrl-C again}
+sleep 1.5
+send $CTRL_C
+want_done

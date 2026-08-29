@@ -1,0 +1,6 @@
+# retired command: crew overrides errors with a pointer to crew config.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun overrides
+must {was removed}
+want_exit 1

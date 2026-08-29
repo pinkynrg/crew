@@ -1,0 +1,11 @@
+# `crew upgrade` when already at the latest version (npm stubbed; latest = current).
+# fixture: upgrade
+source tests/e2e/utils/lib.exp
+set env(PATH) "$env(TMP)/bin:$env(PATH)"
+spawn -noecho sh -c "$env(CREW) --version"
+expect -re {(\d+\.\d+\.\d+[^\r\n]*)} { set cur $expect_out(1,string) }
+catch wait
+set env(CREW_TEST_LATEST) $cur
+crun upgrade
+must {already up to date}
+want_exit 0

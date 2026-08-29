@@ -1,0 +1,12 @@
+# the log viewer streaming three fixed lines (prefix column, footer).
+# fixture: viewer-stream
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {gamma line}
+sleep 0.5
+snap "viewer-streaming"
+snapend
+send $ESC
+want_done

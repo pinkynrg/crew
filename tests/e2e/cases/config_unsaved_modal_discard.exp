@@ -1,0 +1,23 @@
+# quitting with unsaved edits opens the modal; `d` discards everything and exits.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $ENTER
+sleep 1
+send $DOWN
+send $DOWN
+send $DOWN
+sleep 1
+send $ENTER
+send "Z"
+send $ENTER
+sleep 1
+send $ESC
+send $ESC
+must {discard all & exit}
+sleep 1
+send $DISCARD
+want_exit 0
+config_hasnt {"make runZ"}

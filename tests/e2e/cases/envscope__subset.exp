@@ -1,9 +1,0 @@
-# env resolution is scoped to the services IN PLAY: a@pre points at b's qa host, so the a+b pair puts b at
-# qa (a is the entry, b its dependency); but b ALONE is the entry and runs at the selection env (pre).
-source tests/e2e/lib.exp
-crun resolve pre a b
-must {qa}
-want_exit 0
-crun resolve pre b
-must {pre}
-want_exit 0

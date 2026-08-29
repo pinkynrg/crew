@@ -1,0 +1,15 @@
+# saving from the editor normalizes the file: unknown top-level/service keys are stripped.
+# fixture: unknown-keys
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $ENTER
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_hasnt {bogusTop}
+config_hasnt {bogusProj}

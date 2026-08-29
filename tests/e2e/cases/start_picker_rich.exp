@@ -1,0 +1,27 @@
+# the graph selector on a CONNECTED pair (web -> api): base graph, the f filter panel, the d debug
+# toggle ([debug] sublabel), and the e per-run overrides checklist (api has both layers).
+# fixture: rich-stack
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+sleep 0.5
+snap "selector-graph"
+send $FILTER
+must {Show nodes}
+sleep 0.3
+snap "filter-panel"
+send $ESC
+sleep 0.3
+send $DEBUG
+sleep 0.4
+snap "debug-toggled-web"
+send $DOWN
+sleep 0.3
+send $OVERRIDES
+sleep 0.4
+snap "overrides-panel-api"
+snapend
+send $ESC
+sleep 0.3
+send $ESC
+want_done

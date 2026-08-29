@@ -1,0 +1,126 @@
+# Shared expect helpers for crew's E2E. Sourced by each cases/*.exp.
+# Every case runs the crew BINARY ($CREW) in a real PTY against a throwaway fixture ($CONFIG), so the
+# suite is black-box + portable: a port to another language just sets CREW=./its-binary.
+#
+# A case can also take SCREEN SNAPSHOTS: call `snap "<label>"` at any capture point (and `snapend`
+# before quitting) — the runner renders each recording into a character grid (utils/render.mjs) and
+# diffs it against snapshots/<case>/<n>-<label>.txt. Goldens are SCREENS, not byte streams. A snapping
+# case must have fully deterministic output (fixed fixture output, no timers/counters).
+set timeout 60
+# Full-frame repaints are ~5KB; expect's DEFAULT match buffer is 2000 bytes, so under load (c8, CI)
+# a pattern could be sliced out of the ring buffer mid-frame — the root of the interactive flakes.
+match_max 100000
+# ONE canonical PTY geometry for every case — screen goldens are rendered at exactly this size, and a
+# consistent, ample PTY also stops CI runners (which spawn tiny/zero-sized) from clipping alt-screen
+# views into spurious timeouts. A case that truly needs another size sets its own `stty_init` after
+# sourcing this (the runner renders its goldens at the declared size).
+set stty_init "rows 40 cols 100"
+# Key constants (arrows/enter/esc/action letters) live in tests/keys.exp — shared by e2e + tui.
+# Repeat a key with: send [string repeat $DOWN 6]
+source [file join [file dirname [info script]] .. .. utils keys.exp]
+
+set CREWBIN [split $env(CREW)]
+set snapN 0
+
+# spawn `crew --config <fixture> <args...>` in the PTY (global spawn_id so must/want_exit see it).
+# Output is recorded into $TMP/raw.1 from the start so a later `snap` has the full first screen.
+proc crun {args} {
+  global CREWBIN env spawn_id snapN
+  set snapN 1
+  log_file -noappend "$env(TMP)/raw.1"
+  eval spawn -noecho $CREWBIN --config $env(CONFIG) $args
+}
+
+# read whatever the app has emitted so far — expect only consumes the PTY while expecting, so a
+# capture point must drain explicitly or the latest frames land in the NEXT segment.
+proc drain {} {
+  global spawn_id timeout
+  set save $timeout
+  set timeout 1
+  expect {
+    -re {.+} { exp_continue }
+    timeout {}
+  }
+  set timeout $save
+}
+
+# capture point: everything since the previous snap becomes screen N; recording continues into N+1.
+# The label is REQUIRED — it names the golden file (snapshots/<case>/<n>-<label>.txt) and tells the
+# runner this case has goldens at all.
+proc snap {label} {
+  global env snapN
+  if {$label eq ""} { puts "\n!! snap needs a label"; exit 7 }
+  drain
+  log_file
+  set f [open "$env(TMP)/cap.$snapN" w]; puts -nonewline $f $label; close $f
+  incr snapN
+  log_file -noappend "$env(TMP)/raw.$snapN"
+}
+
+# final capture point: stop recording entirely (the app's quit/teardown bytes are NOT part of any
+# golden — leaving the alt screen would render as an empty grid)
+proc snapend {} {
+  log_file
+}
+
+# assert a regexp appears before timeout/eof
+proc must {pat} {
+  global spawn_id
+  expect {
+    -re $pat {}
+    timeout { puts "\n!! TIMEOUT waiting for: $pat"; exit 3 }
+    eof     { puts "\n!! EOF before: $pat"; exit 3 }
+  }
+}
+
+# drain to eof, then assert the child's exit code (timeout-guarded so a hung/interactive proc can't wedge)
+proc want_exit {code} {
+  global spawn_id
+  expect {
+    eof {}
+    timeout { puts "\n!! no eof (interactive/hung?)"; catch {exec kill -9 [exp_pid]}; exit 6 }
+  }
+  catch wait r
+  set got [lindex $r 3]
+  if {$got ne $code} { puts "\n!! exit $got, wanted $code"; exit 4 }
+}
+
+# quit an interactive pager/viewer (raw-mode), then assert exit
+proc quit_and_exit {key code} {
+  global spawn_id
+  send -- $key
+  want_exit $code
+}
+
+# drain to eof + reap without asserting a code (teardown/signal exit codes are non-deterministic)
+proc want_done {} {
+  global spawn_id
+  expect {
+    eof {}
+    timeout { puts "\n!! no eof (hung?)"; catch {exec kill -9 [exp_pid]}; exit 6 }
+  }
+  catch wait
+}
+
+# assert a JSON key/value pair exists in the (possibly rewritten) fixture config
+proc config_has {needle} {
+  global env
+  set fh [open $env(CONFIG) r]; set txt [read $fh]; close $fh
+  if {[string first $needle $txt] < 0} { puts "\n!! config missing: $needle"; exit 5 }
+}
+proc config_hasnt {needle} {
+  global env
+  set fh [open $env(CONFIG) r]; set txt [read $fh]; close $fh
+  if {[string first $needle $txt] >= 0} { puts "\n!! config still has: $needle"; exit 5 }
+}
+# same, against the machine-local local.json (overrides / projectsDir live here)
+proc local_has {needle} {
+  global env
+  set fh [open "$env(TMP)/local.json" r]; set txt [read $fh]; close $fh
+  if {[string first $needle $txt] < 0} { puts "\n!! local.json missing: $needle"; exit 5 }
+}
+proc local_hasnt {needle} {
+  global env
+  set fh [open "$env(TMP)/local.json" r]; set txt [read $fh]; close $fh
+  if {[string first $needle $txt] >= 0} { puts "\n!! local.json still has: $needle"; exit 5 }
+}

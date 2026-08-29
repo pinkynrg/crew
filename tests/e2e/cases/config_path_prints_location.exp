@@ -1,0 +1,6 @@
+# crew config path prints the config file location.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun config path
+must {config\.json}
+want_exit 0

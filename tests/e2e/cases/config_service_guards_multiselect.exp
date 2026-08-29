@@ -1,0 +1,18 @@
+# the guards multiselect on a service form links/unlinks guard names.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+crun config
+must {api}
+sleep 1
+send $ENTER
+sleep 1
+send [string repeat $DOWN 7]
+sleep 1
+send $ENTER
+must {space toggle}
+sleep 1
+send $ESC
+sleep 1
+send $ESC
+send $ESC
+want_exit 0

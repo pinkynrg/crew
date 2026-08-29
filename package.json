@@ -16,8 +16,8 @@
   },
   "scripts": {
     "start": "node bin/crew.js",
-    "test": "node tests/snapshot.mjs && sh tests/e2e/run.sh && sh tests/tui/run.sh",
-    "test:update": "node tests/snapshot.mjs -u && sh tests/e2e/run.sh -u && sh tests/tui/run.sh -u",
+    "test": "node tests/graph/run.mjs && sh tests/e2e/run.sh",
+    "test:update": "node tests/graph/run.mjs -u && sh tests/e2e/run.sh -u",
     "test:cov": "npx --yes c8 --include=bin/crew.js --include=bin/graph.js --reporter=text --reporter=html npm test"
   },
   "keywords": [

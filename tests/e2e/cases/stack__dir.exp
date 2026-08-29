@@ -1,4 +1,0 @@
-source tests/e2e/lib.exp
-crun dir $env(TMP)
-must {was removed}
-want_exit 1

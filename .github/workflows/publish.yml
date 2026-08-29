@@ -44,7 +44,7 @@ jobs:
         run: node --check bin/crew.js && node --check bin/graph.js
       - name: Install expect (the E2E + TUI suites drive crew in a real PTY)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq expect
-      - name: Test with coverage (snapshots + E2E + TUI goldens — the one and only suite run)
+      - name: Test with coverage (graph goldens + E2E incl. screen snapshots — the one and only suite run)
         id: cov
         run: |
           set -o pipefail   # without this, `| tee` would swallow a failing suite and green-light the gate

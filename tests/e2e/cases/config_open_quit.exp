@@ -1,0 +1,8 @@
+# crew config opens the visual editor; esc quits clean.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $ESC
+want_exit 0

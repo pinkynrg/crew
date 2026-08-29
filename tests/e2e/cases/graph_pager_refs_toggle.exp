@@ -1,0 +1,11 @@
+# the graph pager's `r` toggles reference edges on/off (persisted footer state flips).
+# fixture: reference-edges
+source tests/e2e/utils/lib.exp
+crun graph
+must {r refs on}
+sleep 1
+send $REFS
+sleep 1
+must {r refs off}
+send $ESC
+want_exit 0

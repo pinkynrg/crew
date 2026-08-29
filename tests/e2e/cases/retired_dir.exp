@@ -1,0 +1,6 @@
+# retired command: crew dir errors with a pointer to Settings.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun dir $env(TMP)
+must {was removed}
+want_exit 1

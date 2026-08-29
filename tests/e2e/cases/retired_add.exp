@@ -1,0 +1,6 @@
+# retired command: crew add errors with a pointer to the visual editor.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun add
+must {was removed}
+want_exit 1

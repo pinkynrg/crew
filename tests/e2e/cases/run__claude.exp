@@ -1,7 +1,0 @@
-source tests/e2e/lib.exp
-set env(PATH) "$env(TMP)/bin:$env(PATH)"
-crun claude sess1
-must {enter run}
-send "\r"
-must {STUB-CLAUDE}
-want_exit 0

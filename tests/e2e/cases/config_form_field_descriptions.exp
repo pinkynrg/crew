@@ -1,0 +1,24 @@
+# each field shows an always-visible description under the form when focused.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+set stty_init "rows 40 cols 110"
+crun config
+must {config editor}
+sleep 1
+send $ENTER
+sleep 1
+# name(0) path(1) type(2) start(3) -> 3 j's to the start field
+send [string repeat $DOWN 3]
+sleep 1
+must {command that starts this service}
+# debug (4) -> its own description
+send $DOWN
+sleep 1
+must {debug mode}
+# env (5) -> its own description
+send $DOWN
+sleep 1
+must {this service's env files live}
+send $ESC
+send $ESC
+want_exit 0

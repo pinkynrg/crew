@@ -1,0 +1,15 @@
+# crew pull fetches a config over http, backs up the old one, installs the new one.
+# fixture: pull
+source tests/e2e/utils/lib.exp
+# a throwaway static server over the fixture dir; prints its port, auto-dies in 30s
+spawn -noecho node -e "const h=require('http'),f=require('fs'),p=require('path');const s=h.createServer((q,r)=>{try{r.end(f.readFileSync(p.join(process.env.TMP,q.url)))}catch{r.statusCode=404;r.end('nope')}});s.listen(0,()=>process.stdout.write('PORT '+s.address().port+String.fromCharCode(10)));setTimeout(()=>process.exit(0),30000).unref()"
+expect -re {PORT (\d+)} { set port $expect_out(1,string) }
+set srv $spawn_id
+crun pull "http://127.0.0.1:$port/good.json"
+must {Loaded config}
+must {previous saved}
+want_exit 0
+config_has {pulled-svc}
+config_hasnt {old-svc}
+if {![file exists "$env(CONFIG).bak"]} { puts "!! no .bak"; exit 5 }
+close -i $srv

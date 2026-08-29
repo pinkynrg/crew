@@ -1,0 +1,38 @@
+# guards section: `n` opens a blank guard form; filling name/comment/command/message + `s` persists it.
+# fixture: guard-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $DOWN
+send $DOWN
+sleep 1
+send $NEW
+must {New guard}
+sleep 1
+send $ENTER
+send "backend-up"
+send $ENTER
+sleep 1
+send $DOWN
+send $ENTER
+send "service reachable"
+send $ENTER
+sleep 1
+send $DOWN
+send $ENTER
+send "true"
+send $ENTER
+sleep 1
+send $DOWN
+send $ENTER
+send "start it"
+send $ENTER
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {"backend-up"}
+config_has {"service reachable"}

@@ -1,0 +1,25 @@
+# the inline text editor's caret keys (move/word-jump/edit mid-string) inside a guard field.
+# fixture: guard-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $DOWN
+send $DOWN
+sleep 1
+send $ENTER
+sleep 1
+send $DOWN
+send $DOWN
+sleep 1
+send $ENTER
+send $CTRL_A
+send "X "
+send $ENTER
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {"command": "X true"}

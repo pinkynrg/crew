@@ -1,0 +1,6 @@
+# retired command: crew install errors (start is the only run command).
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun install
+must {was removed}
+want_exit 1

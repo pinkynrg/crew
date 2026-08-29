@@ -1,5 +1,0 @@
-# workspace has NO default editor: when unset, it's disabled with a clear message — BEFORE the picker.
-source tests/e2e/lib.exp
-crun workspace
-must {no editor configured}
-want_exit 1

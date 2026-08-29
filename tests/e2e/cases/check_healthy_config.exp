@@ -1,0 +1,6 @@
+# crew check on a healthy multi-service config: no problems, exit 0.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun check
+must {no problems found}
+want_exit 0

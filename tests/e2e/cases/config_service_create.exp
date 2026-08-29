@@ -1,0 +1,24 @@
+# `n` + filling the minimal fields creates a service; `s` writes it to the config.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $NEW
+must {New service}
+sleep 1
+send $ENTER
+send "worker"
+send $ENTER
+sleep 1
+send $DOWN
+send $ENTER
+send "worker"
+send $ENTER
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {"worker"}

@@ -1,0 +1,6 @@
+# crew check on a config whose service path is invalid: reports it, exits 1.
+# fixture: broken-path
+source tests/e2e/utils/lib.exp
+crun check
+must {(?i)path}
+want_exit 1

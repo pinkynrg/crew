@@ -1,0 +1,30 @@
+# servicesDir opens a multi-column folder navigator: → opens the highlighted folder's column, ⏎ selects.
+# fixture: dir-browser
+source tests/e2e/utils/lib.exp
+set stty_init "rows 40 cols 120"
+crun config
+must {config editor}
+sleep 1
+send $UP
+sleep 1
+must {Settings}
+send $ENTER
+sleep 1
+# Settings fields: editor(0) servicesDir(1)
+send $DOWN
+sleep 1
+send $ENTER
+must {services dir}
+sleep 1
+# col0 highlights 'root' (start dir), col1 previews root's subdirs [alpha, beta]. → into col1.
+send $RIGHT
+sleep 1
+# cursor on 'alpha' in the active column -> ⏎ selects it
+send $ENTER
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+local_has {alpha}

@@ -1,0 +1,7 @@
+# env derivation across the chain: the entry runs at the selection env, deps inherit their consumer's env.
+# fixture: wiring
+source tests/e2e/utils/lib.exp
+crun resolve qa
+must {web}
+must {api}
+want_exit 0

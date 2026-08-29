@@ -1,0 +1,6 @@
+# --list was retired — the graph selector is the one picker. The flag now errors at arg-parse.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun start --list
+must {unknown flag}
+want_exit 1

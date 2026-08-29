@@ -1,0 +1,13 @@
+# graph selector: `d` toggles svc into debug mode -> crew runs tasks.debug (not tasks.start)
+# fixture: debug-toggle
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+sleep 1
+send $DEBUG
+sleep 1
+send $ENTER
+must {DEBUGMODE}
+sleep 1
+send $ESC
+want_done

@@ -1,0 +1,11 @@
+# the happy path: pick, run, streamed viewer shows output, esc tears down.
+# fixture: run
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {A-started}
+must {B-started}
+sleep 1
+send $ESC
+want_done

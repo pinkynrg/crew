@@ -1,0 +1,10 @@
+# config.json overrides + local.json overrides merge; local WINS (BAR), config-only (FOO) still applies.
+# fixture: two-layer
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {V=config-foo W=local-bar}
+sleep 1
+send $ESC
+want_done

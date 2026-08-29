@@ -1,0 +1,6 @@
+# crew start without env= fails fast, before the picker.
+# fixture: run
+source tests/e2e/utils/lib.exp
+crun start
+must {needs an environment}
+want_exit 1

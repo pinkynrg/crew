@@ -1,0 +1,51 @@
+# Shared key constants for every expect case (e2e + tui) — the single source of truth for
+# "what key does what" in crew's raw-mode views. Tests send the FOOTER-ADVERTISED keys (real
+# arrow sequences, enter, esc) — the app also accepts undocumented vim aliases (j/k/h/l), but
+# tests exercise the advertised spec, never the sugar.
+#
+# NB Tcl: `[` inside double quotes starts command substitution — arrow sequences escape it (\033\[A).
+# Typed TEXT (names, values, search queries) stays a literal string in the case, never a constant.
+
+# ---- navigation (advertised as ↑↓←→ in every raw-mode footer) ----
+set UP     "\033\[A"
+set DOWN   "\033\[B"
+set RIGHT  "\033\[C"   ;# overrides/browse: next column; graph: focus right (NOT a pane switch in the config editor)
+set LEFT   "\033\[D"   ;# overrides/browse: prev column; graph: focus left  (config editor: caret only)
+set PGUP   "\033\[5~"  ;# log viewer: page up
+set PGDN   "\033\[6~"  ;# log viewer: page down
+
+# ---- commit / dismiss ----
+set ENTER  "\r"        ;# open the highlighted item / confirm / apply / commit a cell edit
+set ESC    "\033"      ;# one level back (cell -> field -> list -> quit); viewer/pager/selector: quit
+set SPACE  " "         ;# multiselects: toggle the highlighted row
+set TAB    "\t"        ;# config editor: switch pane (left list <-> form)
+set CTRL_C "\003"      ;# force-quit; log viewer: graceful stop (twice within the grace = force)
+
+# ---- line editor (text cells: config fields, map/override cells) ----
+set BACKSPACE "\177"
+set DELETE    "\033\[3~"  ;# forward-delete
+set HOME      "\033\[H"
+set END       "\033\[F"
+set CTRL_A    "\001"      ;# caret to start (= Home)
+set CTRL_E    "\005"      ;# caret to end (= End)
+set CTRL_U    "\025"      ;# kill to line start
+set CTRL_K    "\013"      ;# kill to line end
+set CTRL_W    "\027"      ;# delete word left
+set ALT_B     "\033b"     ;# word left
+set ALT_F     "\033f"     ;# word right
+
+# ---- action keys (printable, footer-advertised; same letter can mean different things per view) ----
+set SAVE      "s"  ;# config editor: save the current item; unsaved-changes modal: save all & exit
+set NEW       "n"  ;# config editor list: create a new item in the current section
+set DEL       "d"  ;# config editor list: delete item (opens confirm modal); row editors: remove row
+set DISCARD   "d"  ;# unsaved-changes modal: discard all & exit
+set YES       "y"  ;# delete-confirm modal: confirm
+set FILTER    "f"  ;# graph selector/pager + log viewer: node/service filter panel
+set REFS      "r"  ;# graph selector/pager: toggle reference edges
+set ALL       "a"  ;# multiselects (filter panel, viewer menu): toggle all/none
+set DEBUG     "d"  ;# start selector: toggle the focused local node's debug task
+set OVERRIDES "e"  ;# start selector: per-run env-overrides checklist
+set WRAP      "w"  ;# log viewer: toggle wrap/cut (persisted)
+set COPY      "c"  ;# log viewer: copy the filtered view to the clipboard
+set SEARCH    "/"  ;# log viewer: keyword search (type the query, enter applies, esc clears)
+set TYPEPATH  "t"  ;# folder picker / dir browser: drop to typed-path input

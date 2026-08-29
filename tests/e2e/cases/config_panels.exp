@@ -1,0 +1,63 @@
+# the config editor's sub-editors, one screenshot each: the service `path` folder picker, the
+# `type` choice panel, the `tasks` map row-editor, the `guards` multiselect, the inline `match`
+# row-editor, and Settings' servicesDir Miller-columns browser.
+# fixture: rich-stack
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 0.5
+send $ENTER
+must {s save}
+send $DOWN
+sleep 0.3
+send $ENTER
+must {pick a folder}
+sleep 0.3
+snap "path-folder-picker"
+send $ESC
+sleep 0.3
+send $DOWN
+sleep 0.3
+send $ENTER
+must {frontend}
+sleep 0.3
+snap "type-choice-panel"
+send $ESC
+sleep 0.3
+send [string repeat $DOWN 4]
+sleep 0.3
+send $ENTER
+must {add}
+sleep 0.3
+snap "tasks-map-editor"
+send $ESC
+sleep 0.3
+send $DOWN
+sleep 0.3
+send $ENTER
+must {vpn}
+sleep 0.3
+snap "guards-multiselect"
+send $ESC
+sleep 0.3
+send [string repeat $DOWN 2]
+sleep 0.3
+send $ENTER
+sleep 0.5
+snap "match-row-editor"
+send $ESC
+sleep 0.3
+send $ESC
+sleep 0.3
+snapend
+# NB: no screenshot of the servicesDir Miller browser — it renders the REAL filesystem ancestry
+# (/ and /tmp listings), which is machine-specific by nature. Its behavior is covered by the
+# svcbrowse__navigate e2e case instead.
+send $ESC
+sleep 0.3
+send $ESC
+sleep 0.3
+send $ESC
+must {Unsaved changes}
+send $DISCARD
+want_done

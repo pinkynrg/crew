@@ -1,0 +1,7 @@
+# missing-folder gate, ALL missing: same message but an ACTION (start) exits 1.
+# fixture: missing-all
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {check your services dir}
+must {Nothing to start}
+want_exit 1

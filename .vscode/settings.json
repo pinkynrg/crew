@@ -1,8 +1,15 @@
 {
-  // TUI screen goldens (tests/tui/golden/**) are character grids: 1 char = 1 cell. Fonts with an
-  // "fi" ligature fuse those two chars into one glyph, pulling the rest of any row containing e.g.
+  // TUI screen goldens (tests/e2e/cases/*.snaps/*.txt) are character grids: 1 char = 1 cell. Fonts with
+  // an "fi" ligature fuse those two chars into one glyph, pulling the rest of any row containing e.g.
   // "config" one cell left. Plaintext-scoped so code files keep their ligatures.
   "[plaintext]": {
     "editor.fontLigatures": false
-  }
+  },
+  // the test suites' .exp cases are expect scripts = Tcl; map them so the Tcl extension highlights them
+  "files.associations": {
+    "*.exp": "tcl"
+  },
+  // interleave files and folders alphabetically so each case's <case>.snaps/ golden folder sorts
+  // DIRECTLY UNDER its <case>.exp instead of jumping to the top of the folders-first block
+  "explorer.sortOrder": "mixed"
 }

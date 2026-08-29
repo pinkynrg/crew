@@ -1,0 +1,30 @@
+# the tasks map row editor: add key->value rows; save persists tasks.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+crun config
+must {api}
+sleep 1
+send $ENTER
+sleep 1
+# tasks is field #7 (index 6): name path type start debug env tasks
+send [string repeat $DOWN 6]
+sleep 1
+send $ENTER
+must {add task}
+sleep 1
+send $DOWN
+sleep 1
+send $ENTER
+send "build"
+send $ENTER
+send "make build"
+send $ENTER
+sleep 1
+send $ESC
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {"build": "make build"}

@@ -1,0 +1,19 @@
+# the log viewer's c (copy filtered view) and f (service filter menu, persisted hidden set).
+# fixture: long-output
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {tick}
+send $COPY
+must {copied|clipboard|copy}
+send $FILTER
+must {Show logs for}
+sleep 1
+send $SPACE
+send $ENTER
+must {0/1}
+sleep 1
+send $ESC
+want_done
+local_has {"hiddenLog"}

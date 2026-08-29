@@ -1,9 +1,0 @@
-# the `projects` key was renamed to `services`. A legacy config loads fine (the service is found via the
-# legacy `projectsDir` in local.json) and the config is rewritten to the new key on load.
-source tests/e2e/lib.exp
-config_has {"projects"}
-crun list
-must {mysvc}
-want_exit 0
-config_has {"services"}
-config_hasnt {"projects"}

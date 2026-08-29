@@ -1,4 +1,0 @@
-source tests/e2e/lib.exp
-crun check
-must {envfile}
-want_exit 1

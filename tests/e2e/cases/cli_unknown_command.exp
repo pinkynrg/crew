@@ -1,0 +1,6 @@
+# an unknown command prints an error + the help, exit 1.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun bogus
+must {(?i)unknown}
+want_exit 1

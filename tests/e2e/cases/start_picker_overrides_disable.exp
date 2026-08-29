@@ -1,0 +1,17 @@
+# `e` in the start selector -> overrides checklist; disabling FOO means it's NOT injected this run.
+# fixture: overrides-toggle
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $OVERRIDES
+must {overrides . svc}
+sleep 1
+send $SPACE
+sleep 1
+send $ENTER
+sleep 1
+send $ENTER
+must {FOO=\[\]}
+sleep 1
+send $ESC
+want_done

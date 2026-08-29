@@ -1,0 +1,23 @@
+# the overrides row editor: `d` removes a row; save persists the removal.
+# fixture: overrides-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $ENTER
+sleep 1
+send [string repeat $DOWN 10]
+sleep 1
+send $ENTER
+must {AWS_PROFILE}
+sleep 1
+send $DEL
+sleep 1
+send $ESC
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_hasnt {"AWS_PROFILE"}

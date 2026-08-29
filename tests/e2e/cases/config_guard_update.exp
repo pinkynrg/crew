@@ -1,0 +1,25 @@
+# editing a guard field and saving persists the change.
+# fixture: guard-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $DOWN
+send $DOWN
+sleep 1
+send $ENTER
+sleep 1
+send $DOWN
+send $DOWN
+send $DOWN
+sleep 1
+send $ENTER
+send " now"
+send $ENTER
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {connect the vpn now}

@@ -1,0 +1,10 @@
+# the editor opens with the sections stacked and the service list + form visible.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+must {SERVICES}
+must {api}
+must {backend}
+send $ESC
+want_exit 0

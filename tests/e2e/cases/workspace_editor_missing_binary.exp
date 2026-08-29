@@ -1,0 +1,8 @@
+# the configured editor's binary isn't on PATH: friendly error, non-zero exit.
+# fixture: missing-editor
+source tests/e2e/utils/lib.exp
+crun workspace
+must {enter run}
+send $ENTER
+must {not found on PATH}
+want_exit 1

@@ -1,7 +1,0 @@
-# a disconnected selection (a + b share no wiring) flags it as a top-right badge, not in the footer.
-source tests/e2e/lib.exp
-crun start env=x
-must {enter run}
-must {not all local nodes are connected}
-send "\033"
-want_done

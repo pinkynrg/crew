@@ -1,9 +1,0 @@
-source tests/e2e/lib.exp
-crun graph
-must {r refs on}
-sleep 1
-send "r"
-sleep 1
-must {r refs off}
-send "\033"
-want_exit 0

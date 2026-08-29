@@ -1,0 +1,24 @@
+# the log viewer's w (wrap/cut, persisted) and / (search) controls. NB each keystroke is followed
+# by a `must` — expect only drains the PTY while expecting, and the viewer's full-frame repaints
+# fill the buffer fast (stdout backpressure would stall the app, as any unread terminal would).
+# fixture: long-output
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {tick}
+send $WRAP
+must {\[w\] wrap}
+send $SEARCH
+must {search: }
+send "q"   ;# search text (types into the query)
+must {search: [^\r\n]{0,24}q}
+send "j"   ;# search text — NOT a scroll key (raw letter lands in the query)
+must {qj}
+send "x"   ;# search text
+must {qjx}
+send $ENTER
+must {/qjx}
+send $ESC
+want_done
+local_has {"logWrap": false}

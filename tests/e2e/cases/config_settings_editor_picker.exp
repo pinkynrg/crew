@@ -1,0 +1,30 @@
+# pick an editor in the config editor's Settings: the choice picker lists the built-ins, selecting one
+# writes it to local.json (machine-local). (Gray-out of uninstalled editors is display-only / env-dependent,
+# so not asserted here.)
+# fixture: editor-setting
+source tests/e2e/utils/lib.exp
+set stty_init "rows 40 cols 120"
+crun config
+must {config editor}
+sleep 1
+send $UP
+sleep 1
+must {Settings}
+send $ENTER
+sleep 1
+# field 0 = editor; open its picker
+send $ENTER
+sleep 1
+must {vscode}
+# cursor starts on the "(none)" sentinel; step to vscode and pick it (single-select applies)
+send $DOWN
+sleep 1
+send $ENTER
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+local_has {"editor"}
+local_has {vscode}

@@ -1,0 +1,10 @@
+# a 'folders' editor (escape-hatch {bin,kind:'folders'}) opens the picked dirs straight as args —
+# no .code-workspace file. The stub echoes its args so we assert a service dir was passed through.
+# fixture: folders-editor
+source tests/e2e/utils/lib.exp
+set env(PATH) "$env(TMP)/bin:$env(PATH)"
+crun workspace
+must {enter run}
+send $ENTER
+must {STUB-FOLD args:.*projects/a}
+want_exit 0

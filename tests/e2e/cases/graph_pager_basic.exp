@@ -1,0 +1,10 @@
+# the graph pager (read-only view of the same two services).
+# fixture: run
+source tests/e2e/utils/lib.exp
+crun graph
+must {esc}
+sleep 0.5
+snap "graph-pager"
+snapend
+send $ESC
+want_done

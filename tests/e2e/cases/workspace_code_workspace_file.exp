@@ -1,0 +1,11 @@
+# crew workspace opens the picked set in the configured editor; the .code-workspace filename is
+# the short auto-label (a+b), which IS the VS Code window title.
+# fixture: run
+source tests/e2e/utils/lib.exp
+set env(PATH) "$env(TMP)/bin:$env(PATH)"
+crun workspace
+must {enter run}
+send $ENTER
+# the workspace title is the short auto-label (services a,b -> "a+b"), not a long joined name
+must {STUB-CODE.*a\+b\.code-workspace}
+want_exit 0

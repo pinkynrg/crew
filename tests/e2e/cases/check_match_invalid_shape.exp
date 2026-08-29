@@ -1,0 +1,6 @@
+# crew check: an invalid `match` shape (globs / wrong type) is an error (exit 1).
+# fixture: broken-match
+source tests/e2e/utils/lib.exp
+crun check
+must {match}
+want_exit 1

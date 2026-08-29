@@ -1,0 +1,6 @@
+# retired command: crew guards errors with a pointer to crew config.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun guards
+must {was removed}
+want_exit 1

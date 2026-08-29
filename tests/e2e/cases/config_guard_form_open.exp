@@ -1,0 +1,13 @@
+# opening a guard shows its form + the `used by` service list.
+# fixture: guard-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $DOWN
+send $DOWN
+sleep 1
+must {used by}
+must {api}
+send $ESC
+want_exit 0

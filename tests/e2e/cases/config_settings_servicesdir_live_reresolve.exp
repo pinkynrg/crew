@@ -1,0 +1,37 @@
+# projectsDir is part of the whole-session working copy: editing it (unsaved) immediately re-resolves
+# every project's path in-session. Disk (local.json) only changes on save.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+set stty_init "rows 40 cols 110"
+crun config
+must {config editor}
+sleep 1
+send $UP
+sleep 1
+send $ENTER
+sleep 1
+# Settings fields: editor(0) servicesDir(1)
+send $DOWN
+sleep 1
+# ⏎ opens the folder browser; `t` drops to typing (a not-yet-existing path)
+send $ENTER
+sleep 1
+send $TYPEPATH
+sleep 1
+send $CTRL_U
+send "/nope-dir"
+send $ENTER
+sleep 1
+send $ESC
+sleep 1
+send $DOWN
+sleep 1
+send $ENTER
+sleep 1
+must {not found}
+send $ESC
+send $ESC
+must {Unsaved changes}
+send $DISCARD
+want_exit 0
+local_hasnt {/nope-dir}

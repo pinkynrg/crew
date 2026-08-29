@@ -1,0 +1,7 @@
+# piped crew graph prints the ASCII graph straight out (no pager).
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun graph
+must {web}
+must {worker}
+quit_and_exit "\033" 0

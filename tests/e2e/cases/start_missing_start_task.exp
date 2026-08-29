@@ -1,0 +1,8 @@
+# every selected service lacks a start task -> clear one-line error after the picker.
+# fixture: no-start-task
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {no service in target can run task 'start'}
+want_exit 1

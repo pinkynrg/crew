@@ -1,0 +1,16 @@
+# the pager's `f` filter: esc reverts to the pre-open node set.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun graph
+must {web}
+sleep 1
+send $FILTER
+must {Show nodes}
+sleep 1
+send $SPACE
+must {2/3}
+sleep 1
+send $ESC
+must {3/3 shown}
+send $ESC
+want_exit 0

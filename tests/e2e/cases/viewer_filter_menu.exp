@@ -1,0 +1,16 @@
+# the log viewer's f menu (full-screen service multiselect).
+# fixture: viewer-stream
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {gamma line}
+send $FILTER
+must {Show logs for}
+sleep 0.4
+snap "viewer-filter-menu"
+snapend
+send $ENTER
+sleep 0.5
+send $ESC
+want_done

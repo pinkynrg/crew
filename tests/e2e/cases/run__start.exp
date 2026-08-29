@@ -1,9 +1,0 @@
-source tests/e2e/lib.exp
-crun start env=x
-must {enter run}
-send "\r"
-must {A-started}
-must {B-started}
-sleep 1
-send "\033"
-want_done

@@ -1,0 +1,42 @@
+# the `when local` column: picking a peer turns a bare override into whenLocal[peer].
+# fixture: overrides-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $ENTER
+sleep 1
+send [string repeat $DOWN 10]
+sleep 1
+send $ENTER
+must {Environment overrides}
+sleep 1
+# append a new override: DB_URL = localhost:5432, only when 'worker' is local
+send [string repeat $DOWN 2]
+sleep 1
+send $ENTER
+send "DB_URL"
+send $ENTER
+sleep 1
+send $RIGHT
+send $ENTER
+send "localhost:5432"
+send $ENTER
+sleep 1
+# to the when-local column, open the peer picker, choose 'worker'
+send $RIGHT
+send $ENTER
+must {when local}
+sleep 1
+send $DOWN
+send $ENTER
+sleep 1
+send $ESC
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {"DB_URL": "localhost:5432"}
+config_has {"QUEUE"}

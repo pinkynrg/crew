@@ -1,0 +1,13 @@
+# the graph selector: two unconnected services, both preselected, badge visible.
+# fixture: run
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+sleep 0.5
+snap "selector-initial"
+send $SPACE
+sleep 0.5
+snap "selector-a-toggled-off"
+snapend
+send $ESC
+want_done

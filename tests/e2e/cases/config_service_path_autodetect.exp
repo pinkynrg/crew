@@ -1,0 +1,27 @@
+# semi-auto add: `n` + picking a folder runs detectService and prefills the empty fields
+# (name/type/start from package.json + vite script); saving persists the detected service.
+# fixture: autodetect
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $NEW
+must {New service}
+sleep 1
+send $DOWN
+sleep 1
+send $ENTER
+must {pick a folder}
+sleep 1
+send $ENTER
+sleep 1
+must {auto-filled}
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {"webby"}
+config_has {"frontend"}
+config_has {"vite --port 5173"}

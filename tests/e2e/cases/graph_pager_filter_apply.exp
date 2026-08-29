@@ -1,0 +1,16 @@
+# the pager's `f` filter: toggling a node updates the live graph + count; enter persists.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun graph
+must {web}
+sleep 1
+send $FILTER
+must {Show nodes}
+sleep 1
+send $SPACE
+sleep 1
+send $ENTER
+sleep 1
+must {2/3}
+send $ESC
+want_exit 0

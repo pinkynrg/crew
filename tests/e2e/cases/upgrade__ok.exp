@@ -1,9 +1,0 @@
-# `crew upgrade` with a newer version available: resolves it, installs, verifies the global tree.
-source tests/e2e/lib.exp
-set env(PATH) "$env(TMP)/bin:$env(PATH)"
-set env(CREW_TEST_LATEST) "99.9.9"
-crun upgrade
-must {upgrading}
-must {upgraded}
-must {99.9.9}
-want_exit 0

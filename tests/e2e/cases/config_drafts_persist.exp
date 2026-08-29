@@ -1,0 +1,33 @@
+# Edit project A's field, navigate to another item and back — the unsaved edit must persist
+# (held in the in-memory drafts), not roll back. Then save-all on exit writes it.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $ENTER
+sleep 1
+# start is field #4 (index 3): name path type start
+send [string repeat $DOWN 3]
+sleep 1
+send $ENTER
+send "Z"
+send $ENTER
+sleep 1
+# back to the list, move to 'web', then back up to 'api'
+send $LEFT
+sleep 1
+send $DOWN
+sleep 1
+send $UP
+sleep 1
+# re-enter api — the unsaved "make runZ" must still be there
+send $RIGHT
+sleep 1
+must {make runZ}
+send $ESC
+send $ESC
+must {Unsaved changes}
+send $SAVE
+want_exit 0
+config_has {"make runZ"}

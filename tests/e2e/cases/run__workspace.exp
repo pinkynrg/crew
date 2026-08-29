@@ -1,8 +1,0 @@
-source tests/e2e/lib.exp
-set env(PATH) "$env(TMP)/bin:$env(PATH)"
-crun workspace
-must {enter run}
-send "\r"
-# the workspace title is the short auto-label (services a,b -> "a+b"), not a long joined name
-must {STUB-CODE.*a\+b\.code-workspace}
-want_exit 0

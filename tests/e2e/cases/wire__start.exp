@@ -1,9 +1,0 @@
-source tests/e2e/lib.exp
-crun start env=qa
-must {enter run}
-send "\r"
-must {web-up}
-must {api-up}
-sleep 1
-send "\033"
-want_done

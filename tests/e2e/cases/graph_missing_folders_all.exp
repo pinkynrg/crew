@@ -1,0 +1,7 @@
+# missing-folder gate, ALL missing: points at servicesDir, friendly empty state; a VIEW exits 0.
+# fixture: missing-all
+source tests/e2e/utils/lib.exp
+crun graph
+must {check your services dir}
+must {Nothing to show here}
+want_exit 0

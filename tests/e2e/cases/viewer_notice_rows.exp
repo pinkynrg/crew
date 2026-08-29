@@ -1,0 +1,13 @@
+# pre-run warnings render INSIDE the viewer as notice rows (no main-screen scrollback spirit).
+# fixture: long-output
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+# Pre-run warnings (unused arg / missing env file) render INSIDE the viewer as notice rows,
+# NOT on the main screen — so quitting leaves no scrollback "spirit" of the run.
+must {anyway}
+must {tick}
+sleep 1
+send $ESC
+want_done

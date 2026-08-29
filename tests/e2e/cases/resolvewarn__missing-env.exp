@@ -1,6 +1,0 @@
-# resolving an env a service has no env file for: derived anyway, with the explicit warning.
-source tests/e2e/lib.exp
-crun resolve x
-must {no 'x' env file}
-must {running x anyway}
-want_exit 0

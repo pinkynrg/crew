@@ -1,0 +1,9 @@
+# missing-folder gate, MINORITY missing: direction-aware warning says to fix each path
+# (not the services dir); the graph still renders with the present services.
+# fixture: missing-minority
+source tests/e2e/utils/lib.exp
+crun graph
+must {fix each path}
+sleep 1
+send $ESC
+want_done

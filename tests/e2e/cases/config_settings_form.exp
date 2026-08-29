@@ -1,0 +1,13 @@
+# the Settings section shows the machine-local fields (editor + servicesDir).
+# fixture: settings-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $UP
+sleep 1
+must {Settings}
+must {editor}
+must {servicesDir}
+send $ESC
+want_exit 0

@@ -33,12 +33,14 @@ beyond `{placeholder}` substitution.
   single-file rule (see below).
 - `package.json` — `bin.crew`, `type:module`, `engines.node >=18`, zero deps (no build tooling).
   `files: ["bin/crew.js","bin/graph.js","README.md"]` (graph.js MUST stay listed or installs crash
-  on the import). `npm test` runs the snapshot suite.
+  on the import). `npm test` runs both suites.
 - `.github/workflows/publish.yml` — npm publish CI (push to main; auto-bump patch; OIDC trusted
   publishing, npm@11, `--provenance`; no NPM_TOKEN).
-- `tests/` — dev-only (NOT shipped): `graphs/*.mmd` sample graphs, `snapshots/*.txt` golden mono
-  renders, `snapshot.mjs` runner (`node tests/snapshot.mjs [-u] [name…]`); `e2e/` = portable
-  expect-driven CLI tests (`fixtures/`, `cases/*.exp`, `lib.exp`, `run.sh` — runs `$CREW` in a PTY).
+- `tests/` — dev-only (NOT shipped). `graph/` = renderer goldens (`run.mjs [-u] [name…]`,
+  `fixtures/*.mmd`, `snapshots/*.txt`); `e2e/` = portable expect-driven CLI tests incl. screen
+  snapshots (`run.sh [-u] [name…]`, `cases/` with each case's goldens in `<case>.snaps/` beside it,
+  `fixtures/`, `utils/`); `utils/keys.exp` = shared key constants; `tests/README.md` = layout +
+  conventions.
 - `README.md` — user-facing docs (behavior reference).
 
 ## Hard constraints (do not break)
@@ -368,42 +370,44 @@ beyond `{placeholder}` substitution.
 
 **New behavior ⇒ new test — always, unprompted.** Every new command/flag/config field/interactive
 affordance (a selector key, a picker, a footer state) SHIPS WITH a `tests/e2e` case in the same change,
-and a `tests/snapshots` golden if it alters a graph render. A feature without a test is not done — add a
-fixture under `tests/e2e/fixtures/<fx>/` + a `cases/<fx>__<scenario>.exp` that drives it in the PTY and
-asserts the observable result (not internals). Adding a config field also means updating
+and a `tests/graph/snapshots` golden if it alters a graph render. A feature without a test is not done —
+add a fixture under `tests/e2e/fixtures/<name>/` + a `cases/<group>_<scenario>.exp` that drives it in the
+PTY and asserts the observable result (not internals). Adding a config field also means updating
 `TOP_KEYS`/`SERVICE_KEYS`/`GUARD_KEYS` + `cmdCheck` + `pruneConfig`. Run the full suite (`npm test`) and
-keep it green before calling anything finished.
+keep it green before calling anything finished. `tests/README.md` is the full layout/convention reference.
 
-No unit-test framework. Three suites, all run by `npm test`:
-- `tests/snapshot.mjs` — the graph renderer (imports `bin/graph.js`; golden mono renders).
+No unit-test framework. TWO suites, both run by `npm test`:
+- `tests/graph/` — the ASCII graph renderer (`run.mjs` imports `bin/graph.js`; each `fixtures/*.mmd`
+  rendered mono and diffed against `snapshots/*.txt`; `-u [name…]` accepts; also writes the colour
+  `snapshots/gallery.html` on full runs).
 - `tests/e2e/` — **portable black-box E2E driven by `expect`** (a real PTY, so the interactive picker,
-  wizard, and log viewer are exercised as a user would). Every case runs the crew BINARY (`$CREW`,
+  config editor, and log viewer are exercised as a user would). Every case runs the crew BINARY (`$CREW`,
   default `node bin/crew.js`) — it imports NOTHING from the source, so a port to another language keeps
-  the whole suite: `CREW=./crew-rs sh tests/e2e/run.sh`. Layout: `run.sh` copies `fixtures/<fx>/` to a
-  tmp dir (sed `__DIR__`→tmp in `local.json`) and runs each `cases/<fx>__<scenario>.exp`; `lib.exp`
-  gives the helpers `crun`/`must`/`want_exit`/`want_done`/`config_has`/`local_has`. Covers check (+error/exit
-  codes), v1 migration (asserts the rewritten config), graph/resolve/list, dir (+ orphan warning)/config
-  (path + removed `edit`), the visual editor (`crew config`, scrolling to the Settings/Services/Guards
-  sections: create/update/delete/map-rows/pick panels), the retired-command errors
-  (`add`/`remove`/`guards`/`overrides`/`install`), and the runner: `crew start`
-  (picker → streamed viewer + teardown),
-  `workspace`/`claude` (via `code`/`claude` stubs on `PATH`), env wiring + guards. Interactive tips:
-  `spawn`-in-a-proc needs `global spawn_id`; the graph `pager`/picker/viewer are raw-mode alt-screen so
-  quit them (`esc`/Ctrl-C) or they hang; `crew start` ALWAYS streams, so a start case must drive the viewer
-  (assert its output, then `send "\033"` + `want_done` — the viewer holds open once every child exits);
-  `crew start` REQUIRES `env=<name>` (errors before the picker without it — pass `env=x`).
-  Coverage: `npm run test:cov` (c8 over `NODE_V8_COVERAGE`);
-  it's black-box so it works per-language (Go `-cover`+`GOCOVERDIR`, Python coverage.py) — same tests.
-- `tests/tui/` — **TUI screen goldens**: expect drives `$CREW` in a PTY (like e2e) but records the raw
-  output between explicit `snap` points; `render.mjs` (a ~100-line vendored ANSI→character-grid
+  the whole suite: `CREW=./crew-rs sh tests/e2e/run.sh`. Cases are named `group_subgroup_scenario.exp`
+  (full words — `check_` `config_` `graph_` `start_` `viewer_` `workspace_` …) and declare their fixture
+  in-file (`# fixture: <name>` above the `source` line); `run.sh` copies `fixtures/<name>/` to a fresh
+  short-rooted tmp dir (sed `__DIR__`→tmp in `local.json`) per attempt, with ONE retry on PTY flake.
+  `utils/lib.exp` gives `crun`/`must`/`want_exit`/`want_done`/`config_has`/`local_has` + the snapshot
+  hooks below; `tests/utils/keys.exp` (shared) defines every key constant — cases send the
+  footer-advertised keys (`$ENTER`, `$ESC`, real arrow `$UP`/`$DOWN`/`$LEFT`/`$RIGHT`, `$SAVE`,
+  `$FILTER`, …), never the app's undocumented vim aliases; typed text stays a literal string.
+  **Screen snapshots are part of e2e**: a case calls `snap "<label>"` at a capture point (and `snapend`
+  before quitting); after a passing drive, `utils/render.mjs` (a ~100-line vendored ANSI→character-grid
   interpreter: CUP/EL/ED/SGR-strip/alt-screen/scroll-region — the subset any sane implementation emits)
-  renders each segment to a SCREEN, diffed against `golden/<case>.txt`. Goldens are grids, not byte
-  streams — a port that paints the same screen passes whatever escapes it used. `-u` regenerates.
-  Determinism rules: fixed 100x30 PTY, tmp dirs under a SHORT root (`/tmp/crew-tui.XXXXXX` — long
-  macOS $TMPDIR paths display-clip to `…` before the `__TMP__` normalization can match), fixtures with
-  FIXED output (no timers/counters), and `snap` drains the PTY first (expect only reads while
-  expecting — an undrained buffer stalls the app on stdout backpressure and frames land in the wrong
-  segment). No tmux anywhere in the tests: expect is the PTY, render.mjs is the screen.
+  renders each recording and diffs it against the golden folder beside the case,
+  `cases/<case>.snaps/<n>-<label>.txt` — one snap = one golden FILE, the file IS the screenshot (open it
+  in an editor to see the TUI at that moment). Goldens are grids, not byte streams — a port that paints
+  the same screen passes whatever escapes it used. `-u` regenerates. Geometry is the shared lib default
+  (100x40 in `utils/lib.exp`, mirrored by run.sh's render fallback — keep them in sync); snapping cases
+  need FIXED fixture output (no timers/counters); `snap` drains
+  the PTY first (expect only reads while expecting — an undrained buffer stalls the app on stdout
+  backpressure and frames land in the wrong segment). No tmux anywhere: expect is the PTY, render.mjs is
+  the screen. Interactive tips: `spawn`-in-a-proc needs `global spawn_id`; the graph `pager`/picker/viewer
+  are raw-mode alt-screen so quit them (`$ESC`/Ctrl-C) or they hang; `crew start` ALWAYS streams, so a
+  start case must drive the viewer (assert its output, then `send $ESC` + `want_done` — the viewer holds
+  open once every child exits); `crew start` REQUIRES `env=<name>` (errors before the picker without it —
+  pass `env=x`). Coverage: `npm run test:cov` (c8 over `NODE_V8_COVERAGE`); it's black-box so it works
+  per-language (Go `-cover`+`GOCOVERDIR`, Python coverage.py) — same tests.
 
 Harness gotchas learned the hard way (apply to new e2e cases too): keystrokes sent back-to-back
 coalesce into one stdin chunk — the viewer's search input deliberately ignores multi-char chunks, so

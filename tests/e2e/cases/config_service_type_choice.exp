@@ -1,0 +1,24 @@
+# the `type` choice panel: single-select radio; picking persists the type.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+crun config
+must {api}
+sleep 1
+send $ENTER
+sleep 1
+send $DOWN
+send $DOWN
+sleep 1
+send $ENTER
+must {apply}
+sleep 1
+send $DOWN
+sleep 1
+send $ENTER
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {"type": "fullstack"}

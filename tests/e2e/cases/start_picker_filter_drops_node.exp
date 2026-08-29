@@ -1,0 +1,18 @@
+# the SELECTOR's `f` node filter: hiding a node drops it from the run set (count updates).
+# fixture: run
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+sleep 1
+send $FILTER
+must {Show nodes}
+sleep 1
+send $DOWN
+sleep 1
+send $SPACE
+sleep 1
+send $ENTER
+sleep 1
+must {1/2 sel}
+send $ESC
+want_done

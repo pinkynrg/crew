@@ -1,0 +1,6 @@
+# retired command: crew edit errors with a pointer to crew config.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun config edit
+must {config path}
+want_exit 1

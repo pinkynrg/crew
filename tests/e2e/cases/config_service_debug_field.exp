@@ -1,0 +1,21 @@
+# debug is a first-class optional field on a service (stored back as tasks.debug), like start.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+crun config
+must {api}
+sleep 1
+send $ENTER
+sleep 1
+# name(0) path(1) type(2) start(3) debug(4) -> 4 j's to the debug field
+send [string repeat $DOWN 4]
+sleep 1
+send $ENTER
+send "node --inspect app.js"
+send $ENTER
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {"debug": "node --inspect app.js"}

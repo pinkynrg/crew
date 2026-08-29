@@ -1,6 +1,0 @@
-source tests/e2e/lib.exp
-crun list
-must {web}
-must {frontend}
-must {api}
-want_exit 0

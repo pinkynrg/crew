@@ -1,0 +1,15 @@
+# a non-JSON response is rejected and the existing config is left untouched.
+# fixture: pull
+source tests/e2e/utils/lib.exp
+spawn -noecho node -e "const h=require('http'),f=require('fs'),p=require('path');const s=h.createServer((q,r)=>{try{r.end(f.readFileSync(p.join(process.env.TMP,q.url)))}catch{r.statusCode=404;r.end('nope')}});s.listen(0,()=>process.stdout.write('PORT '+s.address().port+String.fromCharCode(10)));setTimeout(()=>process.exit(0),30000).unref()"
+expect -re {PORT (\d+)} { set port $expect_out(1,string) }
+set srv $spawn_id
+crun pull "http://127.0.0.1:$port/bad.json"
+must {not valid JSON}
+want_exit 1
+config_has {old-svc}
+crun pull "http://127.0.0.1:$port/notcfg.json"
+must {missing "services"}
+want_exit 1
+config_has {old-svc}
+close -i $srv

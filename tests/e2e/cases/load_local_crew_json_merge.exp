@@ -1,0 +1,9 @@
+# a ./.crew.json in the CWD merges its services on top of the user config.
+# fixture: local-config
+source tests/e2e/utils/lib.exp
+global spawn_id
+spawn -noecho sh -c "cd $env(TMP)/work && $env(CREW) --config $env(CONFIG) list"
+must {a}
+must {b}
+must {.crew.json}
+want_exit 0

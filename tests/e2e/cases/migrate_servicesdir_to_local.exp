@@ -1,0 +1,8 @@
+# a legacy top-level servicesDir in config.json moves to local.json on load.
+# fixture: servicesdir-legacy
+source tests/e2e/utils/lib.exp
+crun list
+must {m}
+want_exit 0
+config_hasnt {servicesDir}
+local_has {/nonexistent-legacy-dir}

@@ -1,0 +1,10 @@
+# a failing guard blocks the run: its message shows as a live ✗ row in the viewer, nothing spawns.
+# fixture: guard-fail
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {GUARD-BLOCKED}
+sleep 1
+send $ESC
+want_done

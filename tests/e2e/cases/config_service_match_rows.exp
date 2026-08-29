@@ -1,0 +1,31 @@
+# the inline match box: env keys are FIXED (derived from env files); filling a host persists it.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+crun config
+must {api}
+sleep 1
+send $ENTER
+sleep 1
+# match is field #10 (index 9): name path type start debug env tasks guards local match
+send [string repeat $DOWN 9]
+sleep 1
+send $ENTER
+# keys are DERIVED from api's env files (pro, qa) — no + add, only fill a host value
+must {qa}
+# an empty host reads gray (none), like other empty fields
+must {(none)}
+sleep 1
+send $DOWN
+sleep 1
+send $ENTER
+send "qa-api.demo.dev"
+send $ENTER
+sleep 1
+send $ESC
+sleep 1
+send $SAVE
+must {saved}
+send $ESC
+send $ESC
+want_exit 0
+config_has {"qa": "qa-api.demo.dev"}

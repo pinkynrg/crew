@@ -1,0 +1,14 @@
+# esc is level-by-level: right pane -> back to the list (NOT quit); list -> quit.
+# fixture: service-form
+source tests/e2e/utils/lib.exp
+crun config
+must {config editor}
+sleep 1
+send $ENTER
+sleep 1
+must {s save}
+send $ESC
+sleep 1
+must {n new}
+send $ESC
+want_exit 0

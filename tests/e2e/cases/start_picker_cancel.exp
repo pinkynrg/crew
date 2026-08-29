@@ -1,0 +1,7 @@
+# esc in the picker cancels: nothing runs, 'nothing selected' path.
+# fixture: run
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ESC
+want_done

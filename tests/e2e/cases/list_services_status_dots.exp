@@ -1,0 +1,8 @@
+# crew list shows every service with its per-folder status dot.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun list
+must {web}
+must {frontend}
+must {api}
+want_exit 0

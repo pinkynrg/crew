@@ -1,0 +1,10 @@
+# crew claude: pick services, then launch Claude Code with each folder attached (--add-dir)
+# and a crew-owned session cwd. (The whole-stack no-picker version lives on the mcp branch.)
+# fixture: run
+source tests/e2e/utils/lib.exp
+set env(PATH) "$env(TMP)/bin:$env(PATH)"
+crun claude sess1
+must {enter run}
+send $ENTER
+must {STUB-CLAUDE}
+want_exit 0

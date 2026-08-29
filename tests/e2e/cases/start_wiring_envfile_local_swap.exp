@@ -1,0 +1,11 @@
+# wiring end-to-end: {envfile} is materialized with peer URLs swapped to local; the child sees the wired values.
+# fixture: wiring
+source tests/e2e/utils/lib.exp
+crun start env=qa
+must {enter run}
+send $ENTER
+must {web-up}
+must {api-up}
+sleep 1
+send $ESC
+want_done

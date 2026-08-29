@@ -1,7 +1,0 @@
-# every selected service lacks a start task -> clear one-line error after the picker.
-source tests/e2e/lib.exp
-crun start env=x
-must {enter run}
-send "\r"
-must {no service in target can run task 'start'}
-want_exit 1

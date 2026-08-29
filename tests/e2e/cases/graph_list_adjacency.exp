@@ -1,0 +1,9 @@
+# crew graph list prints the adjacency text (no TTY UI).
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun graph list
+must {web}
+must {api}
+must {worker}
+must {no crew-service edges}
+want_exit 0

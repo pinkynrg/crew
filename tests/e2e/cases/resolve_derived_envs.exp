@@ -1,0 +1,8 @@
+# crew resolve prints each service's derived env for the selection env.
+# fixture: stack
+source tests/e2e/utils/lib.exp
+crun resolve qa
+must {web}
+must {api}
+must {worker}
+want_exit 0
