@@ -1,0 +1,24 @@
+# the config editor's three form kinds, each as its own captioned screen:
+# Settings (machine-local editor + servicesDir), a fully-populated service (env/match/overrides
+# boxes, guards link, debug task), and a guard.
+source tests/tui/lib.exp
+crun config
+must {config editor}
+sleep 0.5
+send "k"
+sleep 0.5
+snap "Settings form (editor + servicesDir)"
+send "j"
+sleep 0.5
+snap "Service form · web (envs, match, both override layers)"
+send "j"
+sleep 0.5
+snap "Service form · api (guard linked, shared+local overrides)"
+send "j"
+sleep 0.5
+send "j"
+sleep 0.5
+snap "Guard form · vpn"
+snapend
+send "\033"
+want_done

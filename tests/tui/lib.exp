@@ -32,11 +32,13 @@ proc drain {} {
   set timeout $save
 }
 
-# capture point: everything since the previous snap becomes screen N; recording continues into N+1
-proc snap {} {
+# capture point: everything since the previous snap becomes screen N; recording continues into N+1.
+# The optional label is written beside the recording and becomes the screen's caption in the golden.
+proc snap {{label ""}} {
   global env snapN
   drain
   log_file
+  if {$label ne ""} { set f [open "$env(TMP)/cap.$snapN" w]; puts -nonewline $f $label; close $f }
   incr snapN
   log_file -noappend "$env(TMP)/raw.$snapN"
 }

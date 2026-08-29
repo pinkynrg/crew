@@ -1,0 +1,124 @@
+── screen 1 · Settings form (editor + servicesDir) ──
+ crew  ·  config editor
+ SETTINGS  1                    │ Settings · config
+ ▸ config                       │
+                                │    editor       vscode
+ SERVICES  2                    │    servicesDir  __TMP__/projects
+   web                          │
+   api                          │
+   + New service                │
+                                │
+ GUARDS  1                      │
+   vpn                          │
+   + New guard                  │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+ ↑↓ move · ⏎ open · n new · d delete · esc quit
+── screen 2 · Service form · web (envs, match, both override layers) ──
+ crew  ·  config editor
+ SETTINGS  1                    │ Service · web
+   config                       │
+                                │    name             web
+ SERVICES  2                    │    path             __TMP__/projects/web
+ ▸ web                          │    type             frontend
+   api                          │    start            vite --port 3000
+   + New service                │    debug            vite --port 3000 --debug
+                                │    env              .envs/{env}.env
+ GUARDS  1                      │    tasks (other)    (none)
+   vpn                          │    guards           (none)
+   + New guard                  │    local            http://localhost:3000
+                                │
+                                │ ┌─ Environment hosts ───────────────────────────────────────────┐
+                                │ │   x   = web.demo.dev                                          │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · shared ──────────────────────────────┐
+                                │ │ (none)                                                        │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · local ───────────────────────────────┐
+                                │ │ (none)                                                        │
+                                │ │                                                               │
+                                │ │                                                               │
+ ↑↓ move · ⏎ open · n new · d delete · esc quit
+── screen 3 · Service form · api (guard linked, shared+local overrides) ──
+ crew  ·  config editor
+ SETTINGS  1                    │ Service · api
+   config                       │
+                                │    name             api
+ SERVICES  2                    │    path             __TMP__/projects/api
+   web                          │    type             backend
+ ▸ api                          │    start            make run
+   + New service                │    debug            (optional)
+                                │    env              .envs/{env}.env
+ GUARDS  1                      │    tasks (other)    (none)
+   vpn                          │    guards           vpn
+   + New guard                  │    local            http://localhost:4000
+                                │
+                                │ ┌─ Environment hosts ───────────────────────────────────────────┐
+                                │ │   x   = api.demo.dev                                          │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · shared ──────────────────────────────┐
+                                │ │   QUEUE       = api-local  always                             │
+                                │ │   CORS_ORIGIN = http://localhost:3000  when web local         │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · local ───────────────────────────────┐
+                                │ │   DB_PASSWORD = hunter2  always                               │
+                                │ │                                                               │
+                                │ │                                                               │
+ ↑↓ move · ⏎ open · n new · d delete · esc quit
+── screen 4 · Guard form · vpn ──
+ crew  ·  config editor
+ SETTINGS  1                    │ Guard · vpn
+   config                       │
+                                │    name     vpn
+ SERVICES  2                    │    comment  VPN is connected
+   web                          │    command  true
+   api                          │    message  connect the VPN first
+   + New service                │
+                                │   used by  api
+ GUARDS  1                      │
+ ▸ vpn                          │
+   + New guard                  │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+ ↑↓ move · ⏎ open · n new · d delete · esc quit

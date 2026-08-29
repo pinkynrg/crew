@@ -23,7 +23,8 @@ for exp in tests/tui/cases/*.exp; do
   n=1
   while [ -f "$tmp/raw.$n" ]; do
     if [ ! -s "$tmp/raw.$n" ]; then n=$((n + 1)); continue; fi
-    printf '── screen %s ──\n' "$n" >> "$got"
+    cap=""; [ -f "$tmp/cap.$n" ] && cap=" · $(cat "$tmp/cap.$n")"
+    printf '── screen %s%s ──\n' "$n" "$cap" >> "$got"
     node tests/tui/render.mjs 100x30 < "$tmp/raw.$n" | sed "s|$tmp|__TMP__|g" >> "$got"
     n=$((n + 1))
   done
