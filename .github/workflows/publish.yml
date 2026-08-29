@@ -84,7 +84,12 @@ jobs:
           else
             git add README.md
             git commit -m "ci: coverage badge ${PCT}% [skip ci]"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
+            # main may have moved while we ran (anyone pushing during the job) — rebase and retry
+            for i in 1 2 3; do
+              git push origin "HEAD:${GITHUB_REF_NAME}" && break
+              [ "$i" = 3 ] && exit 1
+              git pull --rebase origin "${GITHUB_REF_NAME}"
+            done
           fi
       - name: Resolve version (publish as-is, or auto-bump patch)
         run: |
@@ -94,8 +99,13 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
             echo "$NAME@$VERSION already on npm — bumping patch."
+            git pull --rebase origin "${GITHUB_REF_NAME}"   # pick up the badge commit / anything newer
             npm version patch -m "ci: release v%s [skip ci]"
-            git push origin "HEAD:${GITHUB_REF_NAME}" --follow-tags
+            for i in 1 2 3; do
+              git push origin "HEAD:${GITHUB_REF_NAME}" --follow-tags && break
+              [ "$i" = 3 ] && exit 1
+              git pull --rebase origin "${GITHUB_REF_NAME}"
+            done
           else
             echo "$NAME@$VERSION not on npm — publishing as-is."
             git tag "v$VERSION" || true
