@@ -75,9 +75,9 @@ func cmdGraphDraw(flags *Flags, cfg *OM) {
 		reason := pagerView(draw(shown, showRef), pagerMeta{
 			shown: len(shown), total: len(ge.nodes), hasRef: hasRef, showRef: showRef,
 			filter: &pagerFilter{
-				nodes: ge.nodes,
-				shown: shownKeys(shown, ge.nodes),
-				paint: paintFn,
+				nodes:  ge.nodes,
+				shown:  shownKeys(shown, ge.nodes),
+				paint:  paintFn,
 				render: func(s map[string]bool) string { return draw(s, showRef) },
 				onApply: func(list []string) {
 					shown = map[string]bool{}

@@ -410,32 +410,32 @@ func signalName(sig syscall.Signal) string {
 // ---- the interactive log viewer ----
 
 type viewerState struct {
-	mu          *sync.Mutex
-	names       []string
-	guardProcs  map[string]*fanProc
-	history     []histRow
-	pending     map[*fanProc]string
-	shown       map[string]bool
-	wrap        bool
-	scroll      int
-	active      bool
-	dirty       bool
-	searching   bool
-	query       string
-	copyMsg     string
-	copyTimer   *time.Timer
-	fillW       int
-	logHistory  int
-	maxLine     int
-	saveHidden  func([]string)
-	saveWrap    func(bool)
-	requestStop func()
+	mu           *sync.Mutex
+	names        []string
+	guardProcs   map[string]*fanProc
+	history      []histRow
+	pending      map[*fanProc]string
+	shown        map[string]bool
+	wrap         bool
+	scroll       int
+	active       bool
+	dirty        bool
+	searching    bool
+	query        string
+	copyMsg      string
+	copyTimer    *time.Timer
+	fillW        int
+	logHistory   int
+	maxLine      int
+	saveHidden   func([]string)
+	saveWrap     func(bool)
+	requestStop  func()
 	isAllStopped func() bool
-	menuOpenRef *bool
-	raw         *rawInput
-	ticker      *time.Ticker
-	tickStop    chan struct{}
-	menu        *viewerMenu
+	menuOpenRef  *bool
+	raw          *rawInput
+	ticker       *time.Ticker
+	tickStop     chan struct{}
+	menu         *viewerMenu
 }
 
 type viewerMenu struct {

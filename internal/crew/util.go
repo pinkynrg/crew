@@ -167,10 +167,10 @@ func fetchUrl(u string) (string, error) {
 
 // exit code aggregation: first non-zero numeric wins; else 130 if anything was signalled; else 1.
 type exitEvent struct {
-	name     string
-	index    int
-	code     int    // valid when signal == ""
-	signal   string // signal name when killed
+	name   string
+	index  int
+	code   int    // valid when signal == ""
+	signal string // signal name when killed
 }
 
 func exitCodeFromEvents(events []exitEvent) int {

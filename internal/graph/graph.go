@@ -81,10 +81,10 @@ func lmed(a []float64) float64 {
 // Place is a node's box geometry in the rendered text — enough for an interactive caller to
 // move a cursor between nodes and scroll a box into view.
 type Place struct {
-	Layer  int
-	CX     float64 // centre column
-	X0, W  int     // left edge + width
-	Y0, H  int     // top row + height (boxes are always 3 rows)
+	Layer int
+	CX    float64 // centre column
+	X0, W int     // left edge + width
+	Y0, H int     // top row + height (boxes are always 3 rows)
 }
 
 // Layout is the interactive-caller view of a render: real nodes per layer left-to-right, and

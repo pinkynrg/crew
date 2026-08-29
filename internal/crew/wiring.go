@@ -72,7 +72,7 @@ func tokenMatchLen(host, path, tok string) int {
 
 var originRE = regexp.MustCompile(`(?i)^https?://[^/?#\s]+`)
 
-// The scheme://host[:port] prefix of a URL (drops path/query/fragment). '' if not a URL.
+// The scheme://host[:port] prefix of a URL (drops path/query/fragment). ” if not a URL.
 func originOf(u string) string { return originRE.FindString(u) }
 
 type wirePeer struct {

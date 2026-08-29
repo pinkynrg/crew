@@ -1268,7 +1268,9 @@ func configForm(flags *Flags, startSection string) {
 					if active {
 						bc, bce = "", ""
 					}
-					bl := func(content string) string { return bc + "│" + bce + " " + padP(content, iw) + " " + bc + "│" + bce }
+					bl := func(content string) string {
+						return bc + "│" + bce + " " + padP(content, iw) + " " + bc + "│" + bce
+					}
 					tt := " " + plainTitle
 					if titleFocused {
 						tt += "  ⏎ edit"

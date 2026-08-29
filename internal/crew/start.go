@@ -14,8 +14,8 @@ import (
 
 func cmdStart(flags *Flags, rest []string) {
 	m := loadMerged(flags)
-	warnMissing(m.cfg)          // heads-up about broken paths...
-	cfg := presentCfg(m.cfg)    // ...then run on only the services whose folder exists
+	warnMissing(m.cfg)       // heads-up about broken paths...
+	cfg := presentCfg(m.cfg) // ...then run on only the services whose folder exists
 	if cfg.GetOM("services").Len() == 0 {
 		emptyServicesState("Nothing to start — no service folders found.")
 		osExit(1)
