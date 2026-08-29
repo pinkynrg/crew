@@ -883,7 +883,13 @@ func (v *viewerState) menuKey(key string) {
 
 func (v *viewerState) handleKey(s string) {
 	if v.menu != nil {
-		v.menuKey(s)
+		// The menu takes one key at a time — a chunk can bundle several (space+Enter as " \r").
+		for _, k := range splitKeys(s) {
+			if v.menu == nil {
+				break
+			}
+			v.menuKey(k)
+		}
 		return
 	}
 	// Search-input mode: type a substring; Enter applies, Esc clears. Ctrl-C still stops.

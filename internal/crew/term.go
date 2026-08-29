@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -44,10 +45,18 @@ var stdinRoute struct {
 }
 
 func startRawInput(onChunk func(string)) *rawInput {
-	old, err := term.MakeRaw(int(os.Stdin.Fd()))
+	fd := int(os.Stdin.Fd())
+	old, err := term.MakeRaw(fd)
 	r := &rawInput{}
 	if err == nil {
 		r.oldState = old
+		// MakeRaw also clears OPOST on output, which stops "\n" translating to CRLF and makes
+		// bare-newline writes stair-step. Raw INPUT is what the views need — restore output
+		// post-processing so newline behavior stays conventional.
+		if t, terr := unix.IoctlGetTermios(fd, ioctlReadTermios); terr == nil {
+			t.Oflag |= unix.OPOST | unix.ONLCR
+			_ = unix.IoctlSetTermios(fd, ioctlWriteTermios, t)
+		}
 	}
 	stdinRoute.mu.Lock()
 	stdinRoute.handler = onChunk
