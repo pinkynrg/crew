@@ -409,6 +409,10 @@ Harness gotchas learned the hard way (apply to new e2e cases too): keystrokes se
 coalesce into one stdin chunk — the viewer's search input deliberately ignores multi-char chunks, so
 type through per-key `must` assertions (which also drain the PTY; long sleeps between sends can stall
 the app on a full PTY buffer). Tcl regex has no `\S` inside brackets — its `.` already spans newlines.
+`must` patterns must be ASCII-ONLY: expect decodes the stream in chunks, and a multibyte character
+(`←`, `·`, `↑`, `⏎`) split across a read boundary decodes as mojibake that never matches — a
+load-dependent, unreproducible-locally timeout (the root of the last CI flake class). Assert an ASCII
+token from the same output, or bridge the char with a regex (`overrides .{0,4}local`).
 
 Audit notes (for a port): `crew start` requires a full TTY for the picker, so the piped/non-interactive
 branches in cmdStart/runGuards/render are UNREACHABLE from the CLI today (defensive code, not spec);

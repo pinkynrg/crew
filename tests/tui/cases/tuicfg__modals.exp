@@ -10,7 +10,7 @@ snap "delete-modal"
 send "\033"
 sleep 0.3
 send "\r"
-must {esc ← list}
+must {s save}
 send "\r"
 sleep 0.3
 send "x"

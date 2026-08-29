@@ -5,7 +5,7 @@ must {config editor}
 sleep 1
 send "l"
 sleep 1
-must {esc ← list}
+must {s save}
 send "\033"
 sleep 1
 must {n new}

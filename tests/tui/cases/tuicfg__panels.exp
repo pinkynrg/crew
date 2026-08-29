@@ -6,7 +6,7 @@ crun config
 must {config editor}
 sleep 0.5
 send "\r"
-must {esc ← list}
+must {s save}
 send "j"
 sleep 0.3
 send "\r"

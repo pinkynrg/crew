@@ -31,7 +31,7 @@ sleep 1
 # --- LOCAL block (field #11): one more j ---
 send "j"
 sleep 1
-must {overrides · local}
+must {overrides .{0,4}local}
 send "\r"
 sleep 1
 # local block starts empty -> row 0 IS the "+ add" row

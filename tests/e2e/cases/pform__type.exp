@@ -8,7 +8,7 @@ send "j"
 send "j"
 sleep 1
 send "\r"
-must {↑↓ pick}
+must {apply}
 sleep 1
 send "j"
 sleep 1
