@@ -36,8 +36,9 @@ beyond `{placeholder}` substitution.
   on the import). `npm test` runs both suites.
 - `.github/workflows/publish.yml` — npm publish CI (push to main; auto-bump patch; OIDC trusted
   publishing, npm@11, `--provenance`; no NPM_TOKEN).
-- `tests/` — dev-only (NOT shipped). `graph/` = renderer goldens (`run.mjs [-u] [name…]`,
-  `fixtures/*.mmd`, `snapshots/*.txt`); `e2e/` = portable expect-driven CLI tests incl. screen
+- `tests/` — dev-only (NOT shipped). `graph/` = renderer goldens (`run.mjs [-u] [name…]`; `cases/`
+  holds `<name>.mmd` + optional `.opts.json` + its `.snap.txt` golden side by side); `e2e/` = portable
+  expect-driven CLI tests incl. screen
   snapshots (`run.sh [-u] [name…]`, `cases/` with each case's goldens in `<case>.snaps/` beside it,
   `fixtures/`, `utils/`); `utils/keys.exp` = shared key constants; `tests/README.md` = layout +
   conventions.
@@ -370,16 +371,16 @@ beyond `{placeholder}` substitution.
 
 **New behavior ⇒ new test — always, unprompted.** Every new command/flag/config field/interactive
 affordance (a selector key, a picker, a footer state) SHIPS WITH a `tests/e2e` case in the same change,
-and a `tests/graph/snapshots` golden if it alters a graph render. A feature without a test is not done —
+and a `tests/graph/cases` golden if it alters a graph render. A feature without a test is not done —
 add a fixture under `tests/e2e/fixtures/<name>/` + a `cases/<group>_<scenario>.exp` that drives it in the
 PTY and asserts the observable result (not internals). Adding a config field also means updating
 `TOP_KEYS`/`SERVICE_KEYS`/`GUARD_KEYS` + `cmdCheck` + `pruneConfig`. Run the full suite (`npm test`) and
 keep it green before calling anything finished. `tests/README.md` is the full layout/convention reference.
 
 No unit-test framework. TWO suites, both run by `npm test`:
-- `tests/graph/` — the ASCII graph renderer (`run.mjs` imports `bin/graph.js`; each `fixtures/*.mmd`
-  rendered mono and diffed against `snapshots/*.txt`; `-u [name…]` accepts; also writes the colour
-  `snapshots/gallery.html` on full runs).
+- `tests/graph/` — the ASCII graph renderer (`run.mjs` imports `bin/graph.js`; each `cases/<name>.mmd`
+  rendered mono — with `<name>.opts.json` render options when present — and diffed against the adjacent
+  `<name>.snap.txt`; `-u [name…]` accepts; also writes the colour `gallery.html` on full runs).
 - `tests/e2e/` — **portable black-box E2E driven by `expect`** (a real PTY, so the interactive picker,
   config editor, and log viewer are exercised as a user would). Every case runs the crew BINARY (`$CREW`,
   default `node bin/crew.js`) — it imports NOTHING from the source, so a port to another language keeps

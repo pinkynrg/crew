@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Snapshot tests for the ASCII graph renderer. Each tests/graph/fixtures/<name>.mmd is rendered in
-// MONO (no color) and compared to tests/graph/snapshots/<name>.txt.
+// Snapshot tests for the ASCII graph renderer. Everything about one case sits together in cases/:
+// <name>.mmd (the graph) [+ <name>.opts.json render options — cursor/sublabels, i.e. the selector
+// rendering mode] + <name>.snap.txt (the golden mono render, BESIDE its case).
 //
 //   node tests/graph/run.mjs             verify all — exit 1 on any diff / missing snapshot
 //   node tests/graph/run.mjs diamond fan verify only names containing these substrings
@@ -10,16 +11,14 @@
 // The .txt goldens are the assertion (mono, so they stay ANSI-free and diff cleanly). But colour is
 // load-bearing for a HUMAN eyeballing a graph (each edge is drawn in its SOURCE's colour) — a mono
 // snapshot hides which line is which, so mistakes slip through. So on every FULL run we also (re)write
-// tests/graph/snapshots/gallery.html: every fixture rendered in colour, open it in a browser to check.
+// tests/graph/gallery.html: every case rendered in colour, open it in a browser to check.
 import { renderAsciiGraph, parseMermaid } from '../../bin/graph.js';
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const gdir = join(root, 'tests', 'graph', 'fixtures');
-const sdir = join(root, 'tests', 'graph', 'snapshots');
-if (!existsSync(sdir)) mkdirSync(sdir, { recursive: true });
+const gdir = join(root, 'tests', 'graph', 'cases');
 
 const argv = process.argv.slice(2);
 const update = argv.includes('-u') || argv.includes('--update');
@@ -65,7 +64,7 @@ ${items.map((it) => `<section><h2>${escHtml(it.name)}</h2><pre>${it.html}</pre><
 
 const files = readdirSync(gdir).filter((f) => f.endsWith('.mmd'))
   .filter((f) => !filters.length || filters.some((x) => f.includes(x))).sort();
-if (!files.length) { console.error('no matching .mmd in tests/graph/fixtures'); process.exit(2); }
+if (!files.length) { console.error('no matching .mmd in tests/graph/cases'); process.exit(2); }
 
 let pass = 0; const fails = []; const gallery = []; const overlapFails = [];
 for (const f of files) {
@@ -78,7 +77,7 @@ for (const f of files) {
   const ovl = renderAsciiGraph(nodes, edges, { ...optsFor(name), overlaps: true });
   if (ovl.length) overlapFails.push({ name, ovl });
   gallery.push({ name, html: ansi2html(renderAsciiGraph(nodes, edges, colorOptsFor(name, nodes))) });
-  const snap = join(sdir, name + '.txt');
+  const snap = join(gdir, name + '.snap.txt');
   if (update) { writeFileSync(snap, out + '\n'); continue; }
   const exp = existsSync(snap) ? readFileSync(snap, 'utf8').replace(/\n$/, '') : null;
   if (exp === out) pass++;
@@ -87,7 +86,7 @@ for (const f of files) {
 
 // (re)write the colour gallery from the CURRENT render — only on a full run, so a filtered run can't
 // clobber it with a partial set. It's a human-viewable aid, regenerated deterministically like the goldens.
-if (!filters.length) writeFileSync(join(sdir, 'gallery.html'), galleryHtml(gallery));
+if (!filters.length) writeFileSync(join(root, 'tests', 'graph', 'gallery.html'), galleryHtml(gallery));
 
 if (update) { console.log(`wrote ${files.length} snapshot(s)` + (filters.length ? '' : ' + gallery.html')); process.exit(0); }
 
@@ -105,5 +104,5 @@ for (const { name, out, exp } of fails) {
 for (const { name, ovl } of overlapFails) console.log(`\x1b[1;31mOVERLAP\x1b[0m ${name}: ${ovl.length} cell(s) — ${ovl.join(', ')}  \x1b[2m(two edges drawing a collinear line over the same cells)\x1b[0m`);
 console.log(`\n${pass}/${files.length} passed` + (fails.length ? `, \x1b[31m${fails.length} failed\x1b[0m — review, then \`node tests/graph/run.mjs -u\` to accept` : ' \x1b[32m✓\x1b[0m')
   + (overlapFails.length ? `, \x1b[31m${overlapFails.length} with overlaps\x1b[0m` : '')
-  + (filters.length ? '' : `  \x1b[2m· colours: open tests/graph/snapshots/gallery.html\x1b[0m`));
+  + (filters.length ? '' : `  \x1b[2m· colours: open tests/graph/gallery.html\x1b[0m`));
 process.exit(fails.length || overlapFails.length ? 1 : 0);

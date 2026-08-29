@@ -7,9 +7,11 @@ portability contract: a port to another language must pass them unchanged (`CREW
 tests/
   utils/keys.exp        key constants shared by every expect case — the "what key does what" reference
   graph/                ASCII graph renderer goldens (tests bin/graph.js directly — no PTY, no CLI)
-    run.mjs             runner: render each fixture in mono, diff against the golden (-u accepts)
-    fixtures/*.mmd      mermaid-subset sample graphs (+ optional <name>.opts.json render options)
-    snapshots/*.txt     golden mono renders (+ gallery.html: every fixture in colour, regenerated on full runs)
+    run.mjs             runner: render each case in mono, diff against the golden (-u accepts)
+    gallery.html        every case rendered in colour (regenerated on full runs)
+    cases/              everything about one case together: <name>.mmd (the graph),
+                        <name>.opts.json (optional render options: cursor/sublabels = the start
+                        selector's rendering mode), <name>.snap.txt (the golden, beside its case)
   e2e/                  black-box CLI tests driven by expect in a real PTY
     run.sh              runner: fresh fixture copy per case, one retry on flake, golden diffs
                         (`sh tests/e2e/run.sh [-u] [name…]` — names filter cases by substring)
