@@ -1,0 +1,1 @@
+{ "version": 2, "services": { "s": { "path": "s", "tasks": { "start": "sh hold.sh" } } } }

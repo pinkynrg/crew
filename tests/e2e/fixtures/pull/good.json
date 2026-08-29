@@ -1,0 +1,1 @@
+{ "version": 2, "services": { "pulled-svc": { "path": "p", "tasks": { "start": "echo pulled" } } } }

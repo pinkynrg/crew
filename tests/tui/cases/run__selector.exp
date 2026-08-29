@@ -1,0 +1,12 @@
+# the graph selector: two unconnected services, both preselected, badge visible.
+source tests/tui/lib.exp
+crun start env=x
+must {enter run}
+sleep 0.5
+snap
+send " "
+sleep 0.5
+snap
+snapend
+send "\033"
+want_done

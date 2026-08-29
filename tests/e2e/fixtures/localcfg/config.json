@@ -1,0 +1,1 @@
+{ "version": 2, "services": { "a": { "path": "a", "tasks": { "start": "echo A" } } } }

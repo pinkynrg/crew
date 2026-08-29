@@ -1,0 +1,3 @@
+{ "version": 2,
+  "overrides": { "a": { "whenLocal": "not-an-object" } },
+  "services": { "a": { "path": "a", "env": ".envs/{env}.env", "tasks": { "start": "echo {envfile}" } } } }

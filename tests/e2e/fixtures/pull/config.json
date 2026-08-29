@@ -1,0 +1,1 @@
+{ "version": 2, "services": { "old-svc": { "path": "old", "tasks": { "start": "echo old" } } } }

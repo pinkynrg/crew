@@ -1,0 +1,63 @@
+# Shared helpers for the TUI golden suite: drive $CREW in a real PTY (like tests/e2e) but RECORD the
+# raw output up to explicit `snap` points; the runner renders each recording into a character grid
+# (tests/tui/render.mjs) and diffs it against a golden screen. Goldens are SCREENS, not byte streams —
+# any implementation that paints the same grid passes.
+set timeout 60
+# fixed geometry: goldens are rendered at exactly this size
+set stty_init "rows 30 cols 100"
+set CREWBIN [split $env(CREW)]
+set snapN 0
+
+# spawn crew with output recorded into $TMP/raw.1 (until the first `snap`)
+proc crun {args} {
+  global CREWBIN env spawn_id snapN
+  set snapN 1
+  log_file -noappend "$env(TMP)/raw.1"
+  eval spawn -noecho $CREWBIN --config $env(CONFIG) $args
+}
+
+# read whatever the app has emitted so far — expect only consumes the PTY while expecting, so a
+# capture point must drain explicitly or the latest frames land in the NEXT segment.
+proc drain {} {
+  global spawn_id timeout
+  set save $timeout
+  set timeout 1
+  expect {
+    -re {.+} { exp_continue }
+    timeout {}
+  }
+  set timeout $save
+}
+
+# capture point: everything since the previous snap becomes screen N; recording continues into N+1
+proc snap {} {
+  global env snapN
+  drain
+  log_file
+  incr snapN
+  log_file -noappend "$env(TMP)/raw.$snapN"
+}
+
+# final capture point: stop recording entirely (the app's quit/teardown bytes are NOT part of any
+# golden — leaving the alt screen would render as an empty grid)
+proc snapend {} {
+  log_file
+}
+
+proc must {pat} {
+  global spawn_id
+  expect {
+    -re $pat {}
+    timeout { puts "\n!! TIMEOUT waiting for: $pat"; exit 3 }
+    eof     { puts "\n!! EOF before: $pat"; exit 3 }
+  }
+}
+
+proc want_done {} {
+  global spawn_id
+  expect {
+    eof {}
+    timeout { puts "\n!! no eof (hung?)"; catch {exec kill -9 [exp_pid]}; exit 6 }
+  }
+  catch wait
+}

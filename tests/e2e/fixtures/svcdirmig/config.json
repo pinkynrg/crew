@@ -1,0 +1,1 @@
+{ "version": 2, "servicesDir": "/nonexistent-legacy-dir", "services": { "m": { "path": "m", "tasks": { "start": "echo M" } } } }

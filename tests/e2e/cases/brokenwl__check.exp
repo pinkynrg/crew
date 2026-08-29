@@ -1,0 +1,4 @@
+source tests/e2e/lib.exp
+crun check
+must {whenLocal must be an object}
+want_exit 1

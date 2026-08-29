@@ -1,0 +1,8 @@
+#!/bin/sh
+# npm stub for crew upgrade e2e. Behavior driven by CREW_TEST_LATEST.
+case "$1" in
+  view) echo "${CREW_TEST_LATEST:?}" ;;
+  install) exit 0 ;;
+  ls) printf '{"dependencies":{"@pinkynrg/crew":{"version":"%s"}}}\n' "${CREW_TEST_LATEST:?}" ;;
+  *) exit 1 ;;
+esac

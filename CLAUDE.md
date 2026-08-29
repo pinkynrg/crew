@@ -374,7 +374,7 @@ asserts the observable result (not internals). Adding a config field also means 
 `TOP_KEYS`/`SERVICE_KEYS`/`GUARD_KEYS` + `cmdCheck` + `pruneConfig`. Run the full suite (`npm test`) and
 keep it green before calling anything finished.
 
-No unit-test framework. Two suites, both run by `npm test`:
+No unit-test framework. Three suites, all run by `npm test`:
 - `tests/snapshot.mjs` — the graph renderer (imports `bin/graph.js`; golden mono renders).
 - `tests/e2e/` — **portable black-box E2E driven by `expect`** (a real PTY, so the interactive picker,
   wizard, and log viewer are exercised as a user would). Every case runs the crew BINARY (`$CREW`,
@@ -394,6 +394,28 @@ No unit-test framework. Two suites, both run by `npm test`:
   `crew start` REQUIRES `env=<name>` (errors before the picker without it — pass `env=x`).
   Coverage: `npm run test:cov` (c8 over `NODE_V8_COVERAGE`);
   it's black-box so it works per-language (Go `-cover`+`GOCOVERDIR`, Python coverage.py) — same tests.
+- `tests/tui/` — **TUI screen goldens**: expect drives `$CREW` in a PTY (like e2e) but records the raw
+  output between explicit `snap` points; `render.mjs` (a ~100-line vendored ANSI→character-grid
+  interpreter: CUP/EL/ED/SGR-strip/alt-screen/scroll-region — the subset any sane implementation emits)
+  renders each segment to a SCREEN, diffed against `golden/<case>.txt`. Goldens are grids, not byte
+  streams — a port that paints the same screen passes whatever escapes it used. `-u` regenerates.
+  Determinism rules: fixed 100x30 PTY, tmp dirs under a SHORT root (`/tmp/crew-tui.XXXXXX` — long
+  macOS $TMPDIR paths display-clip to `…` before the `__TMP__` normalization can match), fixtures with
+  FIXED output (no timers/counters), and `snap` drains the PTY first (expect only reads while
+  expecting — an undrained buffer stalls the app on stdout backpressure and frames land in the wrong
+  segment). No tmux anywhere in the tests: expect is the PTY, render.mjs is the screen.
+
+Harness gotchas learned the hard way (apply to new e2e cases too): keystrokes sent back-to-back
+coalesce into one stdin chunk — the viewer's search input deliberately ignores multi-char chunks, so
+type through per-key `must` assertions (which also drain the PTY; long sleeps between sends can stall
+the app on a full PTY buffer). Tcl regex has no `\S` inside brackets — its `.` already spans newlines.
+
+Audit notes (for a port): `crew start` requires a full TTY for the picker, so the piped/non-interactive
+branches in cmdStart/runGuards/render are UNREACHABLE from the CLI today (defensive code, not spec);
+resolveEnvs' unreached-node re-seed loop is likewise defensive (ref edges are skipped entirely, so
+source-seeding reaches everything). `crew upgrade` is e2e-tested via an `npm` stub on PATH driven by
+`CREW_TEST_LATEST`; `crew pull` via a throwaway node http server spawned inside the case.
+
 
 Also verify manually against a throwaway config (no build — run the file):
 

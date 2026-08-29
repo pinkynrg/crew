@@ -1,0 +1,7 @@
+# the configured editor's binary isn't on PATH: friendly error, non-zero exit.
+source tests/e2e/lib.exp
+crun workspace
+must {enter run}
+send "\r"
+must {not found on PATH}
+want_exit 1

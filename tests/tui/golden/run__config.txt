@@ -1,0 +1,62 @@
+── screen 1 ──
+ crew  ·  config editor
+ SETTINGS  1                    │ Service · a
+   config                       │
+                                │    name             a
+ SERVICES  2                    │    path             __TMP__/projects/a
+ ▸ a                            │    type             backend
+   b                            │    start            echo A-started
+   + New service                │    debug            (optional)
+                                │    env              (optional)
+ GUARDS  0                      │    tasks (other)    (none)
+   + New guard                  │    guards           (none)
+                                │    local            (optional)
+                                │
+                                │ ┌─ Environment hosts ───────────────────────────────────────────┐
+                                │ │ (no env files found — set env / create them)                  │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · shared ──────────────────────────────┐
+                                │ │ (none)                                                        │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · local ───────────────────────────────┐
+                                │ │ (none)                                                        │
+                                │ │                                                               │
+                                │ │                                                               │
+ ↑↓ move · ⏎ open · n new · d delete · esc quit
+── screen 2 ──
+ crew  ·  config editor
+ SETTINGS  1                    │ Service · b
+   config                       │
+                                │    name             b
+ SERVICES  2                    │    path             __TMP__/projects/b
+   a                            │    type             backend
+ ▸ b                            │    start            echo B-started
+   + New service                │    debug            (optional)
+                                │    env              (optional)
+ GUARDS  0                      │    tasks (other)    (none)
+   + New guard                  │    guards           (none)
+                                │    local            (optional)
+                                │
+                                │ ┌─ Environment hosts ───────────────────────────────────────────┐
+                                │ │ (no env files found — set env / create them)                  │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · shared ──────────────────────────────┐
+                                │ │ (none)                                                        │
+                                │ │                                                               │
+                                │ │                                                               │
+                                │ └───────────────────────────────────────────────────────────────┘
+                                │
+                                │ ┌─ Environment overrides · local ───────────────────────────────┐
+                                │ │ (none)                                                        │
+                                │ │                                                               │
+                                │ │                                                               │
+ ↑↓ move · ⏎ open · n new · d delete · esc quit
