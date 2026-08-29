@@ -3,6 +3,9 @@
 # (tests/tui/render.mjs) and diffs it against a golden screen. Goldens are SCREENS, not byte streams —
 # any implementation that paints the same grid passes.
 set timeout 60
+# Full-frame repaints are ~5KB; expect's DEFAULT match buffer is 2000 bytes, so under load (c8, CI)
+# a pattern could be sliced out of the ring buffer mid-frame — the root of the interactive flakes.
+match_max 100000
 # fixed geometry: goldens are rendered at exactly this size
 set stty_init "rows 30 cols 100"
 set CREWBIN [split $env(CREW)]

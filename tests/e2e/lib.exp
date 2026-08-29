@@ -2,6 +2,9 @@
 # Every case runs the crew BINARY ($CREW) in a real PTY against a throwaway fixture ($CONFIG), so the
 # suite is black-box + portable: a port to another language just sets CREW=./its-binary.
 set timeout 60
+# Full-frame repaints are ~5KB; expect's DEFAULT match buffer is 2000 bytes, so under load (c8, CI)
+# a pattern could be sliced out of the ring buffer mid-frame — the root of the interactive flakes.
+match_max 100000
 # Give every case a consistent, ample PTY. CI runners often spawn with a tiny/zero default size, which
 # clips the alt-screen views (e.g. a config-editor sub-editor renders off-screen) and reads as a spurious
 # timeout. A case that needs a specific size just sets its own `stty_init` after sourcing this.

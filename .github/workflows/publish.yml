@@ -4,7 +4,11 @@ name: Publish to npm
 # manifest/lock. Pushes that touch just docs, the website, tests, or *.md (README, CLAUDE.md,
 # …) do NOT cut a release, so unrelated commits don't bump the npm version. Want to publish a
 # docs-only change anyway? Trigger this workflow manually (workflow_dispatch, in the Actions tab).
-# When it does run: checks + tests, refresh the coverage badge, then publish to npm.
+#
+# ONE test execution, strictly ordered:  test (under coverage) → badge from THAT number → publish.
+# The suite runs exactly once, instrumented (c8 changes timing, never behavior) — its pass/fail IS
+# the release gate, and its percentage feeds the badge. No second regime: if a case can't survive
+# instrumentation timing, the case is flaky and should be fixed, not re-run uninstrumented.
 # Version handling is automatic:
 #   - if package.json's version is NOT yet on npm -> publish it as-is (tag it);
 #   - if it IS already on npm -> auto-bump the patch version, commit + tag, publish.
@@ -28,6 +32,8 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.cov.outputs.pct }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,11 +41,16 @@ jobs:
           node-version: 20
       - run: npm ci
       - name: Syntax check
-        run: node --check bin/crew.js
-      - name: Install expect (the E2E suite drives crew in a real PTY)
+        run: node --check bin/crew.js && node --check bin/graph.js
+      - name: Install expect (the E2E + TUI suites drive crew in a real PTY)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq expect
-      - name: Test (graph snapshots + expect E2E)
-        run: npm test
+      - name: Test with coverage (snapshots + E2E + TUI goldens — the one and only suite run)
+        id: cov
+        run: |
+          set -o pipefail   # without this, `| tee` would swallow a failing suite and green-light the gate
+          npm run -s test:cov | tee cov.txt
+          PCT=$(grep -m1 'All files' cov.txt | awk -F'|' '{gsub(/ /,"",$2); print $2}')
+          echo "pct=${PCT%.*}" >> "$GITHUB_OUTPUT"
 
   publish:
     needs: test
@@ -55,19 +66,12 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - name: Upgrade npm (OIDC trusted publishing needs >= 11.5.1; npm 11 supports node 20)
         run: npm install -g npm@11
-      - run: npm ci
-      - name: Install expect
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq expect
-      - name: Refresh coverage badge
-        # Badge refresh must NEVER block a release: the suite already gated in the `test` job, and the
-        # c8-instrumented re-run here is slower/flakier on a loaded runner (interactive PTY cases).
-        continue-on-error: true
+      - name: Refresh coverage badge (from the test job's number — no re-run)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          npm run -s test:cov > cov.txt 2>&1 || { cat cov.txt; exit 1; }
-          PCT=$(grep -m1 'All files' cov.txt | awk -F'|' '{gsub(/ /,"",$2); print $2}')
-          PCT=${PCT%.*}
+          PCT='${{ needs.test.outputs.coverage }}'
+          [ -n "$PCT" ] || { echo "no coverage number from the test job"; exit 1; }
           if   [ "$PCT" -ge 90 ]; then C=brightgreen
           elif [ "$PCT" -ge 80 ]; then C=green
           elif [ "$PCT" -ge 70 ]; then C=yellowgreen
@@ -75,7 +79,6 @@ jobs:
           elif [ "$PCT" -ge 50 ]; then C=orange
           else C=red; fi
           sed -i -E "s#coverage-[0-9]+%25-[a-z]+#coverage-${PCT}%25-${C}#" README.md
-          rm -f cov.txt
           if git diff --quiet README.md; then
             echo "coverage badge unchanged (${PCT}%)"
           else
