@@ -30,7 +30,7 @@ Type 'printf %s "{\"servicesDir\":\"demo/projects\",\"editor\":\"vscode\"}" > de
 Enter
 Type 'printf %s "{\"version\":2,\"services\":{}}" > demo/.scratch-config.json'
 Enter
-Type 'crew() { node bin/crew.js --config demo/.scratch-config.json "$@"; }'
+Type 'crew() { .build/crew --config demo/.scratch-config.json "$@"; }'
 Enter
 Type "clear"
 Enter
