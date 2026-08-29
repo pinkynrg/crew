@@ -1,7 +1,16 @@
 #!/usr/bin/env node
-// Snapshot tests for the ASCII graph renderer. Everything about one case sits together in cases/:
-// <name>.mmd (the graph) [+ <name>.opts.json render options — cursor/sublabels, i.e. the selector
-// rendering mode] + <name>.snap.txt (the golden mono render, BESIDE its case).
+// Snapshot tests for the ASCII graph renderer — BLACK-BOX like tests/e2e: every case is rendered by
+// the $GRAPH binary (default `node bin/graph.js`), never by importing renderer code, so a port to
+// another language keeps the suite: `GRAPH="./crew-go graph-render" node tests/graph/run.mjs`.
+//
+// Binary contract (what a port must honor — see bin/graph.js standalone entry):
+//   $GRAPH <file.mmd> [--opts <file.json>] [--color|--no-color] [--check-overlaps]
+//   stdout = the render (mono when piped; --color forces the palette even piped)
+//   --opts: {cursor, sublabel:{node:suffix}} — the selector rendering mode (cursor marker + [env] tags)
+//   --check-overlaps: collinear edge overlaps print to stderr and exit 3 when any exist
+//
+// Everything about one case sits together in cases/: <name>.mmd (the graph) [+ <name>.opts.json
+// render options] + <name>.snap.txt (the golden mono render, BESIDE its case).
 //
 //   node tests/graph/run.mjs             verify all — exit 1 on any diff / missing snapshot
 //   node tests/graph/run.mjs diamond fan verify only names containing these substrings
@@ -11,44 +20,40 @@
 // The .txt goldens are the assertion (mono, so they stay ANSI-free and diff cleanly). But colour is
 // load-bearing for a HUMAN eyeballing a graph (each edge is drawn in its SOURCE's colour) — a mono
 // snapshot hides which line is which, so mistakes slip through. So on every FULL run we also (re)write
-// tests/graph/gallery.html: every case rendered in colour, open it in a browser to check.
-import { renderAsciiGraph, parseMermaid } from '../../bin/graph.js';
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
+// tests/graph/gallery.html: every case rendered in colour (the binary's --color output), open it in a
+// browser to check.
+import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const gdir = join(root, 'tests', 'graph', 'cases');
+const GRAPH = (process.env.GRAPH || `node ${join(root, 'bin', 'graph.js')}`).split(' ');
 
 const argv = process.argv.slice(2);
 const update = argv.includes('-u') || argv.includes('--update');
 const filters = argv.filter((a) => !a.startsWith('-'));
 const cpw = (s) => [...(s || '')].length;
-// optional per-fixture opts: a companion <name>.opts.json ({ cursor, sublabel:{node:suffix} }) exercises
-// the selector rendering (inline env + cursor marker). No colorOf -> mono, so snapshots stay ANSI-free.
-const optsFor = (name) => {
-  const p = join(gdir, name + '.opts.json');
-  if (!existsSync(p)) return {};
-  const o = JSON.parse(readFileSync(p, 'utf8'));
-  return { cursor: o.cursor, sublabel: o.sublabel ? (n) => o.sublabel[n] || '' : undefined };
+
+// one spawn = one rendering; NO_COLOR strips the TTY auto-color so piped output is deterministic
+const render = (args) => spawnSync(GRAPH[0], [...GRAPH.slice(1), ...args], { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
+const caseArgs = (name) => {
+  const opts = join(gdir, name + '.opts.json');
+  return [join(gdir, name + '.mmd'), ...(existsSync(opts) ? ['--opts', opts] : [])];
 };
 
 // --- colour (gallery only) -------------------------------------------------
-// distinct colour per node, assigned in the graph's own node order (so a graph's edges are told apart).
-const PALETTE = ['#ff6b6b', '#5fd38d', '#e8c34a', '#6aa9ff', '#d68cf0', '#56cbdb', '#f0883e', '#9ae6b4', '#b794f6', '#f6ad55', '#7ee3d6', '#ff8fab'];
-const colorOptsFor = (name, nodes) => {
-  const cm = new Map(); nodes.forEach((n, i) => cm.set(n, PALETTE[i % PALETTE.length]));
-  const ansi = (n) => { const h = cm.get(n) || '#c7cdda'; return `\x1b[38;2;${parseInt(h.slice(1, 3), 16)};${parseInt(h.slice(3, 5), 16)};${parseInt(h.slice(5, 7), 16)}m`; };
-  return { ...optsFor(name), colorOf: ansi };
-};
+// the binary's --color palette (16-color SGR codes, one per node in graph order) mapped to hex for HTML.
+const HEX = { 31: '#ff6b6b', 32: '#5fd38d', 33: '#e8c34a', 34: '#6aa9ff', 35: '#d68cf0', 36: '#56cbdb', 91: '#f0883e', 92: '#9ae6b4', 93: '#b794f6', 94: '#f6ad55', 95: '#7ee3d6', 96: '#ff8fab' };
 const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const ansi2html = (s) => { // handles the renderer's truecolor set (38;2;r;g;b) + reset (0)
+const ansi2html = (s) => { // handles the binary's 16-color set + reset/default
   let out = '', open = false, last = 0, m; const re = /\x1b\[([0-9;]*)m/g;
   while ((m = re.exec(s))) {
     out += escHtml(s.slice(last, m.index)); last = re.lastIndex;
     if (open) { out += '</span>'; open = false; }
-    const rgb = m[1].match(/38;2;(\d+);(\d+);(\d+)/);
-    if (rgb) { out += `<span style="color:rgb(${rgb[1]},${rgb[2]},${rgb[3]})">`; open = true; }
+    const hex = HEX[m[1]];
+    if (hex) { out += `<span style="color:${hex}">`; open = true; }
   }
   out += escHtml(s.slice(last)); if (open) out += '</span>'; return out;
 };
@@ -69,14 +74,13 @@ if (!files.length) { console.error('no matching .mmd in tests/graph/cases'); pro
 let pass = 0; const fails = []; const gallery = []; const overlapFails = [];
 for (const f of files) {
   const name = f.replace(/\.mmd$/, '');
-  const src = readFileSync(join(gdir, f), 'utf8');
-  const { nodes, edges } = parseMermaid(src);
-  const out = renderAsciiGraph(nodes, edges, optsFor(name));
   // INVARIANT: no two edges may draw a collinear overlap (one paints over the other). Checked in the
-  // fixture's real render mode (its optsFor opts) — never disabled, even under -u.
-  const ovl = renderAsciiGraph(nodes, edges, { ...optsFor(name), overlaps: true });
-  if (ovl.length) overlapFails.push({ name, ovl });
-  gallery.push({ name, html: ansi2html(renderAsciiGraph(nodes, edges, colorOptsFor(name, nodes))) });
+  // case's real render mode (its --opts) — never disabled, even under -u (exit 3 = overlaps on stderr).
+  const r = render([...caseArgs(name), '--check-overlaps']);
+  if (r.status !== 0 && r.status !== 3) { fails.push({ name, out: (r.stderr || 'render failed').trim(), exp: null }); continue; }
+  if (r.status === 3) overlapFails.push({ name, ovl: r.stderr.trim().split('\n') });
+  const out = r.stdout.replace(/\n$/, '');
+  gallery.push({ name, html: ansi2html(render([...caseArgs(name), '--color']).stdout.replace(/\n$/, '')) });
   const snap = join(gdir, name + '.snap.txt');
   if (update) { writeFileSync(snap, out + '\n'); continue; }
   const exp = existsSync(snap) ? readFileSync(snap, 'utf8').replace(/\n$/, '') : null;

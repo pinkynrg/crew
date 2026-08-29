@@ -1,12 +1,16 @@
 # crew test suites
 
 Two suites, both run by `npm test`. No test framework, no runtime deps — the suites are the
-portability contract: a port to another language must pass them unchanged (`CREW=./crew-go npm test`).
+portability contract: a port to another language must pass them unchanged
+(`CREW=./crew-go GRAPH="./crew-go graph-render" npm test`).
 
 ```
 tests/
   utils/keys.exp        key constants shared by every expect case — the "what key does what" reference
-  graph/                ASCII graph renderer goldens (tests bin/graph.js directly — no PTY, no CLI)
+  graph/                ASCII graph renderer goldens — BLACK-BOX like e2e: cases are rendered by the
+                        $GRAPH binary (default `node bin/graph.js`), so a port swaps in its own renderer:
+                        GRAPH="./crew-go graph-render" node tests/graph/run.mjs
+                        contract: $GRAPH <mmd> [--opts <json>] [--color] [--check-overlaps] (see run.mjs)
     run.mjs             runner: render each case in mono, diff against the golden (-u accepts)
     gallery.html        every case rendered in colour (regenerated on full runs)
     cases/              everything about one case together: <name>.mmd (the graph),

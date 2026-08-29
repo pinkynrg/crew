@@ -496,12 +496,27 @@ export function parseMermaid(text) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const file = process.argv.find((a, i) => i >= 2 && !a.startsWith('-'));
+  // Standalone CLI — ALSO the black-box contract tests/graph/run.mjs drives (a port must honor it):
+  //   graph.js <file.mmd> [--opts <file.json>] [--color|--no-color] [--check-overlaps]
+  //   stdout = the render (mono when piped; --color forces the palette even piped)
+  //   --opts: {cursor, sublabel:{node:suffix}} — the selector rendering mode (▸ marker + [env] tags)
+  //   --check-overlaps: collinear edge overlaps print to stderr and exit 3 when any exist
+  let file = null, optsFile = null;
+  const argv = process.argv.slice(2);
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--opts') optsFile = argv[++i];
+    else if (!argv[i].startsWith('-')) file = argv[i];
+  }
   const src = readFileSync(file || 0, 'utf8');
   const { nodes, edges } = parseMermaid(src);
+  const o = optsFile ? JSON.parse(readFileSync(optsFile, 'utf8')) : {};
+  const opts = { cursor: o.cursor, sublabel: o.sublabel ? (n) => o.sublabel[n] || '' : undefined };
   const PAL = ['\x1b[31m', '\x1b[32m', '\x1b[33m', '\x1b[34m', '\x1b[35m', '\x1b[36m', '\x1b[91m', '\x1b[92m', '\x1b[93m', '\x1b[94m', '\x1b[95m', '\x1b[96m'];
-  const color = process.stdout.isTTY && !process.env.NO_COLOR && !process.argv.includes('--no-color');
+  const color = argv.includes('--color') || (process.stdout.isTTY && !process.env.NO_COLOR && !argv.includes('--no-color'));
   const cmap = new Map(nodes.map((n, i) => [n, PAL[i % PAL.length]]));
-  const colorOf = color ? (n) => cmap.get(n) || '' : () => '';
-  process.stdout.write(renderAsciiGraph(nodes, edges, { colorOf }) + '\n');
+  process.stdout.write(renderAsciiGraph(nodes, edges, { ...opts, colorOf: color ? (n) => cmap.get(n) || '' : () => '' }) + '\n');
+  if (argv.includes('--check-overlaps')) {
+    const ovl = renderAsciiGraph(nodes, edges, { ...opts, overlaps: true });
+    if (ovl.length) { process.stderr.write(ovl.join('\n') + '\n'); process.exit(3); }
+  }
 }

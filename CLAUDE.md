@@ -378,9 +378,12 @@ PTY and asserts the observable result (not internals). Adding a config field als
 keep it green before calling anything finished. `tests/README.md` is the full layout/convention reference.
 
 No unit-test framework. TWO suites, both run by `npm test`:
-- `tests/graph/` — the ASCII graph renderer (`run.mjs` imports `bin/graph.js`; each `cases/<name>.mmd`
-  rendered mono — with `<name>.opts.json` render options when present — and diffed against the adjacent
-  `<name>.snap.txt`; `-u [name…]` accepts; also writes the colour `gallery.html` on full runs).
+- `tests/graph/` — the ASCII graph renderer, BLACK-BOX like e2e: `run.mjs` spawns the `$GRAPH` binary
+  (default `node bin/graph.js` — its standalone entry IS the contract: `<mmd> [--opts <json>] [--color]
+  [--check-overlaps]`, overlaps → stderr + exit 3), so a port swaps in its renderer via `GRAPH=…`. Each
+  `cases/<name>.mmd` (+ optional `.opts.json` cursor/sublabel render options) renders mono and diffs
+  against the adjacent `<name>.snap.txt`; `-u [name…]` accepts; the colour `gallery.html` (the binary's
+  `--color` output) rewrites on full runs.
 - `tests/e2e/` — **portable black-box E2E driven by `expect`** (a real PTY, so the interactive picker,
   config editor, and log viewer are exercised as a user would). Every case runs the crew BINARY (`$CREW`,
   default `node bin/crew.js`) — it imports NOTHING from the source, so a port to another language keeps
