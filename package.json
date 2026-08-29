@@ -1,6 +1,6 @@
 {
   "name": "@pinkynrg/crew",
-  "version": "1.0.83",
+  "version": "1.0.84",
   "description": "Run the slice of your stack you care about — locally, wired to the rest. Start a selected group of projects in parallel, open them as one VSCode workspace, or hand the set to Claude Code. One persistent config, run via npx.",
   "type": "module",
   "bin": {
