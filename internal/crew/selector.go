@@ -170,54 +170,63 @@ func graphSelect(flags *Flags, cfg *OM, opts selectOpts) (*selectResult, bool) {
 		envSig = sig
 		remoteEnv = resolveEnvs(cfg, sorted, selEnv).resolved
 	}
+	// Per-keystroke work is a cheap Paint over CACHED geometry: cursor moves, space/a toggles and
+	// the d/e states change only colors and sublabels, never box positions (widths are padded to
+	// envW precisely so this holds). Geometry re-Prepares only when the f-filter or r-toggle
+	// changes the visible graph — that's what keeps held-arrow navigation instant.
+	colorFn := func(n string) string { // running set keeps per-source colours; the rest grayed
+		if active[n] {
+			return prefix(n)
+		}
+		return sgrDimOn
+	}
+	var subFn func(string) string
+	if hasSelEnv {
+		// [debug] = local under a debugger; [local] = plain local; else the resolved remote env
+		subFn = func(n string) string {
+			if active[n] {
+				if debug[n] {
+					return "debug"
+				}
+				return "local"
+			}
+			if e, ok := remoteEnv[n]; ok {
+				return e
+			}
+			return selEnv
+		}
+	}
+	var prep *graph.Prepared
+	prepSig := "\x00never"
 	draw := func() *graph.Layout {
 		refreshEnv()
-		var vis []string
-		for _, n := range nodes {
-			if shown[n] {
-				vis = append(vis, n)
+		sig := strings.Join(shownKeys(shown, nodes), "\n") + "\x00" + fmt.Sprint(showRef)
+		if prep == nil || sig != prepSig {
+			prepSig = sig
+			var vis []string
+			for _, n := range nodes {
+				if shown[n] {
+					vis = append(vis, n)
+				}
 			}
-		}
-		var edges []graph.Edge
-		for _, e := range ge.real {
-			if shown[e[0]] && shown[e[1]] {
-				edges = append(edges, graph.Edge{From: e[0], To: e[1]})
-			}
-		}
-		if showRef {
-			for _, e := range ge.ref {
+			var edges []graph.Edge
+			for _, e := range ge.real {
 				if shown[e[0]] && shown[e[1]] {
-					edges = append(edges, graph.Edge{From: e[0], To: e[1], Ref: true})
+					edges = append(edges, graph.Edge{From: e[0], To: e[1]})
 				}
 			}
-		}
-		o := graph.Opts{
-			// running set keeps per-source colours; the rest grayed
-			ColorOf: func(n string) string {
-				if active[n] {
-					return prefix(n)
-				}
-				return sgrDimOn
-			},
-			Cursor: cursor,
-		}
-		if hasSelEnv {
-			// [debug] = local under a debugger; [local] = plain local; else the resolved remote env
-			o.Sublabel = func(n string) string {
-				if active[n] {
-					if debug[n] {
-						return "debug"
+			if showRef {
+				for _, e := range ge.ref {
+					if shown[e[0]] && shown[e[1]] {
+						edges = append(edges, graph.Edge{From: e[0], To: e[1], Ref: true})
 					}
-					return "local"
 				}
-				if e, ok := remoteEnv[n]; ok {
-					return e
-				}
-				return selEnv
 			}
-			o.SublabelWidth = envW
+			prep = graph.Prepare(vis, edges, graph.Opts{Sublabel: subFn, SublabelWidth: envW})
 		}
-		return graph.RenderLayout(vis, edges, o)
+		lay := prep.LayoutOf()
+		lay.Text = prep.Paint(colorFn, subFn, cursor)
+		return lay
 	}
 
 	result := make(chan *selectResult, 1)

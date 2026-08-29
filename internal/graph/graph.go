@@ -96,22 +96,73 @@ type Layout struct {
 	Height int
 }
 
+// Prepared is the EXPENSIVE half of a render — the full layout pipeline (layering, ordering,
+// coordinates, ports, lanes, deconflict) with every drawn element reduced to concrete grid
+// coordinates. Paint (the cheap half) fills a character grid from it in microseconds, so an
+// interactive caller re-Paints per keystroke (cursor/selection/sublabel changes) and only
+// re-Prepares when the GEOMETRY changes (node filter, ref toggle). Sublabels passed to Paint
+// must keep each label's LENGTH stable (pad via SublabelWidth) — widths are baked at Prepare.
+type Prepared struct {
+	nodes   []string
+	subW    int
+	height  int
+	canvasW int
+	boxes   []pBox
+	tjs     []pTj
+	routes  []pRoute
+	layers  [][]string
+	place   map[string]Place
+}
+
+type pBox struct {
+	name     string
+	x0, w, t int
+}
+type pTj struct {
+	node     string
+	col, row int
+	ref, top bool
+}
+type pRoute struct {
+	from                                  string
+	ref, final, arrowToLower              bool
+	id, cid                               int
+	colU, colL, laneRow, upStart, downEnd int
+	arrowCol, arrowRow                    int
+}
+
 // Render renders the graph; Overlaps returns the overlap-invariant violations instead;
-// RenderLayout also returns node geometry for interactive cursors (the graph selector).
+// RenderLayout also returns node geometry for interactive cursors; Prepare gives the caller the
+// geometry to re-Paint cheaply. All four share one pipeline, so output is identical everywhere.
 func Render(nodes []string, edges []Edge, o Opts) string {
-	t, _, _ := render(nodes, edges, o, false)
+	t, _ := Prepare(nodes, edges, o).paint(o.ColorOf, o.Sublabel, o.Cursor, false)
 	return t
 }
 func Overlaps(nodes []string, edges []Edge, o Opts) []string {
-	_, ovl, _ := render(nodes, edges, o, true)
+	_, ovl := Prepare(nodes, edges, o).paint(o.ColorOf, o.Sublabel, o.Cursor, true)
 	return ovl
 }
 func RenderLayout(nodes []string, edges []Edge, o Opts) *Layout {
-	_, _, lay := render(nodes, edges, o, false)
+	p := Prepare(nodes, edges, o)
+	t, _ := p.paint(o.ColorOf, o.Sublabel, o.Cursor, false)
+	lay := p.LayoutOf()
+	lay.Text = t
 	return lay
 }
 
-func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []string, *Layout) {
+// Paint fills the prepared geometry with colors/labels/cursor — the per-keystroke path.
+func (p *Prepared) Paint(colorOf func(string) string, sublabel func(string) string, cursor string) string {
+	t, _ := p.paint(colorOf, sublabel, cursor, false)
+	return t
+}
+
+// LayoutOf returns the interactive-caller geometry (Text is left for the caller's Paint).
+func (p *Prepared) LayoutOf() *Layout {
+	return &Layout{Layers: p.layers, Place: p.place, Height: p.height}
+}
+
+// Prepare runs the full layout pipeline and freezes the drawn elements as grid coordinates.
+func Prepare(nodes []string, edges []Edge, o Opts) *Prepared {
 	colorOf := o.ColorOf
 	if colorOf == nil {
 		colorOf = func(string) string { return "" }
@@ -148,7 +199,7 @@ func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []
 		}
 	}
 	if len(NODES) == 0 {
-		return "", nil, &Layout{Place: map[string]Place{}}
+		return &Prepared{place: map[string]Place{}}
 	}
 	has := map[string]bool{}
 	for _, n := range NODES {
@@ -1098,7 +1149,91 @@ func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []
 	fl := buildLayout()
 	yTop, height, gapY, topY, botY := fl.yTop, fl.height, fl.gapY, fl.topY, fl.botY
 
-	// 9. render --------------------------------------------------------------
+	// 9./10. — freeze every drawn element as concrete grid coordinates; painting happens in
+	// (*Prepared).paint so an interactive caller can re-colour without re-running the layout.
+	p := &Prepared{nodes: NODES, subW: subW, height: height, canvasW: canvasW}
+	for _, c := range NODES { // boxes
+		p.boxes = append(p.boxes, pBox{name: c, x0: int(cellX[c]), w: CW(c), t: yTop[cellL[c]]})
+	}
+	for _, c := range NODES { // T-junctions where a line LEAVES a box (source side only)
+		t := yTop[cellL[c]]
+		for _, sg := range botSeg.get(c) {
+			if sg.to != c {
+				p.tjs = append(p.tjs, pTj{node: c, col: xU(sg), row: t + 2, ref: sg.ref})
+			}
+		}
+		for _, sg := range topSeg.get(c) {
+			if sg.to != c {
+				p.tjs = append(p.tjs, pTj{node: c, col: xL(sg), row: t, ref: sg.ref, top: true})
+			}
+		}
+	}
+	for _, sg := range segs { // routed segments (+ arrowheads on the final one)
+		r := pRoute{
+			from: sg.from, ref: sg.ref, id: sg.id, cid: sg.cid,
+			colU: xU(sg), colL: xL(sg), laneRow: gapY(sg.gap) + sg.lane,
+			upStart: botY(sg.upper), downEnd: topY(sg.lower),
+		}
+		if !isDummy(sg.lower) {
+			r.downEnd-- // STOP above target border
+		}
+		if sg.final {
+			r.final = true
+			r.arrowToLower = sg.to == sg.lower
+			if r.arrowToLower {
+				r.arrowCol, r.arrowRow = r.colL, topY(sg.lower)-1
+			} else {
+				r.arrowCol, r.arrowRow = r.colU, botY(sg.upper)+1
+			}
+		}
+		p.routes = append(p.routes, r)
+	}
+	// layout for an interactive caller: real nodes per layer left-to-right + each node's box
+	p.layers = make([][]string, len(rows))
+	for li, r := range rows {
+		var real []string
+		for _, c := range r {
+			if !isDummy(c) {
+				real = append(real, c)
+			}
+		}
+		sort.SliceStable(real, func(a, b int) bool { return cxc(real[a]) < cxc(real[b]) })
+		p.layers[li] = real
+	}
+	p.place = map[string]Place{}
+	for _, c := range NODES {
+		p.place[c] = Place{Layer: cellL[c], CX: cxc(c), X0: jsRound(cellX[c]), W: CW(c), Y0: yTop[cellL[c]], H: 3}
+	}
+	return p
+}
+
+// paint fills a fresh character grid from the prepared geometry — boxes, T-junctions, routed
+// segments, arrowheads — then composes SGR-colored lines (or returns the overlap violations).
+func (p *Prepared) paint(colorOf func(string) string, sublabel func(string) string, cursor string, wantOverlaps bool) (string, []string) {
+	if len(p.nodes) == 0 {
+		return "", nil
+	}
+	if colorOf == nil {
+		colorOf = func(string) string { return "" }
+	}
+	if sublabel == nil {
+		sublabel = func(string) string { return "" }
+	}
+	subField := func(c string) string {
+		s := sublabel(c)
+		if s == "" {
+			return ""
+		}
+		tok := "[" + s + "]"
+		t := (p.subW + 2) - len(tok)
+		if t < 0 {
+			t = 0
+		}
+		l := t >> 1
+		return " " + strings.Repeat(" ", l) + tok + strings.Repeat(" ", t-l)
+	}
+	boxLabel := func(c string) string { return c + subField(c) }
+	height, canvasW := p.height, p.canvasW
 	mk := func() [][]int {
 		g := make([][]int, height)
 		for i := range g {
@@ -1217,13 +1352,13 @@ func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []
 	const curFrame = "\x1b[48;5;237m"
 	boxCol := func(c string) string {
 		cc := colorOf(c)
-		if c == o.Cursor && cc != "" {
+		if c == cursor && cc != "" {
 			return curFrame + cc
 		}
 		return cc
 	}
-	for _, c := range NODES { // boxes (own color)
-		x0, w, t := int(cellX[c]), CW(c), yTop[cellL[c]]
+	for _, bx := range p.boxes { // boxes (own color)
+		c, x0, w, t := bx.name, bx.x0, bx.w, bx.t
 		cc, fcc := colorOf(c), boxCol(c)
 		lbl := " " + boxLabel(c) + " "
 		pad := w - 2 - len(lbl)
@@ -1251,61 +1386,40 @@ func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []
 			put(x0+1+i, t+1, string(tr[i]), cc)
 		}
 	}
-	for _, c := range NODES { // T-junctions where a line LEAVES a box (source side only)
-		t, cc := yTop[cellL[c]], boxCol(c)
-		for _, s := range botSeg.get(c) {
-			if s.to != c {
-				g := "╦"
-				if s.ref {
-					g = "╤"
-				}
-				put(xU(s), t+2, g, cc)
+	for _, tj := range p.tjs { // T-junctions where a line LEAVES a box (source side only)
+		g := "╦"
+		if tj.top {
+			g = "╩"
+			if tj.ref {
+				g = "╧"
 			}
+		} else if tj.ref {
+			g = "╤"
 		}
-		for _, s := range topSeg.get(c) {
-			if s.to != c {
-				g := "╩"
-				if s.ref {
-					g = "╧"
-				}
-				put(xL(s), t, g, cc)
-			}
-		}
+		put(tj.col, tj.row, g, boxCol(tj.node))
 	}
 
-	for _, s := range segs { // route each segment in its source's color
-		cc := colorOf(s.from)
-		laneRow := gapY(s.gap) + s.lane
-		a, b := xU(s), xL(s)
-		upStart := botY(s.upper) // exit bottom border
-		downEnd := topY(s.lower)
-		if !isDummy(s.lower) {
-			downEnd-- // STOP above target border
-		}
-		vsg(upStart, laneRow, a, s.ref, s.id, cc, s.cid)
-		hsg(a, b, laneRow, s.ref, s.id, cc, s.cid)
-		vsg(laneRow, downEnd, b, s.ref, s.id, cc, s.cid)
-		if s.final { // arrowhead on the incoming column (solid = dep, hollow = ref)
-			toIsLower := s.to == s.lower
+	for _, r := range p.routes { // route each segment in its source's color
+		cc := colorOf(r.from)
+		vsg(r.upStart, r.laneRow, r.colU, r.ref, r.id, cc, r.cid)
+		hsg(r.colU, r.colL, r.laneRow, r.ref, r.id, cc, r.cid)
+		vsg(r.laneRow, r.downEnd, r.colL, r.ref, r.id, cc, r.cid)
+		if r.final { // arrowhead on the incoming column (solid = dep, hollow = ref)
 			var g string
-			if s.ref {
-				if toIsLower {
+			if r.ref {
+				if r.arrowToLower {
 					g = "▽"
 				} else {
 					g = "△"
 				}
 			} else {
-				if toIsLower {
+				if r.arrowToLower {
 					g = "▼"
 				} else {
 					g = "▲"
 				}
 			}
-			if toIsLower {
-				put(b, topY(s.lower)-1, g, cc)
-			} else {
-				put(a, botY(s.upper)+1, g, cc)
-			}
+			put(r.arrowCol, r.arrowRow, g, cc)
 		}
 	}
 
@@ -1315,7 +1429,7 @@ func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []
 			out = append(out, k)
 		}
 		sort.Strings(out)
-		return "", out, nil
+		return "", out
 	}
 
 	// 10. compose (crossings hop; color runs) --------------------------------
@@ -1372,24 +1486,7 @@ func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []
 		}
 		out = append(out, trimRight(line.String()))
 	}
-	text := strings.Join(out, "\n")
-	// layout for an interactive caller: real nodes per layer left-to-right + each node's box
-	layers := make([][]string, len(rows))
-	for li, r := range rows {
-		var real []string
-		for _, c := range r {
-			if !isDummy(c) {
-				real = append(real, c)
-			}
-		}
-		sort.SliceStable(real, func(a, b int) bool { return cxc(real[a]) < cxc(real[b]) })
-		layers[li] = real
-	}
-	place := map[string]Place{}
-	for _, c := range NODES {
-		place[c] = Place{Layer: cellL[c], CX: cxc(c), X0: jsRound(cellX[c]), W: CW(c), Y0: yTop[cellL[c]], H: 3}
-	}
-	return text, nil, &Layout{Text: text, Layers: layers, Place: place, Height: height}
+	return strings.Join(out, "\n"), nil
 }
 
 // trimRight strips trailing spaces/tabs, keeping a trailing SGR reset attached to the content.
