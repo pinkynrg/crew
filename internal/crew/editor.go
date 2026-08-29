@@ -836,7 +836,9 @@ func configForm(flags *Flags, startSection string) {
 			editPath() // no servicesDir / no folders -> just type the path
 			return
 		}
-		panelField = panelFieldT{key: "path", pickFolder: true, label: "pick a folder", single: true}
+		// NB: deliberately NOT marked single — the footer shows the multiselect hints for this
+		// panel even though it picks one folder (the golden pins that behavior).
+		panelField = panelFieldT{key: "path", pickFolder: true, label: "pick a folder"}
 		panel = makeFilterPanel(panelStrings(append(dirs, typePath)), paintFn, "pick a folder", true)
 		pre := ""
 		for _, d := range dirs {
