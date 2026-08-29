@@ -5,8 +5,7 @@ import (
 	"strings"
 )
 
-// ParseMermaid — port of bin/graph.js parseMermaid: the flowchart subset that maps to a dependency
-// DAG. `A --> B`, chains, fan `A & B --> C`, labels (`-->|x|`, `-- x -->`), node shapes (`A[Text]`
+// ParseMermaid — the flowchart subset that maps to a dependency DAG. `A --> B`, chains, fan `A & B --> C`, labels (`-->|x|`, `-- x -->`), node shapes (`A[Text]`
 // -> id A), two-headed arrows (`<-->`, `x--x`, `o--o`). Dotted (`-.->`) or a `|ref|` label = ref
 // edge. Ignores subgraph/style/class/direction lines. Not a full mermaid parser.
 var (

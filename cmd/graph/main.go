@@ -1,5 +1,5 @@
 // crew-graph — standalone ASCII graph renderer honoring the black-box contract that
-// tests/graph/run.mjs drives (same as bin/graph.js's standalone entry):
+// tests/graph/run.mjs drives:
 //
 //	crew-graph <file.mmd> [--opts <file.json>] [--color|--no-color] [--check-overlaps]
 //	stdout = the render (mono when piped; --color forces the palette even piped)

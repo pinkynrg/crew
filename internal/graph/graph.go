@@ -1,8 +1,6 @@
-// Package graph — zero-dep layered-DAG ASCII renderer, a faithful 1:1 port of bin/graph.js.
-// Section numbers (§1..§10) mirror the JS source; keep them in sync when either side changes.
-// The 28 goldens in tests/graph demand BYTE-EXACT output, so every heuristic detail matters:
-// insertion-ordered map walks (JS Map semantics), stable sorts (JS sort is stable), and
-// half-up rounding (JS Math.round = floor(x+0.5)).
+// Package graph — zero-dep layered-DAG ASCII renderer (top-down Sugiyama-lite).
+// The goldens in tests/graph pin the output byte-for-byte, so every heuristic detail is
+// load-bearing: insertion-ordered map walks, stable sorts, and half-up rounding.
 package graph
 
 import (
@@ -23,7 +21,7 @@ const (
 	gapW  = 1
 )
 
-// jsRound = JS Math.round: half-up (floor(x+0.5)); Go's math.Round differs on negative halves.
+// jsRound rounds half-up (floor(x+0.5)) — math.Round rounds halves away from zero instead.
 func jsRound(x float64) int { return int(math.Floor(x + 0.5)) }
 
 type Edge struct {
@@ -47,7 +45,7 @@ type seg struct {
 	from         string
 	final        bool
 	to           string
-	pU, pL       int // port columns (JS portX.get(s).u / .l)
+	pU, pL       int // assigned port columns (upper / lower end)
 }
 
 type chain struct {
@@ -56,7 +54,7 @@ type chain struct {
 	pts  []string
 }
 
-// olist — insertion-ordered string->[]*seg map (JS Map iteration semantics).
+// olist — insertion-ordered string->[]*seg map: iteration order = first-push order (deterministic).
 type olist struct {
 	keys []string
 	m    map[string][]*seg
@@ -73,24 +71,47 @@ func (o *olist) get(k string) []*seg { return o.m[k] }
 
 func isDummy(c string) bool { return len(c) > 0 && c[0] == 0 }
 
-// lower median of a sorted copy — JS lmed/pmed: s[(len-1)>>1]
+// lower median of a sorted copy: s[(len-1)>>1]
 func lmed(a []float64) float64 {
 	s := append([]float64(nil), a...)
 	sort.Float64s(s)
 	return s[(len(s)-1)>>1]
 }
 
-// Render renders the graph; Overlaps returns the overlap-invariant violations instead.
+// Place is a node's box geometry in the rendered text — enough for an interactive caller to
+// move a cursor between nodes and scroll a box into view.
+type Place struct {
+	Layer  int
+	CX     float64 // centre column
+	X0, W  int     // left edge + width
+	Y0, H  int     // top row + height (boxes are always 3 rows)
+}
+
+// Layout is the interactive-caller view of a render: real nodes per layer left-to-right, and
+// each node's geometry.
+type Layout struct {
+	Text   string
+	Layers [][]string
+	Place  map[string]Place
+	Height int
+}
+
+// Render renders the graph; Overlaps returns the overlap-invariant violations instead;
+// RenderLayout also returns node geometry for interactive cursors (the graph selector).
 func Render(nodes []string, edges []Edge, o Opts) string {
-	t, _ := render(nodes, edges, o, false)
+	t, _, _ := render(nodes, edges, o, false)
 	return t
 }
 func Overlaps(nodes []string, edges []Edge, o Opts) []string {
-	_, ovl := render(nodes, edges, o, true)
+	_, ovl, _ := render(nodes, edges, o, true)
 	return ovl
 }
+func RenderLayout(nodes []string, edges []Edge, o Opts) *Layout {
+	_, _, lay := render(nodes, edges, o, false)
+	return lay
+}
 
-func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []string) {
+func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []string, *Layout) {
 	colorOf := o.ColorOf
 	if colorOf == nil {
 		colorOf = func(string) string { return "" }
@@ -127,7 +148,7 @@ func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []
 		}
 	}
 	if len(NODES) == 0 {
-		return "", nil
+		return "", nil, &Layout{Place: map[string]Place{}}
 	}
 	has := map[string]bool{}
 	for _, n := range NODES {
@@ -217,7 +238,7 @@ func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []
 
 	// 3. dummies -> chains ---------------------------------------------------
 	cellL := map[string]int{}
-	var cellKeys []string // insertion order of cellL (JS Map key order): NODES first, then dummies
+	var cellKeys []string // insertion order of cellL: NODES first, then dummies in creation order
 	for _, n := range NODES {
 		cellL[n] = L[n]
 		cellKeys = append(cellKeys, n)
@@ -1103,7 +1124,7 @@ func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []
 		return g
 	}
 	mask := mk()
-	chr := mkS()  // "" = empty (JS null); a painted space is impossible (glyphs only)
+	chr := mkS()  // "" = empty cell; a painted space is impossible (glyphs only)
 	cCol := mkS() // box/arrow color
 	vCol := mkS() // color of N/S owner
 	hCol := mkS() // color of E/W owner
@@ -1294,7 +1315,7 @@ func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []
 			out = append(out, k)
 		}
 		sort.Strings(out)
-		return "", out
+		return "", out, nil
 	}
 
 	// 10. compose (crossings hop; color runs) --------------------------------
@@ -1351,10 +1372,27 @@ func render(nodes []string, edges []Edge, o Opts, wantOverlaps bool) (string, []
 		}
 		out = append(out, trimRight(line.String()))
 	}
-	return strings.Join(out, "\n"), nil
+	text := strings.Join(out, "\n")
+	// layout for an interactive caller: real nodes per layer left-to-right + each node's box
+	layers := make([][]string, len(rows))
+	for li, r := range rows {
+		var real []string
+		for _, c := range r {
+			if !isDummy(c) {
+				real = append(real, c)
+			}
+		}
+		sort.SliceStable(real, func(a, b int) bool { return cxc(real[a]) < cxc(real[b]) })
+		layers[li] = real
+	}
+	place := map[string]Place{}
+	for _, c := range NODES {
+		place[c] = Place{Layer: cellL[c], CX: cxc(c), X0: jsRound(cellX[c]), W: CW(c), Y0: yTop[cellL[c]], H: 3}
+	}
+	return text, nil, &Layout{Text: text, Layers: layers, Place: place, Height: height}
 }
 
-// trimRight — JS: line.replace(/[ \t]+(\x1b\[0m)?$/, (m, r) => r || ”)
+// trimRight strips trailing spaces/tabs, keeping a trailing SGR reset attached to the content.
 func trimRight(l string) string {
 	hadReset := strings.HasSuffix(l, reset)
 	body := l
