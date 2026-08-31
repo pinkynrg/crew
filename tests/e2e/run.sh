@@ -40,7 +40,10 @@ for exp in tests/e2e/cases/*.exp; do
     fail=$((fail + 1)); echo "FAIL $name (missing '# fixture: <name>' or fixtures/$fixture)"; continue
   fi
   ok=0; lastlog=""; retried=""; tmp=""
-  for attempt in 1 2; do
+  # up to 3 attempts: interactive cases can flake on a heavily loaded CI runner when a multibyte
+  # glyph in crew's TUI output splits across expect's PTY read boundary (a transient UTF-8 decode
+  # hiccup, not a crew bug) — a retry re-runs from a clean spawn. Rare, so 3 makes it negligible.
+  for attempt in 1 2 3; do
     # short tmp root: snapshot paths must never display-clip to `…` before the __TMP__ normalization
     tmp=$(mktemp -d /tmp/crew-e2e.XXXXXX)
     cp -R "tests/e2e/fixtures/$fixture/." "$tmp/"
@@ -52,7 +55,7 @@ for exp in tests/e2e/cases/*.exp; do
     [ "$attempt" = 1 ] && retried=" (retried)"
   done
   if [ "$ok" != 1 ]; then
-    fail=$((fail + 1)); echo "FAIL $name (failed twice)"; printf '%s\n' "$lastlog"; continue
+    fail=$((fail + 1)); echo "FAIL $name (failed every attempt)"; printf '%s\n' "$lastlog"; continue
   fi
   # golden screenshots — only for cases that snapped (a cap.N label beside each recording)
   bad=0

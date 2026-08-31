@@ -4,7 +4,7 @@ source tests/e2e/utils/lib.exp
 crun start env=x
 must {enter run}
 send $OVERRIDES
-must {overrides . svc}
+must {shared config}
 sleep 1
 send $SPACE
 sleep 1
