@@ -7,6 +7,12 @@
 # diffs it against snapshots/<case>/<n>-<label>.txt. Goldens are SCREENS, not byte streams. A snapping
 # case must have fully deterministic output (fixed fixture output, no timers/counters).
 set timeout 60
+# Treat the PTY stream as raw single-byte chars, never UTF-8. crew's TUI renders multibyte glyphs
+# (box-drawing ┌│└─, ·, ▸, arrows); on a loaded CI runner a read can land mid-glyph, and in UTF-8
+# mode Tcl holds/garbles the partial sequence so a `must` waiting on nearby ascii misses — the
+# load-only interactive flake. As single bytes ascii always matches, and because BOTH the match
+# buffer and log_file use this encoding the recorded bytes round-trip unchanged (snapshots intact).
+encoding system iso8859-1
 # Full-frame repaints are ~5KB; expect's DEFAULT match buffer is 2000 bytes, so under load (c8, CI)
 # a pattern could be sliced out of the ring buffer mid-frame — the root of the interactive flakes.
 match_max 100000
