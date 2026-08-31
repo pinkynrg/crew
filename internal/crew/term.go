@@ -47,6 +47,31 @@ var stdinRoute struct {
 	stopped chan struct{}
 }
 
+// incompleteEscTail returns the index at which s ends with an INCOMPLETE CSI/SS3 escape (ESC[…
+// or ESCO… with no final byte yet), or -1. A read boundary can split a multi-byte key like an
+// arrow (`\x1b[B`) across two reads; poll()ing before each read widens that window. Holding the
+// unfinished tail until the next read heals it, so splitKeys never sees `\x1b[` alone (which it
+// would drop) followed by a stray `B`. A lone trailing ESC is deliberately NOT held — that stays
+// an immediate Escape keypress (no added latency, no change to quit responsiveness).
+func incompleteEscTail(s string) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] != 0x1b {
+			continue
+		}
+		rest := s[i:]
+		if len(rest) >= 2 && (rest[1] == '[' || rest[1] == 'O') {
+			for j := 2; j < len(rest); j++ {
+				if c := rest[j]; (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~' {
+					return -1 // has a final byte: the sequence is complete
+				}
+			}
+			return i // ESC[ / ESCO with no final byte yet
+		}
+		return -1 // lone ESC or ESC+other (Alt-b/f): leave as-is
+	}
+	return -1
+}
+
 // The reader loop polls stdin AND a wake pipe, so it can stop without stealing a byte — vital
 // before handing the terminal to a child process (claude, an editor): a reader blocked in Read
 // would race the child for keystrokes and eat most of them.
@@ -56,6 +81,7 @@ func stdinReadLoop() {
 		{Fd: int32(os.Stdin.Fd()), Events: unix.POLLIN},
 		{Fd: int32(stdinRoute.wakeR.Fd()), Events: unix.POLLIN},
 	}
+	carry := "" // an unfinished escape sequence split across reads (see incompleteEscTail)
 	for {
 		fds[0].Revents, fds[1].Revents = 0, 0
 		n, err := unix.Poll(fds, -1)
@@ -75,11 +101,19 @@ func stdinReadLoop() {
 		}
 		nr, rerr := os.Stdin.Read(buf)
 		if nr > 0 {
-			stdinRoute.mu.Lock()
-			h := stdinRoute.handler
-			stdinRoute.mu.Unlock()
-			if h != nil {
-				h(string(buf[:nr]))
+			data := carry + string(buf[:nr])
+			carry = ""
+			if k := incompleteEscTail(data); k >= 0 {
+				carry = data[k:]
+				data = data[:k]
+			}
+			if data != "" {
+				stdinRoute.mu.Lock()
+				h := stdinRoute.handler
+				stdinRoute.mu.Unlock()
+				if h != nil {
+					h(data)
+				}
 			}
 		}
 		if rerr != nil {
