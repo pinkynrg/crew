@@ -114,6 +114,10 @@ func sanitize(name string) string { return sanitizeRE.ReplaceAllString(name, "_"
 
 // launch replaces the process with `bin args...` semantics: inherit stdio, exit with its status.
 func launch(bin string, args []string, dir string) {
+	// Stop crew's stdin reader WITHOUT consuming a byte before the child owns the terminal — an
+	// immortal reader blocked in Read would race the child (claude, an editor) for keystrokes and
+	// eat most of them.
+	releaseStdinReader()
 	cmd := exec.Command(bin, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if dir != "" {

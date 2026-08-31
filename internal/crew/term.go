@@ -41,7 +41,55 @@ type rawInput struct {
 var stdinRoute struct {
 	mu      sync.Mutex
 	handler func(string)
-	started bool
+	running bool
+	wakeR   *os.File // reader-side of the wake pipe: poll() watches it beside stdin
+	wakeW   *os.File // releaseStdinReader writes one byte here to stop the loop WITHOUT reading stdin
+	stopped chan struct{}
+}
+
+// The reader loop polls stdin AND a wake pipe, so it can stop without stealing a byte — vital
+// before handing the terminal to a child process (claude, an editor): a reader blocked in Read
+// would race the child for keystrokes and eat most of them.
+func stdinReadLoop() {
+	buf := make([]byte, 4096)
+	fds := []unix.PollFd{
+		{Fd: int32(os.Stdin.Fd()), Events: unix.POLLIN},
+		{Fd: int32(stdinRoute.wakeR.Fd()), Events: unix.POLLIN},
+	}
+	for {
+		fds[0].Revents, fds[1].Revents = 0, 0
+		n, err := unix.Poll(fds, -1)
+		if err != nil && err != unix.EINTR {
+			break
+		}
+		if n <= 0 {
+			continue
+		}
+		if fds[1].Revents != 0 { // wake requested: drain the pipe and stop
+			drain := make([]byte, 16)
+			_, _ = stdinRoute.wakeR.Read(drain)
+			break
+		}
+		if fds[0].Revents == 0 {
+			continue
+		}
+		nr, rerr := os.Stdin.Read(buf)
+		if nr > 0 {
+			stdinRoute.mu.Lock()
+			h := stdinRoute.handler
+			stdinRoute.mu.Unlock()
+			if h != nil {
+				h(string(buf[:nr]))
+			}
+		}
+		if rerr != nil {
+			break
+		}
+	}
+	stdinRoute.mu.Lock()
+	stdinRoute.running = false
+	close(stdinRoute.stopped)
+	stdinRoute.mu.Unlock()
 }
 
 func startRawInput(onChunk func(string)) *rawInput {
@@ -60,28 +108,31 @@ func startRawInput(onChunk func(string)) *rawInput {
 	}
 	stdinRoute.mu.Lock()
 	stdinRoute.handler = onChunk
-	if !stdinRoute.started {
-		stdinRoute.started = true
-		go func() {
-			buf := make([]byte, 4096)
-			for {
-				n, err := os.Stdin.Read(buf)
-				if n > 0 {
-					stdinRoute.mu.Lock()
-					h := stdinRoute.handler
-					stdinRoute.mu.Unlock()
-					if h != nil {
-						h(string(buf[:n]))
-					}
-				}
-				if err != nil {
-					return
-				}
-			}
-		}()
+	if !stdinRoute.running {
+		if stdinRoute.wakeR == nil {
+			stdinRoute.wakeR, stdinRoute.wakeW, _ = os.Pipe()
+		}
+		stdinRoute.running = true
+		stdinRoute.stopped = make(chan struct{})
+		go stdinReadLoop()
 	}
 	stdinRoute.mu.Unlock()
 	return r
+}
+
+// releaseStdinReader stops the reader loop (if any) WITHOUT consuming a byte of stdin, so a child
+// process can own the terminal. A later raw-mode view just starts a fresh loop.
+func releaseStdinReader() {
+	stdinRoute.mu.Lock()
+	if !stdinRoute.running {
+		stdinRoute.mu.Unlock()
+		return
+	}
+	stdinRoute.handler = nil
+	stopped := stdinRoute.stopped
+	_, _ = stdinRoute.wakeW.Write([]byte{0})
+	stdinRoute.mu.Unlock()
+	<-stopped
 }
 
 func (r *rawInput) restore() {
