@@ -1,0 +1,14 @@
+# crew start's [r] key restarts the SAME slice in place — no exit/re-pick: it tears the group down
+# (SIGTERM) and re-spawns, so the boot line appears a second time under a "restarting" notice.
+# fixture: startagent
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send "\r"
+must {A-up}
+send "r"
+must {restarting stack}
+must {exited \(SIGTERM\)}
+must {A-up}
+send "\x03"
+want_done

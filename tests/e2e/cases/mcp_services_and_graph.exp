@@ -1,0 +1,29 @@
+# the read-only MCP server over stdio JSON-RPC: initialize (serverInfo + the read-only copilot
+# instructions), tools/list (exactly the 5 READ tools — no write/lifecycle tools), and the
+# discovery tools (services / graph / config_get) answer with real data.
+# fixture: startagent
+source tests/e2e/utils/lib.exp
+crun mcp
+send {{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}}
+send "\r"
+must {"serverInfo":\{"name":"crew"}
+must {READ-ONLY development copilot}
+send {{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}}
+send "\r"
+must {"name":"services"}
+must {"name":"graph"}
+must {"name":"config_get"}
+must {"name":"status"}
+must {"name":"logs"}
+send {{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"services","arguments":{}}}}
+send "\r"
+must {\\"name\\": \\"a\\"}
+must {\\"canStart\\": true}
+send {{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"graph","arguments":{}}}}
+send "\r"
+must {\\"dependencies\\"}
+send {{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"config_get","arguments":{"kind":"service","name":"a"}}}}
+send "\r"
+must {\\"type\\": \\"backend\\"}
+send "\004"   ;# EOF ends the server
+want_exit 0

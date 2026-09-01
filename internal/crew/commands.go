@@ -395,7 +395,6 @@ func help() {
 		{"list", "", "List services"},
 		{"start", "env=<env>", "Pick services, wire + start them for that env"},
 		{"workspace", "", "Pick services, open them in your editor"},
-		{"claude", "[session]", "Pick services, launch Claude Code"},
 		{"graph", "[list]", "Show the dependency graph (list = text)"},
 		{"resolve", "<env> [proj…]", "Show each service's resolved env (dry-run)"},
 	}
@@ -495,8 +494,6 @@ func Main(argv []string) {
 		fail("crew install was removed — `crew start` is the only run command; a service's other tasks aren't wired to a command yet")
 	case "workspace":
 		cmdWorkspace(flags, rest)
-	case "claude":
-		cmdClaude(flags, rest)
 	case "add":
 		fail("crew add was removed — create services visually: crew config  (then the \"+ New service\" row)")
 	case "edit":
@@ -517,6 +514,8 @@ func Main(argv []string) {
 		cmdConfig(flags, restFirst)
 	case "check":
 		cmdCheck(flags)
+	case "mcp":
+		cmdMcp(flags)
 	case "pull":
 		cmdPull(flags, restFirst)
 	case "upgrade":

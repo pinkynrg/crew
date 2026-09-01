@@ -1122,6 +1122,9 @@ func resolveRun(cfg *OM, task string, members []member, args []string) *runResol
 	var argWarnings []string
 	var unknown []string
 	for _, k := range keyOrder.list() {
+		if k == "env" { // required start parameter — a command without {env} is fine, not a user mistake
+			continue
+		}
 		if !union.has(k) {
 			unknown = append(unknown, k)
 		}
@@ -1391,19 +1394,6 @@ func applyEnvOverridesText(text string, vars *OM) (string, []string, []string) {
 }
 
 // A stable id for a selection: sorted member names joined.
-func selectionLabel(members []member) string {
-	var names []string
-	for _, m := range members {
-		names = append(names, m.name)
-	}
-	sort.Strings(names)
-	s := sanitize(strings.Join(names, "+"))
-	if s == "" {
-		return "selection"
-	}
-	return s
-}
-
 // A SHORT, readable title for the opened workspace: strips the `xxx-` prefix all picked services
 // share, shows the first `cap` names, appends `+Nmore` for the rest.
 func workspaceLabel(members []member, cap int) string {
@@ -1654,3 +1644,4 @@ func detectService(abs string) detected {
 	}
 	return detected{typ: typ, env: env, local: local, start: start}
 }
+

@@ -1,0 +1,22 @@
+# the read-only run tools against a registered run: status reports each service alive/exited,
+# logs tails the captured output (grep filters), and a guard-BLOCKED run stays explainable — the
+# reserved "guards" pseudo-service surfaces WHY nothing started. No write/lifecycle tools exist.
+# fixture: startagent
+source tests/e2e/utils/lib.exp
+crun mcp
+# status: the seeded run is stopped, both services not alive
+send {{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"status","arguments":{"runId":"rTEST"}}}}
+send "\r"
+must {\\"running\\": false}
+must {\\"alive\\": false}
+# logs with a grep: only the matching line comes back
+send {{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"logs","arguments":{"runId":"rTEST","grep":"error"}}}}
+send "\r"
+must {ERROR boom in a}
+# the guards pseudo-service explains a blocked run
+send {{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"logs","arguments":{"runId":"rTEST","service":"guards"}}}}
+send "\r"
+must {FAIL vpn}
+must {run BLOCKED}
+send "\004"   ;# EOF ends the server
+want_exit 0

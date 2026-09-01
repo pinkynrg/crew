@@ -9,6 +9,7 @@ package crew
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -64,6 +65,13 @@ type fanOpts struct {
 	saveHidden    func([]string)
 	logWrap       bool
 	saveWrap      func(bool)
+	// Run hooks (crew start): tee mirrors each service's
+	// raw output into a writer (the run's log file — what the MCP `logs` tool reads), onSpawned
+	// reports the spawned pids once (the run registry — what `status`/`logs` read).
+	tee       map[string]io.Writer
+	onSpawned func(pids map[string]int)
+	agent     *agentSession // when set (interactive), the viewer's [a] key summons a read-only claude beside it
+	guardLog  io.Writer     // guard pass/fail lines are mirrored here so the agent can read WHY a run was blocked
 }
 
 type histRow struct {
@@ -92,7 +100,9 @@ func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 	stopRequested := false
 	allStopped := false
 	settled := false
+	restarting := false
 	settledCh := make(chan struct{})
+	var launch, doRelaunch, requestRestart func()
 	viewerRepaint := func() {}
 	menuOpen := false
 	detachKeys := func() {}
@@ -268,6 +278,10 @@ func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 			tearDown(syscall.SIGTERM)
 		}
 		if len(live) == 0 {
+			if restarting { // [r] pressed: the group has drained — re-spawn the same slice
+				go doRelaunch()
+				return
+			}
 			// If processes exited on their OWN and the user hasn't asked to quit, hold the
 			// interactive viewer open so the error stays on screen.
 			if o.interactive && !stopRequested {
@@ -311,6 +325,9 @@ func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 					if n > 0 {
 						mu.Lock()
 						emit(proc, string(buf[:n]))
+						if w := o.tee[proc.name]; w != nil {
+							_, _ = w.Write(buf[:n])
+						}
 						mu.Unlock()
 					}
 					if err != nil {
@@ -342,6 +359,15 @@ func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 				finish(proc, ev)
 			}(proc, i)
 		}
+		if o.onSpawned != nil {
+			pids := map[string]int{}
+			for _, pr := range spawned {
+				if pr.pid != 0 {
+					pids[pr.name] = pr.pid
+				}
+			}
+			o.onSpawned(pids)
+		}
 		if len(live) == 0 {
 			settle()
 		}
@@ -363,29 +389,62 @@ func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 		v.attach()
 	}
 
-	// Guard phase then spawn. Interactive: run guards as live rows inside the viewer and only
-	// spawn once they pass (holding the viewer open on failure). Non-interactive: the caller
-	// already ran + gated them.
-	if viewerRunGuards != nil && len(o.guards) > 0 {
-		go func() {
-			ok := viewerRunGuards()
+	// Guard phase then spawn — run once initially and again on each [r] restart. Interactive: run
+	// guards as live rows inside the viewer and only spawn once they pass (holding the viewer open
+	// on failure). Non-interactive: the caller already ran + gated them. Called WITHOUT mu held.
+	launch = func() {
+		if viewerRunGuards != nil && len(o.guards) > 0 {
+			go func() {
+				ok := viewerRunGuards()
+				mu.Lock()
+				defer mu.Unlock()
+				if settled || stopRequested {
+					return
+				}
+				if ok {
+					startSpawn()
+				} else {
+					allStopped = true // guards failed: hold the viewer so the ✗ + message stay on screen
+					viewerRepaint()
+				}
+			}()
+		} else {
 			mu.Lock()
-			defer mu.Unlock()
-			if settled || stopRequested {
-				return
-			}
-			if ok {
-				startSpawn()
-			} else {
-				allStopped = true // guards failed: hold the viewer so the ✗ + message stay on screen
-				viewerRepaint()
-			}
-		}()
-	} else {
-		mu.Lock()
-		startSpawn()
-		mu.Unlock()
+			startSpawn()
+			mu.Unlock()
+		}
 	}
+	// doRelaunch resets the per-run state and launches the same slice again (fresh guards + spawn).
+	doRelaunch = func() {
+		mu.Lock()
+		restarting = false
+		aborting = false
+		allStopped = false
+		firstSigintAt = time.Time{}
+		results = nil
+		mu.Unlock()
+		launch()
+	}
+	// requestRestart tears the current group down and re-spawns the same slice — no exit/re-pick.
+	// Called under mu (from the viewer key). finish() relaunches once the group has drained.
+	requestRestart = func() {
+		if restarting || settled || stopRequested {
+			return
+		}
+		restarting = true
+		if view != nil {
+			view.notice(cDim("── restarting stack ──"))
+		}
+		if len(live) == 0 {
+			go doRelaunch()
+			return
+		}
+		tearDown(syscall.SIGTERM)
+	}
+	if view != nil {
+		view.requestRestart = requestRestart
+	}
+	launch()
 
 	<-settledCh
 	return results
@@ -427,15 +486,22 @@ type viewerState struct {
 	fillW        int
 	logHistory   int
 	maxLine      int
-	saveHidden   func([]string)
-	saveWrap     func(bool)
-	requestStop  func()
-	isAllStopped func() bool
+	saveHidden     func([]string)
+	saveWrap       func(bool)
+	requestStop    func()
+	requestRestart func()
+	isAllStopped   func() bool
 	menuOpenRef  *bool
 	raw          *rawInput
 	ticker       *time.Ticker
 	tickStop     chan struct{}
 	menu         *viewerMenu
+	// Read-only agent pane: [a] summons claude beside the viewer (left = this viewer, right =
+	// claude reading the run via MCP). ^Q / [a] toggle which side has the keyboard.
+	agentCfg   *agentSession
+	agent      *splitPane
+	agentFocus bool
+	guardLog   io.Writer
 }
 
 type viewerMenu struct {
@@ -451,7 +517,9 @@ func newViewerState(commands []fanCmd, o fanOpts, logHistory, maxLine int, mu *s
 		mu: mu, pending: map[*fanProc]string{}, shown: map[string]bool{},
 		wrap: o.logWrap, active: true, logHistory: logHistory, maxLine: maxLine,
 		saveHidden: o.saveHidden, saveWrap: o.saveWrap,
-		guardProcs: map[string]*fanProc{},
+		guardProcs:   map[string]*fanProc{},
+		agentCfg:     o.agent,
+		guardLog:     o.guardLog,
 	}
 	// Guards appear as pseudo-services ([vpn]/[aws]) — filterable rows.
 	for _, cmd := range commands {
@@ -582,9 +650,17 @@ func viewerCols() int {
 	return cols
 }
 
+// viewW is the viewer's usable width: the whole terminal, or the LEFT half when the agent pane is up.
+func (v *viewerState) viewW() int {
+	if v.agent != nil {
+		return (viewerCols() - 1) / 2
+	}
+	return viewerCols()
+}
+
 // Flatten the filtered history into screen rows (each <= terminal width).
 func (v *viewerState) screenRows() []string {
-	w := viewerCols()
+	w := v.viewW()
 	var out []string
 	for _, h := range v.history {
 		if h.notice { // notice rows ignore the service filter, honor search
@@ -614,9 +690,10 @@ func (v *viewerState) footerText() string {
 	if v.searching {
 		return cDim("search: ") + v.query + cCyan("▌") + cDim("   (Enter apply · Esc clear)")
 	}
-	if v.isAllStopped != nil && v.isAllStopped() {
-		return cRed("■ stopped") + cDim(" — scroll to review · [/] search · [esc] exit")
-	}
+	// Stopped keeps every hotkey listed (they all still work, [r] restart most of
+	// all here) and marks the state with a red badge, rather than dropping half
+	// the bar so the keys look gone.
+	stopped := v.isAllStopped != nil && v.isAllStopped()
 	pos := ""
 	if v.scroll > 0 {
 		pos = cYellow(fmt.Sprintf("  ↑%d", v.scroll))
@@ -635,7 +712,17 @@ func (v *viewerState) footerText() string {
 	if v.wrap {
 		wrapWord = "cut"
 	}
-	return cDim("crew: [f] filter (") + count + cDim(fmt.Sprintf(")  [/] search  [w] %s  [c] copy  [esc] stop", wrapWord)) + q + pos
+	agentHint := ""
+	if v.agentCfg != nil && v.agent == nil {
+		agentHint = "  [a] agent"
+	}
+	lead := cDim("crew: ")
+	escWord := "stop"
+	if stopped {
+		lead = cRed("■ stopped  ")
+		escWord = "exit"
+	}
+	return lead + cDim("[f] filter (") + count + cDim(fmt.Sprintf(")  [/] search  [w] %s  [c] copy  [r] restart%s  [esc] %s", wrapWord, agentHint, escWord)) + q + pos
 }
 
 // Full repaint: body rows painted by absolute position, footer on the last row. One batched
@@ -643,6 +730,10 @@ func (v *viewerState) footerText() string {
 func (v *viewerState) paint() {
 	if v.menu != nil {
 		v.paintMenu(false)
+		return
+	}
+	if v.agent != nil {
+		v.paintSplit()
 		return
 	}
 	r := viewerRows()
@@ -678,6 +769,135 @@ func (v *viewerState) paint() {
 	v.dirty = false
 }
 
+// splitDims returns the current split geometry: left/right pane widths, their pane height (rows
+// minus the nav bar), and the right pane's 1-based first column.
+func (v *viewerState) splitDims() (leftW, rightW, paneH, rightX0 int) {
+	cols, rows := termSize()
+	paneH = rows - 1
+	if paneH < 1 {
+		paneH = 1
+	}
+	leftW = (cols - 1) / 2
+	rightX0 = leftW + 2 // col 1..leftW = viewer, col leftW+1 = divider, leftW+2.. = claude
+	rightW = cols - (leftW + 1)
+	if rightW < 1 {
+		rightW = 1
+	}
+	return
+}
+
+// summonAgent spawns the read-only claude beside the viewer (or, if already up, just returns —
+// the caller flips focus). No-op when no agent session was prepared (piped run, missing binary).
+func (v *viewerState) summonAgent() {
+	if v.agentCfg == nil || v.agent != nil {
+		return
+	}
+	_, rightW, paneH, _ := v.splitDims()
+	cmd := exec.Command("claude", v.agentCfg.cliArgs...)
+	cmd.Dir = v.agentCfg.cwd
+	cmd.Env = os.Environ()
+	pane, err := startPane(cmd, rightW, paneH, &v.dirty, v.mu)
+	if err != nil {
+		v.notice(cRed("could not launch claude: " + err.Error()))
+		return
+	}
+	v.agent = pane
+	v.agentFocus = true
+	_, _ = pane.pty.WriteString("\x1b[I") // focus-in
+	go func() { // collapse back to full viewer when claude exits
+		_ = pane.cmd.Wait()
+		v.mu.Lock()
+		pane.exited = true
+		v.dirty = true
+		v.mu.Unlock()
+	}()
+	v.paint()
+}
+
+// closeAgent tears the pane down and returns the viewer to full width.
+func (v *viewerState) closeAgent() {
+	if v.agent == nil {
+		return
+	}
+	v.agent.close()
+	v.agent = nil
+	v.agentFocus = false
+	v.paint()
+}
+
+// paintSplit composites the viewer (left) and claude's emulated screen (right) with a divider and
+// a nav bar. The viewer keeps its own footer hints inside the left pane's bottom row.
+func (v *viewerState) paintSplit() {
+	// collapse if claude exited on its own
+	if v.agent.exited {
+		v.closeAgent()
+		return
+	}
+	leftW, rightW, paneH, rightX0 := v.splitDims()
+	if v.agent.w != rightW || v.agent.h != paneH {
+		v.agent.resize(rightW, paneH, v.mu)
+	}
+	// left: viewer body (leftW wide) with its footer on the last row
+	all := v.screenRows()
+	bodyH := paneH - 1
+	if bodyH < 1 {
+		bodyH = 1
+	}
+	maxScroll := len(all) - bodyH
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if v.scroll > maxScroll {
+		v.scroll = maxScroll
+	}
+	endExcl := len(all) - v.scroll
+	start := endExcl - bodyH
+	if start < 0 {
+		start = 0
+	}
+	win := all[start:endExcl]
+	rightRows := strings.Split(v.agent.emu.Render(), "\n")
+	cur := v.agent.emu.CursorPosition()
+
+	var buf strings.Builder
+	buf.WriteString(cursorHide)
+	divider := sgrDimOn + "│" + sgrReset
+	for y := 0; y < paneH; y++ {
+		// left cell
+		left := ""
+		if y == paneH-1 {
+			left = cutRow(v.footerText(), leftW) // viewer footer pinned to the pane's last row
+		} else if y < len(win) {
+			left = cutRow(win[y], leftW)
+		}
+		buf.WriteString(cup(y+1, 1) + "\x1b[2K" + left)
+		// divider
+		buf.WriteString(cup(y+1, leftW+1) + divider)
+		// right cell (claude)
+		rline := ""
+		if y < len(rightRows) {
+			rline = rightRows[y]
+		}
+		buf.WriteString(cup(y+1, rightX0) + cutRow(rline, rightW) + sgrReset)
+	}
+	// nav bar
+	logsLbl, claudeLbl := "logs", "claude"
+	if v.agentFocus {
+		claudeLbl = sgrBoldOn + "▸ claude" + sgrBoldOff
+	} else {
+		logsLbl = sgrBoldOn + "▸ logs" + sgrBoldOff
+	}
+	cols, rows := termSize()
+	bar := logsLbl + " · " + claudeLbl + "   ^Q switch · [a] close agent"
+	buf.WriteString(cup(rows, 1) + "\x1b[2K" + navBar(bar, cols))
+	// real cursor tracks claude only when it has focus
+	if v.agentFocus && v.agent.curVis {
+		buf.WriteString(cup(cur.Y+1, rightX0+cur.X) + cursorShow)
+	}
+	_, _ = os.Stdout.WriteString(buf.String())
+	v.dirty = false
+}
+
 // Run guards live as rows (⏳ → ✓/✗) inside the already-open viewer; return pass/fail.
 func (v *viewerState) runGuards(guards []guardSpec) bool {
 	v.mu.Lock()
@@ -705,10 +925,19 @@ func (v *viewerState) runGuards(guards []guardSpec) bool {
 	for i, g := range guards {
 		if results[i] {
 			v.history[idx[i]].text = cGreen("✓") + " " + orDefault(g.comment, "passed")
+			if v.guardLog != nil {
+				fmt.Fprintf(v.guardLog, "PASS %s — %s\n", g.name, orDefault(g.comment, "passed"))
+			}
 		} else {
 			allOk = false
 			v.history[idx[i]].text = cRed("✗ " + orDefault(g.message, "guard failed"))
+			if v.guardLog != nil {
+				fmt.Fprintf(v.guardLog, "FAIL %s — %s\n", g.name, orDefault(g.message, "guard failed"))
+			}
 		}
+	}
+	if !allOk && v.guardLog != nil {
+		fmt.Fprintf(v.guardLog, "run BLOCKED: guard(s) failed — services were NOT started\n")
 	}
 	v.paint()
 	return allOk
@@ -881,7 +1110,40 @@ func (v *viewerState) menuKey(key string) {
 	}
 }
 
+// handleKey routes input: when the agent pane is up, ^Q/[a] flip focus and the focused side gets
+// the keys (claude via its PTY, the viewer via its own handler); otherwise the viewer handles it.
 func (v *viewerState) handleKey(s string) {
+	if v.agent != nil {
+		for _, tok := range splitKeys(s) {
+			if tok == keyFocusToggle {
+				v.toggleFocus()
+			} else if v.agentFocus {
+				_, _ = v.agent.pty.WriteString(tok) // claude has the keyboard — everything (incl 'a') goes to it
+			} else {
+				v.handleViewerKey(tok) // viewer side: scroll/filter as usual; 'a' closes the pane
+			}
+		}
+		return
+	}
+	v.handleViewerKey(s)
+}
+
+// toggleFocus moves the keyboard between the viewer and claude, sending claude the matching focus
+// event so its own UI (cursor, hints) reacts like a native terminal.
+func (v *viewerState) toggleFocus() {
+	if v.agent == nil {
+		return
+	}
+	v.agentFocus = !v.agentFocus
+	if v.agentFocus {
+		_, _ = v.agent.pty.WriteString("\x1b[I")
+	} else {
+		_, _ = v.agent.pty.WriteString("\x1b[O")
+	}
+	v.paint()
+}
+
+func (v *viewerState) handleViewerKey(s string) {
 	if v.menu != nil {
 		// The menu takes one key at a time — a chunk can bundle several (space+Enter as " \r").
 		for _, k := range splitKeys(s) {
@@ -940,6 +1202,17 @@ func (v *viewerState) handleKey(s string) {
 	case "/":
 		v.searching = true
 		v.paint()
+	case "a":
+		// toggle the read-only claude copilot open/closed (focus is separate: ^Q switches sides)
+		if v.agent == nil {
+			v.summonAgent()
+		} else {
+			v.closeAgent()
+		}
+	case "r":
+		if v.requestRestart != nil {
+			v.requestRestart() // tear down + re-spawn the SAME slice (no exit/re-pick)
+		}
 	case "f":
 		v.openMenu()
 	case "w":
@@ -1023,6 +1296,10 @@ func (v *viewerState) attach() {
 }
 
 func (v *viewerState) detach() {
+	if v.agent != nil {
+		v.agent.close()
+		v.agent = nil
+	}
 	if v.ticker != nil {
 		v.ticker.Stop()
 		close(v.tickStop)
@@ -1037,3 +1314,12 @@ func (v *viewerState) detach() {
 	}
 	// No history dump: leaving the alternate screen restores the terminal to before the run.
 }
+
+func (v *viewerState) notice(text string) {
+	v.history = append(v.history, histRow{text: text, notice: true})
+	if len(v.history) > v.logHistory {
+		v.history = v.history[1:]
+	}
+	v.paint()
+}
+

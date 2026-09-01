@@ -1,4 +1,3 @@
-ignoring unused argument(s): env. Task 'start' takes: (none)
 v: no 'x' env file — running x anyway
 [v ·] ▶ cd __TMP__/projects/v && sh say.sh
 [v ·] alpha line
@@ -37,4 +36,5 @@ v: no 'x' env file — running x anyway
 
 
 
-crew: [f] filter (1/1)  [/] search  [w] cut  [c] copy  [esc] stop
+
+crew: [f] filter (1/1)  [/] search  [w] cut  [c] copy  [r] restart  [a] agent  [esc] stop
