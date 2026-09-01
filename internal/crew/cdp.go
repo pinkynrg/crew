@@ -29,12 +29,16 @@ import (
 )
 
 // Args use crew's positional / key=value idiom (the global parser rejects `--flags`):
-//   crew cdp <url>            launch a debug Chrome at <url> and stream its console
-//   crew cdp <url> port=9223  use a specific debug port (default 9222)
-//   crew cdp <url> attach     attach to an ALREADY-running debug Chrome (don't launch)
-//   crew cdp stdin            test seam: format CDP events read from stdin (no browser)
+//   crew cdp <url>                  launch a debug Chrome at <url> and stream its console
+//   crew cdp <url> cmd="<dev cmd>"  ALSO run the dev server (its own tab suppressed) — the clean
+//                                   one-command form for a frontend's tasks.debug
+//   crew cdp cmd="<dev cmd>"        shield-only: run the dev server with its tab suppressed, no
+//                                   Chrome/tap — the clean form for a frontend's tasks.start
+//   crew cdp <url> port=9223        use a specific debug port (default 9222)
+//   crew cdp <url> attach           attach to an ALREADY-running debug Chrome (don't launch)
+//   crew cdp stdin                  test seam: format CDP events read from stdin (no browser)
 func cmdCdp(flags *Flags, rest []string) {
-	var target, port string
+	var target, port, wrapped string
 	launch := true
 	fromStdin := false
 	for _, a := range rest {
@@ -45,6 +49,8 @@ func cmdCdp(flags *Flags, rest []string) {
 			launch = false
 		case strings.HasPrefix(a, "port="):
 			port = a[len("port="):]
+		case strings.HasPrefix(a, "cmd="):
+			wrapped = a[len("cmd="):] // run this dev-server command with its own browser-open suppressed
 		case !strings.HasPrefix(a, "-"):
 			target = a
 		}
@@ -75,42 +81,79 @@ func cmdCdp(flags *Flags, rest []string) {
 		return
 	}
 
-	if target == "" {
+	if target == "" && wrapped == "" {
 		fail("crew cdp needs a URL — e.g. crew cdp http://localhost:3001")
+	}
+
+	// Optional wrap: run the dev-server command ourselves, with a no-op `open`/`xdg-open` on its
+	// PATH so it can't pop its own browser tab UNDER crew (run directly, the project still opens
+	// normally). Its stdout/stderr flow through us → crew's log. The service's life = this command.
+	var child *exec.Cmd
+	if wrapped != "" {
+		child = startShielded(wrapped)
+	}
+	var chrome *exec.Cmd
+	killAll := func() {
+		if chrome != nil && chrome.Process != nil {
+			_ = chrome.Process.Kill()
+		}
+		if child != nil && child.Process != nil {
+			_ = child.Process.Kill()
+		}
+	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	go func() { <-sig; killAll(); os.Exit(0) }()
+	if child != nil { // dev server exits => we're done (kill the debug Chrome too)
+		go func() { _ = child.Wait(); killAll(); os.Exit(0) }()
+	}
+
+	// Shield-only mode (no URL): just run the dev server with its tab suppressed — no Chrome, no
+	// tap. Used by a clean `start` command; block until it exits (the child goroutine exits us).
+	if target == "" {
+		select {}
 	}
 
 	// Wait for the dev server before opening the tab — otherwise Chrome lands on a "connection
 	// refused" page and never reloads once the server is up (so we'd capture no app console).
 	waitForURL(target, 60*time.Second)
-
-	var chrome *exec.Cmd
 	if launch {
 		chrome = launchChrome(target, port)
-		defer func() {
-			if chrome != nil && chrome.Process != nil {
-				_ = chrome.Process.Kill()
-			}
-		}()
 	}
-
-	// Ctrl-C / SIGTERM: kill chrome and exit (crew's runner sends SIGTERM on teardown).
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sig
-		if chrome != nil && chrome.Process != nil {
-			_ = chrome.Process.Kill()
-		}
-		os.Exit(0)
-	}()
-
 	wsURL := waitForPageWS(port, 15*time.Second)
 	if wsURL == "" {
+		if child != nil { // no DevTools, but keep the dev server running — just stop tapping
+			_ = child.Wait()
+			return
+		}
 		fail("could not reach Chrome DevTools on port %s — is a debug Chrome running? (crew launches one unless you pass `attach`)", port)
 	}
 	if err := streamConsole(wsURL); err != nil {
+		if child != nil { // the tab was closed; leave the dev server up
+			_ = child.Wait()
+			killAll()
+			return
+		}
 		fail("devtools stream ended: %s", err.Error())
 	}
+}
+
+// startShielded runs a shell command with a no-op open/xdg-open shim prepended to PATH (so a dev
+// server can't auto-open a browser), inheriting our stdout/stderr so its logs reach crew.
+func startShielded(command string) *exec.Cmd {
+	shim, err := os.MkdirTemp("", "crew-cdp-shim-")
+	if err == nil {
+		for _, b := range []string{"open", "xdg-open"} {
+			_ = os.WriteFile(shim+"/"+b, []byte("#!/bin/sh\nexit 0\n"), 0o755)
+		}
+	}
+	c := exec.Command("/bin/sh", "-c", command)
+	c.Env = append(os.Environ(), "PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"))
+	c.Stdout, c.Stderr = os.Stdout, os.Stderr
+	if err := c.Start(); err != nil {
+		fail("failed to start the wrapped command: %s", err.Error())
+	}
+	return c
 }
 
 // ---- CDP event → one log line (pure, tested via --from-stdin) ----

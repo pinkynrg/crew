@@ -1,0 +1,9 @@
+# `crew cdp cmd="…"` runs a dev-server command with a no-op open/xdg-open shim on its PATH, so the
+# command can't pop a browser tab UNDER crew — while its stdout flows through to crew's log. This is
+# the clean shield-only form (no URL = no Chrome) used by a frontend's tasks.start.
+# fixture: startagent
+source tests/e2e/utils/lib.exp
+spawn -noecho $env(CREW) --config $env(CONFIG) cdp {cmd=echo DEV-UP; open http://should-not-open; echo AFTER-OPEN}
+must {DEV-UP}
+must {AFTER-OPEN}
+want_exit 0
