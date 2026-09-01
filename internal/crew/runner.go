@@ -501,6 +501,7 @@ type viewerState struct {
 	raw          *rawInput
 	ticker       *time.Ticker
 	tickStop     chan struct{}
+	winch        chan os.Signal
 	menu         *viewerMenu
 	// Read-only agent pane: [a] summons claude beside the viewer (left = this viewer, right =
 	// claude reading the run via MCP). ^Q / [a] toggle which side has the keyboard.
@@ -1297,6 +1298,23 @@ func (v *viewerState) attach() {
 			}
 		}
 	}()
+	// Terminal resize: repaint at the new size, and re-size the agent pane's PTY so claude reflows
+	// too (without this the view freezes on a shrink — nothing marks it dirty and claude keeps its
+	// old geometry). paint() reads termSize() live, so a dirty flag is all the viewer itself needs.
+	v.winch = make(chan os.Signal, 1)
+	signal.Notify(v.winch, syscall.SIGWINCH)
+	go func() {
+		for range v.winch {
+			v.mu.Lock()
+			ag := v.agent
+			v.dirty = true
+			v.mu.Unlock()
+			if ag != nil {
+				_, rw, ph, _ := v.splitDims()
+				ag.resize(rw, ph, v.mu) // takes v.mu itself — don't hold it here
+			}
+		}
+	}()
 	_, _ = os.Stdout.WriteString(altScreenOn + mouseOn) // enter the alternate screen + capture mouse
 	v.paint()
 }
@@ -1305,6 +1323,10 @@ func (v *viewerState) detach() {
 	if v.agent != nil {
 		v.agent.close()
 		v.agent = nil
+	}
+	if v.winch != nil {
+		signal.Stop(v.winch)
+		close(v.winch)
 	}
 	if v.ticker != nil {
 		v.ticker.Stop()

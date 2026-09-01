@@ -1,0 +1,17 @@
+# resizing the terminal must not freeze the log viewer: a SIGWINCH repaints at the new size (and
+# resizes the agent pane's PTY). Regression for a shrink that used to wedge the view. We shrink the
+# PTY, then prove the viewer is still LIVE by opening the filter menu — a frozen view wouldn't react.
+# fixture: startagent
+source tests/e2e/utils/lib.exp
+spawn -noecho $env(CREW) --config $env(CONFIG) start env=x
+must {enter run}
+send "\r"
+must {A-up}
+sleep 1
+stty rows 20 columns 60 < $spawn_out(slave,name)
+sleep 1
+send "f"
+must {Space toggles} ;# menu opened AFTER the resize => not frozen, repainting at the new size
+send "\x1b"
+send "\x03"
+expect { eof {} timeout { catch { exec kill -9 [exp_pid] } } }
