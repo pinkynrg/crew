@@ -1,7 +1,10 @@
 # crew start's [r] key restarts the SAME slice in place — no exit/re-pick: it tears the group down
 # (SIGTERM) and re-spawns, so the boot line appears a second time under a "restarting" notice.
+# Regression guard: the teardown's grace-SIGKILL timer must be cancelled on relaunch, else it fires
+# a few seconds in and kills the freshly re-spawned services. Shrink the grace so the guard is fast.
 # fixture: startagent
 source tests/e2e/utils/lib.exp
+set env(CREW_KILL_GRACE_MS) 700
 crun start env=x
 must {enter run}
 send "\r"
@@ -10,5 +13,11 @@ send "r"
 must {restarting stack}
 must {exited \(SIGTERM\)}
 must {A-up}
+# after the restart, the re-spawned services must SURVIVE past the grace window (no stale SIGKILL)
+set timeout 3
+expect {
+  -re {exited \(SIGKILL\)|exited \(137\)} { puts "\n!! restarted services were killed by a stale grace timer"; exit 9 }
+  timeout {}
+}
 send "\x03"
 want_done

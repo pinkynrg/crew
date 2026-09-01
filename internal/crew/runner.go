@@ -417,6 +417,12 @@ func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 	// doRelaunch resets the per-run state and launches the same slice again (fresh guards + spawn).
 	doRelaunch = func() {
 		mu.Lock()
+		// Cancel the teardown's pending grace-SIGKILL timers — they close over `live`, and would
+		// otherwise fire a few seconds into the restart and kill the freshly re-spawned services.
+		for _, t := range timers {
+			t.Stop()
+		}
+		timers = nil
 		restarting = false
 		aborting = false
 		allStopped = false
