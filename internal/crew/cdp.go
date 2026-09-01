@@ -79,6 +79,10 @@ func cmdCdp(flags *Flags, rest []string) {
 		fail("crew cdp needs a URL — e.g. crew cdp http://localhost:3001")
 	}
 
+	// Wait for the dev server before opening the tab — otherwise Chrome lands on a "connection
+	// refused" page and never reloads once the server is up (so we'd capture no app console).
+	waitForURL(target, 60*time.Second)
+
 	var chrome *exec.Cmd
 	if launch {
 		chrome = launchChrome(target, port)
@@ -240,6 +244,7 @@ func launchChrome(target, port string) *exec.Cmd {
 		"--remote-debugging-port=" + port,
 		"--user-data-dir=" + profile, // isolated profile: never touches your real Chrome
 		"--no-first-run", "--no-default-browser-check",
+		"--ignore-certificate-errors", // dev frontends are often https with a self-signed cert
 		target,
 	}
 	cmd := exec.Command(bin, args...)
@@ -268,6 +273,32 @@ func chromeBinary() string {
 		}
 	}
 	return ""
+}
+
+// waitForURL blocks until the target responds to a TCP connect (any HTTP/HTTPS answer counts) or
+// the timeout elapses — best-effort, so a server that never comes up doesn't wedge the run.
+func waitForURL(target string, timeout time.Duration) {
+	u, err := url.Parse(target)
+	if err != nil {
+		return
+	}
+	host := u.Host
+	if !strings.Contains(host, ":") {
+		if u.Scheme == "https" {
+			host += ":443"
+		} else {
+			host += ":80"
+		}
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", host, 2*time.Second)
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
 }
 
 // waitForPageWS polls the DevTools HTTP endpoint until a page target with a websocket URL appears.
