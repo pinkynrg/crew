@@ -516,6 +516,8 @@ func Main(argv []string) {
 		cmdCheck(flags)
 	case "mcp":
 		cmdMcp(flags)
+	case "cdp":
+		cmdCdp(flags, rest)
 	case "pull":
 		cmdPull(flags, restFirst)
 	case "upgrade":
