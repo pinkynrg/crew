@@ -10,3 +10,6 @@ demo/.scratch-config.json
 crew-graph
 .build/
 .covdata/
+
+# e2e seeded-run fixtures need their .log files tracked
+!tests/e2e/fixtures/**/*.log
