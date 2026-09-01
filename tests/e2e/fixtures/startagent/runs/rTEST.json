@@ -1,0 +1,10 @@
+{
+  "runId": "rTEST",
+  "env": "x",
+  "startedAt": 1788000000000,
+  "services": [
+    { "name": "a", "pid": 0, "pgid": 0 },
+    { "name": "b", "pid": 0, "pgid": 0 }
+  ],
+  "stoppedAt": 1788000009000
+}

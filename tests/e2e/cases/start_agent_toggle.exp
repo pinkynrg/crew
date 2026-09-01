@@ -1,0 +1,23 @@
+# crew start's [a] key toggles the read-only claude copilot open/closed beside the live viewer:
+# open spawns claude (which gets the keyboard), typing reaches it, ^Q returns focus to the viewer,
+# and [a] again closes the pane back to the full-width log viewer.
+# fixture: startagent
+source tests/e2e/utils/lib.exp
+set env(PATH) "$env(TMP)/bin:$env(PATH)"
+crun start env=x
+must {enter run}
+send "\r"
+must {A-up}
+must {\[a\] agent}
+send "a"
+must {STUB-CLAUDE-READY}
+must {close agent}
+send "hello\r"
+must {you-typed:.*hello}
+send "\x11"
+sleep 1
+send "a"
+sleep 1
+must {\[a\] agent}
+send "\x03"
+want_done

@@ -18,13 +18,31 @@ type OM struct {
 
 func NewOM() *OM { return &OM{m: map[string]any{}} }
 
-func (o *OM) Keys() []string { return append([]string(nil), o.keys...) }
-func (o *OM) Len() int       { return len(o.keys) }
+func (o *OM) Keys() []string {
+	if o == nil {
+		return nil
+	}
+	return append([]string(nil), o.keys...)
+}
+func (o *OM) Len() int {
+	if o == nil {
+		return 0
+	}
+	return len(o.keys)
+}
 func (o *OM) Has(k string) bool {
+	if o == nil {
+		return false
+	}
 	_, ok := o.m[k]
 	return ok
 }
-func (o *OM) Get(k string) any { return o.m[k] }
+func (o *OM) Get(k string) any {
+	if o == nil {
+		return nil
+	}
+	return o.m[k]
+}
 func (o *OM) Set(k string, v any) {
 	if _, ok := o.m[k]; !ok {
 		o.keys = append(o.keys, k)

@@ -1,0 +1,3 @@
+#!/bin/sh
+printf 'STUB-CLAUDE-READY\r\n'
+while IFS= read -r line; do printf 'you-typed: %s\r\n' "$line"; [ "$line" = "quit" ] && exit 0; done

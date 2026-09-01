@@ -6,5 +6,8 @@ must {enter run}
 send $ENTER
 must {GUARD-BLOCKED}
 sleep 1
+# the run is registered + a _guards.log is written so the read-only agent can explain the block
+set glog [exec sh -c "cat $env(TMP)/runs/*/_guards.log 2>/dev/null"]
+if {![string match "*BLOCKED*" $glog]} { puts "\n!! _guards.log not written for a blocked run"; exit 8 }
 send $ESC
 want_done
