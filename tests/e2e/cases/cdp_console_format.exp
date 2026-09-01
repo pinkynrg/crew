@@ -1,0 +1,17 @@
+# `crew cdp stdin` is the test seam for the browser-console tap: it maps DevTools Protocol events
+# (console calls, uncaught exceptions, log entries) to one stdout line each — what a service's
+# tasks.debug streams into its log so the read-only agent sees browser errors via `logs`. Events
+# it doesn't surface (network, etc.) are dropped. 1-based line/col.
+# fixture: startagent
+source tests/e2e/utils/lib.exp
+set events {}
+append events {{"method":"Runtime.consoleAPICalled","params":{"type":"error","args":[{"type":"string","value":"boom happened"}],"stackTrace":{"callFrames":[{"url":"http://localhost:3001/app.js","lineNumber":41,"columnNumber":8}]}}}} "\n"
+append events {{"method":"Runtime.exceptionThrown","params":{"exceptionDetails":{"text":"Uncaught","exception":{"description":"TypeError: x is not a function"},"url":"http://localhost:3001/app.js","lineNumber":9}}}} "\n"
+append events {{"method":"Log.entryAdded","params":{"entry":{"level":"warning","text":"Deprecated API","url":"http://localhost:3001/x.js","lineNumber":2}}}} "\n"
+append events {{"method":"Network.requestWillBeSent","params":{}}} "\n"
+set f [open "$env(TMP)/events.jsonl" w]; puts -nonewline $f $events; close $f
+spawn -noecho sh -c "$env(CREW) --config $env(CONFIG) cdp stdin < $env(TMP)/events.jsonl"
+must {console.error: boom happened .*app.js:42:9}
+must {uncaught: TypeError: x is not a function .*app.js:10}
+must {log.warning: Deprecated API .*x.js:3}
+want_exit 0
