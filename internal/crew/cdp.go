@@ -288,6 +288,7 @@ func launchChrome(target, port string) *exec.Cmd {
 		"--user-data-dir=" + profile, // isolated profile: never touches your real Chrome
 		"--no-first-run", "--no-default-browser-check",
 		"--ignore-certificate-errors", // dev frontends are often https with a self-signed cert
+		"--test-type",                 // suppress Chrome's yellow "unsupported flag" infobar for the above
 		target,
 	}
 	cmd := exec.Command(bin, args...)

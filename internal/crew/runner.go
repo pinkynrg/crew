@@ -769,7 +769,7 @@ func (v *viewerState) paint() {
 		if i < len(win) {
 			line = win[i]
 		}
-		buf.WriteString(cup(i+1, 1) + "\x1b[2K" + line)
+		buf.WriteString(cup(i+1, 1) + "\x1b[2K" + line + sgrReset)
 	}
 	buf.WriteString(cup(r, 1) + "\x1b[2K" + v.footerText())
 	_, _ = os.Stdout.WriteString(buf.String())
@@ -877,7 +877,7 @@ func (v *viewerState) paintSplit() {
 		} else if y < len(win) {
 			left = cutRow(win[y], leftW)
 		}
-		buf.WriteString(cup(y+1, 1) + "\x1b[2K" + left)
+		buf.WriteString(cup(y+1, 1) + "\x1b[2K" + left + sgrReset)
 		// divider
 		buf.WriteString(cup(y+1, leftW+1) + divider)
 		// right cell (claude)
@@ -1122,6 +1122,21 @@ func (v *viewerState) menuKey(key string) {
 func (v *viewerState) handleKey(s string) {
 	if v.agent != nil {
 		for _, tok := range splitKeys(s) {
+			// A left-button press picks the side it lands on (like ^Q, but by click).
+			if m := mouseClickRE.FindStringSubmatch(tok); m != nil && m[1] == "0" && m[4] == "M" {
+				col, _ := strconv.Atoi(m[2])
+				leftW, _, _, rightX0 := v.splitDims()
+				if col <= leftW && v.agentFocus {
+					v.toggleFocus()
+				} else if col >= rightX0 && !v.agentFocus {
+					v.toggleFocus()
+				}
+				// clicks on the claude side still reach it so its own UI reacts
+				if col >= rightX0 {
+					_, _ = v.agent.pty.WriteString(tok)
+				}
+				continue
+			}
 			if tok == keyFocusToggle {
 				v.toggleFocus()
 			} else if v.agentFocus {

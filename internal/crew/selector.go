@@ -29,6 +29,9 @@ type selectOpts struct {
 
 var mouseEventRE = regexp.MustCompile(`\x1b\[<(\d+);\d+;\d+[Mm]`)
 
+// mouseClickRE captures button, column, row of an SGR mouse event (M=press, m=release).
+var mouseClickRE = regexp.MustCompile(`\x1b\[<(\d+);(\d+);(\d+)([Mm])`)
+
 func graphSelect(flags *Flags, cfg *OM, opts selectOpts) (*selectResult, bool) {
 	services := cfg.GetOM("services")
 	if !canInteractive() || services == nil || services.Len() == 0 {
