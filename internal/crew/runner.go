@@ -1119,6 +1119,25 @@ func (v *viewerState) menuKey(key string) {
 
 // handleKey routes input: when the agent pane is up, ^Q/[a] flip focus and the focused side gets
 // the keys (claude via its PTY, the viewer via its own handler); otherwise the viewer handles it.
+// wordJumpLeft/Right are the option/ctrl+arrow encodings a real terminal emits. Claude runs inside
+// crew's emulated PTY, so it negotiates its key protocol with the emulator, not your terminal —
+// these modified-arrow forms never map to word-jump. Normalize them to meta-b/meta-f, which claude's
+// line editor recognizes regardless of the negotiated mode.
+var (
+	wordJumpLeft  = map[string]bool{"\x1b[1;3D": true, "\x1b[1;5D": true, "\x1b[1;9D": true}
+	wordJumpRight = map[string]bool{"\x1b[1;3C": true, "\x1b[1;5C": true, "\x1b[1;9C": true}
+)
+
+func agentKey(tok string) string {
+	if wordJumpLeft[tok] {
+		return "\x1bb"
+	}
+	if wordJumpRight[tok] {
+		return "\x1bf"
+	}
+	return tok
+}
+
 func (v *viewerState) handleKey(s string) {
 	if v.agent != nil {
 		for _, tok := range splitKeys(s) {
@@ -1140,7 +1159,7 @@ func (v *viewerState) handleKey(s string) {
 			if tok == keyFocusToggle {
 				v.toggleFocus()
 			} else if v.agentFocus {
-				_, _ = v.agent.pty.WriteString(tok) // claude has the keyboard — everything (incl 'a') goes to it
+				_, _ = v.agent.pty.WriteString(agentKey(tok)) // claude has the keyboard — everything (incl 'a') goes to it
 			} else {
 				v.handleViewerKey(tok) // viewer side: scroll/filter as usual; 'a' closes the pane
 			}
