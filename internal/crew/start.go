@@ -189,12 +189,17 @@ type agentSession struct {
 
 // prepareAgentSession writes the read-only MCP wiring + session prompt for THIS run and returns
 // the spawn recipe. The MCP server is launched with CREW_RUN_ID so status/logs default to it.
+//
+// The session cwd is STABLE across runs (not per-runID) — Claude keys its chat history off the
+// cwd, so a fixed dir keeps every past conversation available to `/resume` when you stop and
+// restart the stack. The .mcp.json/CLAUDE.md in it are rewritten each start, so the tools always
+// point at the CURRENT run even though the history persists.
 func prepareAgentSession(flags *Flags, m mergedConfig, runnable []*runnableCmd, runID, env string) *agentSession {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil // no binary path => no agent; the run still streams normally
 	}
-	cwd := filepath.Join(crewHomeFor(m.userPath), "sessions", "run-"+runID)
+	cwd := filepath.Join(crewHomeFor(m.userPath), "sessions", "agent")
 	if err := os.MkdirAll(cwd, 0o755); err != nil {
 		return nil
 	}
