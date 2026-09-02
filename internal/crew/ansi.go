@@ -19,6 +19,7 @@ const (
 	sgrFgYellow   = "\x1b[33m"
 	sgrFgCyan     = "\x1b[36m"
 	sgrFgDefault  = "\x1b[39m" // restore default foreground WITHOUT touching attributes
+	oscLinkClose  = "\x1b]8;;\x1b\\" // close an OSC-8 hyperlink (sgrReset does NOT — a cut link underlines the rest)
 )
 
 // ---- screen control ----

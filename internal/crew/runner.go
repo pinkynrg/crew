@@ -587,6 +587,24 @@ func (v *viewerState) matches(proc *fanProc, text string) bool {
 // ANSI-aware line wrap: split into rows of <= w VISIBLE columns, carrying SGR codes verbatim.
 var sgrPrefixRE = regexp.MustCompile(`^\x1b\[[0-9;]*m`)
 
+// oscPrefixLen returns the byte length of an OSC sequence at s[0] (ESC ] … terminated by BEL or
+// ST=ESC\), else 0. OSC-8 hyperlinks (file paths in claude's output) are zero-width and must be
+// copied whole — a cut mid-link leaves the link (and its underline) open across the rest of the row.
+func oscPrefixLen(s string) int {
+	if len(s) < 2 || s[0] != 0x1b || s[1] != ']' {
+		return 0
+	}
+	for i := 2; i < len(s); i++ {
+		if s[i] == 0x07 { // BEL terminator
+			return i + 1
+		}
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' { // ST terminator
+			return i + 2
+		}
+	}
+	return len(s) // unterminated: consume the rest
+}
+
 func splitRows(s string, w int) []string {
 	var out []string
 	var cur strings.Builder
@@ -596,6 +614,11 @@ func splitRows(s string, w int) []string {
 			if m := sgrPrefixRE.FindString(s[i:]); m != "" {
 				cur.WriteString(m)
 				i += len(m)
+				continue
+			}
+			if l := oscPrefixLen(s[i:]); l > 0 {
+				cur.WriteString(s[i : i+l])
+				i += l
 				continue
 			}
 		}
@@ -623,6 +646,11 @@ func cutRow(s string, w int) string {
 			if m := sgrPrefixRE.FindString(s[i:]); m != "" {
 				out.WriteString(m)
 				i += len(m)
+				continue
+			}
+			if l := oscPrefixLen(s[i:]); l > 0 {
+				out.WriteString(s[i : i+l])
+				i += l
 				continue
 			}
 		}
@@ -877,7 +905,7 @@ func (v *viewerState) paintSplit() {
 		} else if y < len(win) {
 			left = cutRow(win[y], leftW)
 		}
-		buf.WriteString(cup(y+1, 1) + "\x1b[2K" + left + sgrReset)
+		buf.WriteString(cup(y+1, 1) + "\x1b[2K" + left + oscLinkClose + sgrReset)
 		// divider
 		buf.WriteString(cup(y+1, leftW+1) + divider)
 		// right cell (claude)
@@ -885,7 +913,7 @@ func (v *viewerState) paintSplit() {
 		if y < len(rightRows) {
 			rline = rightRows[y]
 		}
-		buf.WriteString(cup(y+1, rightX0) + cutRow(rline, rightW) + sgrReset)
+		buf.WriteString(cup(y+1, rightX0) + cutRow(rline, rightW) + oscLinkClose + sgrReset)
 	}
 	// nav bar
 	logsLbl, claudeLbl := "logs", "claude"
