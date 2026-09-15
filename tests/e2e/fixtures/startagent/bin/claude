@@ -1,3 +1,5 @@
 #!/bin/sh
-printf 'STUB-CLAUDE-READY\r\n'
+# Enable bracketed paste (?2004h) like a real TUI so crew's emulator tracks the mode and re-wraps
+# pastes it forwards here (the mode-aware emu.Paste path).
+printf '\033[?2004hSTUB-CLAUDE-READY\r\n'
 while IFS= read -r line; do printf 'you-typed: %s\r\n' "$line"; [ "$line" = "quit" ] && exit 0; done

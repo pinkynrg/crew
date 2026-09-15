@@ -18,7 +18,7 @@ const (
 	sgrFgGreen    = "\x1b[32m"
 	sgrFgYellow   = "\x1b[33m"
 	sgrFgCyan     = "\x1b[36m"
-	sgrFgDefault  = "\x1b[39m" // restore default foreground WITHOUT touching attributes
+	sgrFgDefault  = "\x1b[39m"       // restore default foreground WITHOUT touching attributes
 	oscLinkClose  = "\x1b]8;;\x1b\\" // close an OSC-8 hyperlink (sgrReset does NOT — a cut link underlines the rest)
 )
 
@@ -30,12 +30,22 @@ const (
 	cursorShow   = "\x1b[?25h"
 	lineWrapOff  = "\x1b[?7l" // don't auto-wrap long lines (raw-mode views manage width themselves)
 	lineWrapOn   = "\x1b[?7h"
-	mouseOn      = "\x1b[?1000h\x1b[?1006h" // capture mouse (SGR encoding) so the wheel scrolls the view, not the terminal
+	mouseOn      = "\x1b[?1000h\x1b[?1006h" // full mouse capture (SGR): wheel + clicks. Used by the graph selector, which must tell wheel (scroll graph) from arrows (move cursor).
 	mouseOff     = "\x1b[?1000l\x1b[?1006l"
-	cursorHome   = "\x1b[H"  // cursor to row 1, col 1
-	clearLine    = "\x1b[K"  // erase from cursor to end of line
-	clearBelow   = "\x1b[0J" // erase from cursor to end of screen
-	clearScreen  = "\x1b[2J" // full clear — pushes rows into scrollback on some terminals; avoid in repaint loops
+	// altScrollOn is the LOG VIEWER's lighter alternative: mode ?1007 makes the terminal translate
+	// the wheel into arrow-key presses (which the viewer already scrolls on) WITHOUT reporting
+	// clicks/drags — so native text selection keeps working, unlike full mouse capture. (claude does
+	// the same.) The alt-screen already blocks the terminal's own scrollback; ?1007 only routes the
+	// wheel. Ceiling: a few terminals emit SS3 arrows (\x1bOA) under ?1007 instead of CSI (\x1b[A) —
+	// those won't scroll until keyUp/keyDown also match SS3.
+	altScrollOn     = "\x1b[?1007h"
+	altScrollOff    = "\x1b[?1007l"
+	bracketPaste    = "\x1b[?2004h" // outer terminal wraps pastes in \x1b[200~…\x1b[201~ so claude collapses them
+	bracketPasteOff = "\x1b[?2004l"
+	cursorHome      = "\x1b[H"  // cursor to row 1, col 1
+	clearLine       = "\x1b[K"  // erase from cursor to end of line
+	clearBelow      = "\x1b[0J" // erase from cursor to end of screen
+	clearScreen     = "\x1b[2J" // full clear — pushes rows into scrollback on some terminals; avoid in repaint loops
 )
 
 // cursor to an absolute position (1-based row, col)

@@ -475,34 +475,36 @@ func signalName(sig syscall.Signal) string {
 // ---- the interactive log viewer ----
 
 type viewerState struct {
-	mu           *sync.Mutex
-	names        []string
-	guardProcs   map[string]*fanProc
-	history      []histRow
-	pending      map[*fanProc]string
-	shown        map[string]bool
-	wrap         bool
-	scroll       int
-	active       bool
-	dirty        bool
-	searching    bool
-	query        string
-	copyMsg      string
-	copyTimer    *time.Timer
-	fillW        int
-	logHistory   int
-	maxLine      int
+	mu             *sync.Mutex
+	names          []string
+	guardProcs     map[string]*fanProc
+	history        []histRow
+	pending        map[*fanProc]string
+	shown          map[string]bool
+	wrap           bool
+	scroll         int
+	active         bool
+	dirty          bool
+	pasteBuf       string // accumulates a bracketed paste (\x1b[200~…\x1b[201~) spanning stdin reads; "" = not pasting
+	pasting        bool   // inside a bracketed paste (pasteBuf is being filled)
+	searching      bool
+	query          string
+	copyMsg        string
+	copyTimer      *time.Timer
+	fillW          int
+	logHistory     int
+	maxLine        int
 	saveHidden     func([]string)
 	saveWrap       func(bool)
 	requestStop    func()
 	requestRestart func()
 	isAllStopped   func() bool
-	menuOpenRef  *bool
-	raw          *rawInput
-	ticker       *time.Ticker
-	tickStop     chan struct{}
-	winch        chan os.Signal
-	menu         *viewerMenu
+	menuOpenRef    *bool
+	raw            *rawInput
+	ticker         *time.Ticker
+	tickStop       chan struct{}
+	winch          chan os.Signal
+	menu           *viewerMenu
 	// Read-only agent pane: [a] summons claude beside the viewer (left = this viewer, right =
 	// claude reading the run via MCP). ^Q / [a] toggle which side has the keyboard.
 	agentCfg   *agentSession
@@ -524,9 +526,9 @@ func newViewerState(commands []fanCmd, o fanOpts, logHistory, maxLine int, mu *s
 		mu: mu, pending: map[*fanProc]string{}, shown: map[string]bool{},
 		wrap: o.logWrap, active: true, logHistory: logHistory, maxLine: maxLine,
 		saveHidden: o.saveHidden, saveWrap: o.saveWrap,
-		guardProcs:   map[string]*fanProc{},
-		agentCfg:     o.agent,
-		guardLog:     o.guardLog,
+		guardProcs: map[string]*fanProc{},
+		agentCfg:   o.agent,
+		guardLog:   o.guardLog,
 	}
 	// Guards appear as pseudo-services ([vpn]/[aws]) — filterable rows.
 	for _, cmd := range commands {
@@ -838,8 +840,11 @@ func (v *viewerState) summonAgent() {
 	}
 	v.agent = pane
 	v.agentFocus = true
-	_, _ = pane.pty.WriteString("\x1b[I") // focus-in
-	go func() { // collapse back to full viewer when claude exits
+	// Let the outer terminal mark pastes (\x1b[200~…\x1b[201~) so claude collapses them to
+	// "[Pasted text +N lines]" instead of receiving raw text with embedded newlines.
+	_, _ = os.Stdout.WriteString(bracketPaste)
+	pane.emu.Focus() // focus-in (mode-aware; no-op until claude enables ?1004)
+	go func() {      // collapse back to full viewer when claude exits
 		_ = pane.cmd.Wait()
 		v.mu.Lock()
 		pane.exited = true
@@ -857,6 +862,8 @@ func (v *viewerState) closeAgent() {
 	v.agent.close()
 	v.agent = nil
 	v.agentFocus = false
+	v.pasting = false
+	_, _ = os.Stdout.WriteString(bracketPasteOff)
 	v.paint()
 }
 
@@ -925,8 +932,9 @@ func (v *viewerState) paintSplit() {
 	cols, rows := termSize()
 	bar := logsLbl + " · " + claudeLbl + "   ^Q switch · [a] close agent"
 	buf.WriteString(cup(rows, 1) + "\x1b[2K" + navBar(bar, cols))
-	// real cursor tracks claude only when it has focus
-	if v.agentFocus && v.agent.curVis {
+	// real cursor tracks claude only when it has focus, and only while it sits inside the pane
+	// (a stale/out-of-bounds position would otherwise land in the viewer or the divider column)
+	if v.agentFocus && v.agent.curVis && cur.X < rightW && cur.Y < paneH {
 		buf.WriteString(cup(cur.Y+1, rightX0+cur.X) + cursorShow)
 	}
 	_, _ = os.Stdout.WriteString(buf.String())
@@ -1046,7 +1054,7 @@ func (v *viewerState) feed(proc *fanProc, text string) {
 func (v *viewerState) openMenu() {
 	v.active = false // capture to history only; the menu owns the screen
 	*v.menuOpenRef = true
-	_, _ = os.Stdout.WriteString(mouseOff)
+	_, _ = os.Stdout.WriteString(altScrollOff)
 	_, _ = os.Stdout.WriteString(clearScreen + cursorHome + cursorShow)
 	m := &viewerMenu{items: v.names, checked: map[string]bool{}}
 	for _, n := range v.names {
@@ -1107,7 +1115,7 @@ func (v *viewerState) closeMenu(apply bool) {
 		}
 	}
 	v.menu = nil
-	_, _ = os.Stdout.WriteString(mouseOn)
+	_, _ = os.Stdout.WriteString(altScrollOn)
 	v.scroll = 0
 	v.active = true
 	*v.menuOpenRef = false
@@ -1168,22 +1176,28 @@ func agentKey(tok string) string {
 
 func (v *viewerState) handleKey(s string) {
 	if v.agent != nil {
-		for _, tok := range splitKeys(s) {
-			// A left-button press picks the side it lands on (like ^Q, but by click).
-			if m := mouseClickRE.FindStringSubmatch(tok); m != nil && m[1] == "0" && m[4] == "M" {
-				col, _ := strconv.Atoi(m[2])
-				leftW, _, _, rightX0 := v.splitDims()
-				if col <= leftW && v.agentFocus {
-					v.toggleFocus()
-				} else if col >= rightX0 && !v.agentFocus {
-					v.toggleFocus()
-				}
-				// clicks on the claude side still reach it so its own UI reacts
-				if col >= rightX0 {
-					_, _ = v.agent.pty.WriteString(tok)
-				}
-				continue
+		// Bracketed paste: the outer terminal wraps a paste in \x1b[200~…\x1b[201~, which can span
+		// several stdin reads. Buffer the payload (no per-rune splitKeys — that froze on big pastes),
+		// then hand it to the emulator's mode-aware Paste: it re-wraps the markers only if claude
+		// currently has bracketed-paste mode (?2004) on, else sends raw text — so we never leak
+		// literal [200~ into a child that turned paste off.
+		if v.agentFocus && (v.pasting || strings.HasPrefix(s, "\x1b[200~")) {
+			v.pasting = true
+			v.pasteBuf += s
+			i := strings.Index(v.pasteBuf, "\x1b[201~")
+			if i < 0 {
+				return // paste still open — keep buffering across reads
 			}
+			text := strings.TrimPrefix(v.pasteBuf[:i], "\x1b[200~")
+			rest := v.pasteBuf[i+len("\x1b[201~"):] // bytes after the close marker (a coalesced read)
+			v.agent.emu.Paste(text)
+			v.pasteBuf, v.pasting = "", false
+			if rest == "" {
+				return
+			}
+			s = rest // fall through: handle the trailing keystrokes normally
+		}
+		for _, tok := range splitKeys(s) {
 			if tok == keyFocusToggle {
 				v.toggleFocus()
 			} else if v.agentFocus {
@@ -1204,10 +1218,13 @@ func (v *viewerState) toggleFocus() {
 		return
 	}
 	v.agentFocus = !v.agentFocus
+	// Mode-aware: the emulator emits the focus/blur report only if claude enabled focus
+	// reporting (?1004), matching a real terminal — no blind \x1b[I/\x1b[O into a child that
+	// never asked for it.
 	if v.agentFocus {
-		_, _ = v.agent.pty.WriteString("\x1b[I")
+		v.agent.emu.Focus()
 	} else {
-		_, _ = v.agent.pty.WriteString("\x1b[O")
+		v.agent.emu.Blur()
 	}
 	v.paint()
 }
@@ -1250,21 +1267,9 @@ func (v *viewerState) handleViewerKey(s string) {
 		}
 		return // ignore escape sequences while typing
 	}
-	// Mouse wheel (SGR): 64 = wheel up, 65 = wheel down.
-	mouse := false
-	for _, m := range mouseEventRE.FindAllStringSubmatch(s, -1) {
-		switch m[1] {
-		case "64":
-			v.scrollBy(3)
-			mouse = true
-		case "65":
-			v.scrollBy(-3)
-			mouse = true
-		}
-	}
-	if mouse {
-		return
-	}
+	// The viewer runs in alternate-scroll mode (?1007): the wheel arrives as arrow keys, scrolled
+	// below via keyUp/keyDown — no SGR mouse events to decode here (that mode is the graph
+	// selector's; keeping the wheel off ?1000 is what lets the terminal do native text selection).
 	switch s {
 	case keyCtrlC, keyEsc: // quit on Ctrl-C or a bare ESC
 		v.requestStop()
@@ -1377,7 +1382,7 @@ func (v *viewerState) attach() {
 			}
 		}
 	}()
-	_, _ = os.Stdout.WriteString(altScreenOn + mouseOn) // enter the alternate screen + capture mouse
+	_, _ = os.Stdout.WriteString(altScreenOn + altScrollOn) // alt screen + wheel-as-arrows (keeps native text selection)
 	v.paint()
 }
 
@@ -1397,7 +1402,8 @@ func (v *viewerState) detach() {
 	if v.copyTimer != nil {
 		v.copyTimer.Stop()
 	}
-	_, _ = os.Stdout.WriteString(mouseOff + cursorShow)
+	_, _ = os.Stdout.WriteString(bracketPasteOff)
+	_, _ = os.Stdout.WriteString(altScrollOff + cursorShow)
 	_, _ = os.Stdout.WriteString(altScreenOff) // restore the terminal as it was
 	if v.raw != nil {
 		v.raw.restore()
@@ -1412,4 +1418,3 @@ func (v *viewerState) notice(text string) {
 	}
 	v.paint()
 }
-

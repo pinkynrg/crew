@@ -1,0 +1,32 @@
+# Opening the [a] claude pane enables bracketed paste (\x1b[?2004h) on the outer terminal so a big
+# paste collapses inside claude instead of arriving as raw text; the paste is buffered and handed to
+# the emulator (mode-aware), so a large block no longer freezes the viewer. The viewer itself runs in
+# alternate-scroll mode (\x1b[?1007h), NOT full mouse capture (\x1b[?1000h) — that keeps native text
+# selection working. Teardown restores paste mode (\x1b[?2004l).
+# fixture: startagent
+source tests/e2e/utils/lib.exp
+set env(PATH) "$env(TMP)/bin:$env(PATH)"
+crun start env=x
+must {enter run}
+send "\r"
+# the viewer enters alternate-scroll (?1007), NOT full mouse capture (?1000) — asserted before the
+# first service output, since it streams the moment the viewer attaches
+must {\[\?1007h}
+must {A-up}
+must {\[a\] agent}
+send "a"
+# opening the pane turns on bracketed paste toward the outer terminal (emitted on [a], before the
+# stub's first render)
+must {\[\?2004h}
+must {STUB-CLAUDE-READY}
+# a bracketed paste round-trips through the emulator and the pane stays live: the pasted text plus a
+# following typed line come back together (kept short so the echo fits the narrow pane before cutRow
+# truncates it). Proves the paste path works AND didn't freeze the viewer.
+send "\x1b\[200~PASTED\x1b\[201~"
+send "hi\r"
+must {you-typed:.*PASTEDhi}
+send "\x11"
+send "\x03"
+# teardown restores the terminal's paste mode (before the process reaches eof)
+must {\[\?2004l}
+want_done
