@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+// Byte-reporting claude stub: enables bracketed paste like a real TUI (so crew's emulator tracks the
+// mode) then echoes every chunk it receives from crew as hex — lets the test assert that a key
+// sequence (e.g. Option/Alt+Backspace = \x1b\x7f) reaches the pane WHOLE, not split into esc + DEL.
+if (process.stdin.setRawMode) process.stdin.setRawMode(true) // real TUI: bytes arrive per-keystroke, no line discipline (else \x1b\x7f is buffered/erased)
+process.stdout.write('\x1b[?2004hSTUB-CLAUDE-READY\r\n')
+process.stdin.on('data', (d) => process.stdout.write('rx:' + d.toString('hex') + '\r\n'))
+process.stdin.resume()

@@ -181,7 +181,8 @@ func (r *rawInput) restore() {
 // Split one stdin chunk into individual key tokens — a single read can bundle several keystrokes
 // (fast typing, paste, PTY batching). An escape sequence (CSI/SS3, incl. SGR mouse) stays one
 // token; everything else is one char. A lone ESC stays its own token (so a coalesced "esc then s"
-// isn't misread as Alt-s); ESC merges with a following char ONLY for Alt-b/Alt-f (word move).
+// isn't misread as Alt-s); ESC merges with a following char ONLY for Alt-b/Alt-f (word move) and
+// ESC+DEL (Alt/Option-Backspace = word delete) — else \x1b\x7f splits and claude gets a bare backspace.
 var csiFinalRE = regexp.MustCompile(`[A-Za-z~]`)
 
 func splitKeys(s string) []string {
@@ -200,8 +201,8 @@ func splitKeys(s string) []string {
 				out = append(out, string(r[i:]))
 				i = len(r)
 			}
-		} else if r[i] == 0x1b && i+1 < len(r) && (r[i+1] == 'b' || r[i+1] == 'f') {
-			out = append(out, string(r[i:i+2]))
+		} else if r[i] == 0x1b && i+1 < len(r) && (r[i+1] == 'b' || r[i+1] == 'f' || r[i+1] == 0x7f) {
+			out = append(out, string(r[i:i+2])) // Alt-b/Alt-f (word move) + Alt/Option-Backspace (\x1b\x7f, word delete)
 			i += 2
 		} else {
 			out = append(out, string(r[i]))

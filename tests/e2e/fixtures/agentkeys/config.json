@@ -1,0 +1,4 @@
+{ "version": 2, "services": {
+  "a": { "path": "a", "type": "backend", "local": "http://localhost:3001", "tasks": { "start": "printf 'A-up\\n'; sleep 20" } },
+  "b": { "path": "b", "type": "backend", "local": "http://localhost:3002", "tasks": { "start": "printf 'B-up\\n'; sleep 20" } }
+} }
