@@ -22,6 +22,11 @@ must {rx:1b62}
 # Option/Ctrl+Right -> meta-f (word right) = 1b66
 send "\033\[1;3C"
 must {rx:1b66}
+# Mouse wheel over the claude pane must SCROLL claude (forwarded as an SGR wheel event), not leak
+# arrow keys into its input. Outer SGR wheel-up at a pane column -> claude re-encodes SGR: ESC[<64 =
+# 1b5b3c3634. (Regression: under ?1007 the wheel arrived as arrows and moved claude's cursor.)
+send "\033\[<64;60;5M"
+must {rx:1b5b3c3634}
 # ^Q returns focus to the viewer (else \x03 goes to claude), then stop.
 send "\x11"
 send "\x03"

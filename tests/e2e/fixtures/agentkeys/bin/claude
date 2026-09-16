@@ -3,6 +3,8 @@
 // mode) then echoes every chunk it receives from crew as hex — lets the test assert that a key
 // sequence (e.g. Option/Alt+Backspace = \x1b\x7f) reaches the pane WHOLE, not split into esc + DEL.
 if (process.stdin.setRawMode) process.stdin.setRawMode(true) // real TUI: bytes arrive per-keystroke, no line discipline (else \x1b\x7f is buffered/erased)
-process.stdout.write('\x1b[?2004hSTUB-CLAUDE-READY\r\n')
+// Enable mouse tracking (?1000) + SGR encoding (?1006) so crew's emulator forwards wheel events here
+// (SendMouse is a no-op unless the child asked for mouse) — lets the test assert wheel -> scroll.
+process.stdout.write('\x1b[?1000h\x1b[?1006h\x1b[?2004hSTUB-CLAUDE-READY\r\n')
 process.stdin.on('data', (d) => process.stdout.write('rx:' + d.toString('hex') + '\r\n'))
 process.stdin.resume()

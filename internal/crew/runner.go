@@ -19,6 +19,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/charmbracelet/x/vt"
 )
 
 func envMs(name string, def int) time.Duration {
@@ -843,7 +845,8 @@ func (v *viewerState) summonAgent() {
 	// Let the outer terminal mark pastes (\x1b[200~…\x1b[201~) so claude collapses them to
 	// "[Pasted text +N lines]" instead of receiving raw text with embedded newlines.
 	_, _ = os.Stdout.WriteString(bracketPaste)
-	pane.emu.Focus() // focus-in (mode-aware; no-op until claude enables ?1004)
+	v.setAgentInputModes() // claude starts focused: real mouse capture so the wheel scrolls claude, not its cursor
+	pane.emu.Focus()       // focus-in (mode-aware; no-op until claude enables ?1004)
 	go func() {      // collapse back to full viewer when claude exits
 		_ = pane.cmd.Wait()
 		v.mu.Lock()
@@ -864,6 +867,7 @@ func (v *viewerState) closeAgent() {
 	v.agentFocus = false
 	v.pasting = false
 	_, _ = os.Stdout.WriteString(bracketPasteOff)
+	v.setAgentInputModes() // agent gone: back to the viewer's alt-scroll + native selection
 	v.paint()
 }
 
@@ -1201,7 +1205,11 @@ func (v *viewerState) handleKey(s string) {
 			if tok == keyFocusToggle {
 				v.toggleFocus()
 			} else if v.agentFocus {
-				_, _ = v.agent.pty.WriteString(agentKey(tok)) // claude has the keyboard — everything (incl 'a') goes to it
+				if m := mouseClickRE.FindStringSubmatch(tok); m != nil {
+					v.forwardAgentWheel(m) // wheel -> claude's emulator (scrolls its chat); clicks/motion dropped
+				} else {
+					_, _ = v.agent.pty.WriteString(agentKey(tok)) // claude has the keyboard — everything (incl 'a') goes to it
+				}
 			} else {
 				v.handleViewerKey(tok) // viewer side: scroll/filter as usual; 'a' closes the pane
 			}
@@ -1226,7 +1234,52 @@ func (v *viewerState) toggleFocus() {
 	} else {
 		v.agent.emu.Blur()
 	}
+	v.setAgentInputModes()
 	v.paint()
+}
+
+// setAgentInputModes switches the OUTER terminal between the viewer's alt-scroll mode (?1007: wheel
+// arrives as arrow keys, native text selection works) and real mouse capture (?1000/?1006) while
+// claude is focused. Under ?1007 the wheel is indistinguishable from arrow keys, so forwarding it to
+// claude moved its cursor instead of scrolling its chat; with real capture the wheel arrives as SGR
+// events we hand to the emulator (which scrolls claude's own view). Viewer-focused/closed restores ?1007.
+func (v *viewerState) setAgentInputModes() {
+	if v.agent != nil && v.agentFocus {
+		_, _ = os.Stdout.WriteString(altScrollOff + mouseOn)
+	} else {
+		_, _ = os.Stdout.WriteString(mouseOff + altScrollOn)
+	}
+}
+
+// forwardAgentWheel translates an outer-terminal SGR wheel event (col/row 1-based) into a pane-relative
+// wheel event for claude's emulator; SendMouse is a no-op unless claude enabled mouse tracking. Only the
+// wheel is forwarded — clicks/motion are dropped so raw SGR never leaks into the read-only pane as keys.
+func (v *viewerState) forwardAgentWheel(m []string) {
+	var b vt.MouseButton
+	switch m[1] {
+	case "64":
+		b = vt.MouseWheelUp
+	case "65":
+		b = vt.MouseWheelDown
+	default:
+		return
+	}
+	col, _ := strconv.Atoi(m[2])
+	row, _ := strconv.Atoi(m[3])
+	_, rightW, paneH, rightX0 := v.splitDims()
+	x := col - rightX0
+	if x < 0 {
+		x = 0
+	} else if x >= rightW {
+		x = rightW - 1
+	}
+	y := row - 1
+	if y < 0 {
+		y = 0
+	} else if y >= paneH {
+		y = paneH - 1
+	}
+	v.agent.emu.SendMouse(vt.MouseWheel{X: x, Y: y, Button: b})
 }
 
 func (v *viewerState) handleViewerKey(s string) {
@@ -1403,7 +1456,7 @@ func (v *viewerState) detach() {
 		v.copyTimer.Stop()
 	}
 	_, _ = os.Stdout.WriteString(bracketPasteOff)
-	_, _ = os.Stdout.WriteString(altScrollOff + cursorShow)
+	_, _ = os.Stdout.WriteString(mouseOff + altScrollOff + cursorShow) // mouseOff: clear capture if we exit while claude was focused
 	_, _ = os.Stdout.WriteString(altScreenOff) // restore the terminal as it was
 	if v.raw != nil {
 		v.raw.restore()
