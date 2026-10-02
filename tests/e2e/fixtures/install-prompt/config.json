@@ -1,0 +1,13 @@
+{
+ "version": 2,
+ "services": {
+  "ask": {
+   "path": "ask",
+   "type": "backend",
+   "tasks": {
+    "install": "sh -c 'read answer < /dev/tty'",
+    "start": "echo ASK''UP; sleep 30"
+   }
+  }
+ }
+}

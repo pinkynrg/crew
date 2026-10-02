@@ -213,6 +213,13 @@ package caches. A failed install stops the run right away with its exit code; fi
 Because installs run one after another, a start pays the sum of their up-to-date checks, so keep those
 checks fast. Installs apply to `debug` too, and their output streams under the service's label.
 
+A slow install never looks frozen: every 15s (`CREW_INSTALL_TICK_MS`) the installing service logs how
+long it has been going and what it's running right now (`⏳ installing · 1m15s · now: npm ci › node
+./scripts/install.js`), and the services queued behind it say once whose install they're waiting for.
+An install that stops on a terminal prompt (an ssh passphrase, a git login) can't be answered inside crew
+— crew runs it in the background and owns the terminal — so crew names it instead (`⏸ install stuck on a
+terminal prompt`): run that install once in a terminal. Status lines land in the run logs too.
+
 A service's `tasks` map can hold **other** tasks too, but they're just data for now: only `start`, its
 per-node `debug` variant (below) and `install` (before either) are run. `debug` runs under
 `crew start` via the selector's `d` toggle.

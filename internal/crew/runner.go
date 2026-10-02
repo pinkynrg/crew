@@ -78,7 +78,15 @@ type fanOpts struct {
 	onSpawned func(pids map[string]int)
 	agent     *agentSession // when set (interactive), the viewer's [a] key summons a read-only claude beside it
 	guardLog  io.Writer     // guard pass/fail lines are mirrored here so the agent can read WHY a run was blocked
+	// tick, when set, is called every tickEvery while the slice runs (not while it restarts or has
+	// stopped), outside mu, with each live service's pid — its process group. The lines it returns
+	// are logged under their services, in the viewer and the run logs.
+	tickEvery time.Duration
+	tick      func(pids map[string]int) []fanLine
 }
+
+// fanLine is one status line runFanout logs under a service (see fanOpts.tick).
+type fanLine struct{ name, text string }
 
 type histRow struct {
 	proc   *fanProc
@@ -165,8 +173,8 @@ func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 	}
 	note := func(proc *fanProc, msg string) {
 		lead := ""
-		if lastChar != '\n' {
-			lead = "\n"
+		if (view != nil && view.pending[proc] != "") || (view == nil && lastChar != '\n') {
+			lead = "\n" // close the service's unterminated line so the note gets its own row
 		}
 		emit(proc, lead+msg+"\n")
 	}
@@ -467,6 +475,43 @@ func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 		view.requestRestart = requestRestart
 	}
 	launch()
+	if o.tick != nil {
+		go func() {
+			t := time.NewTicker(o.tickEvery)
+			defer t.Stop()
+			for {
+				select {
+				case <-settledCh:
+					return
+				case <-t.C:
+				}
+				mu.Lock()
+				pids, byName := map[string]int{}, map[string]*fanProc{}
+				if !restarting && !aborting && !allStopped {
+					for p := range live {
+						if p.pid != 0 {
+							pids[p.name], byName[p.name] = p.pid, p
+						}
+					}
+				}
+				mu.Unlock()
+				if len(pids) == 0 {
+					continue
+				}
+				lines := o.tick(pids) // may run ps: never while holding mu
+				mu.Lock()
+				for _, l := range lines {
+					if p := byName[l.name]; p != nil && live[p] {
+						note(p, l.text)
+						if w := o.tee[p.name]; w != nil {
+							_, _ = io.WriteString(w, stripSGR(l.text)+"\n")
+						}
+					}
+				}
+				mu.Unlock()
+			}
+		}()
+	}
 
 	<-settledCh
 	return results

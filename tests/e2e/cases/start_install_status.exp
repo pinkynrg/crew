@@ -1,0 +1,19 @@
+# a slow install is never a silent screen: every tick (CREW_INSTALL_TICK_MS) the installing service
+# logs how long it has been going and what it runs right now, and the service queued behind it logs
+# ONCE whose install it's waiting for — in the viewer and in the run log the agent reads.
+# fixture: install-status
+source tests/e2e/utils/lib.exp
+set env(CREW_INSTALL_TICK_MS) 1000
+crun start env=x
+must {enter run}
+send $ENTER
+must {installing[^\r\n]{1,10}\d+s[^\r\n]{1,10}now: sh status-install.sh}
+must {waiting for slow's install}
+must {SLOWUP}
+must {NEXTUP}
+send $ESC
+want_done
+set slow [exec sh -c "cat $env(TMP)/runs/*/slow.log"]
+if {![regexp {installing[^\n]*now: sh status-install.sh} $slow]} { puts "\n!! slow.log lacks the install status:\n$slow"; exit 8 }
+set waits [exec sh -c "grep -c \"waiting for slow's install\" $env(TMP)/runs/*/next.log || true"]
+if {$waits != 1} { puts "\n!! next.log says it's waiting $waits times, wanted once"; exit 8 }

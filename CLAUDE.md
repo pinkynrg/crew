@@ -218,7 +218,15 @@ crew is a Go CLI shipped as a single static binary. `make build` → `.build/cre
   marker files in a per-run temp dir chain them (each installer waits for the previous installer's
   marker; every command waits for the last one's). A failed install exits with its code and kill-others
   stops the rest. `fanCmd.display` keeps the plumbing off the ▶ line; `fanOpts.beforeSpawn` empties the
-  marker dir so `[r]` re-runs installs. Runs with no install are byte-for-byte unchanged. crew never
+  marker dir so `[r]` re-runs installs. Runs with no install are byte-for-byte unchanged. While installs
+  run, `installStatus` (via `fanOpts.tick`, every `CREW_INSTALL_TICK_MS`, default 15000) logs status lines
+  under services — the active installer (first without its marker): `⏳ installing · <elapsed> · now:
+  <oldest › newest command>` from one `ps -A -o pid= -o pgid= -o stat= -o etime= -o command=` per tick
+  (its process group, minus its own shells and crew's `sleep`); every other service, ONCE per active
+  installer: `⏳ waiting for <name>'s install`. A group member in state `T` means a terminal read stopped
+  the group (SIGTTIN — services run in their own background process group): `⏸ install stuck on a
+  terminal prompt`, naming the newest command. Tick lines also go to the run logs (tee). `note` closes a
+  service's unterminated line first, so a status line always gets its own row. crew never
   decides whether an install is needed — the command must be a cheap no-op when current. In `crew config`,
   `start`, `debug` AND `install` are **dedicated text fields** (stored as `tasks.start` / `tasks.debug` /
   `tasks.install`); the `tasks`

@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -166,6 +169,8 @@ func cmdStart(flags *Flags, rest []string) {
 			_ = os.RemoveAll(markerDir)
 			_ = os.Mkdir(markerDir, 0o700)
 		}
+		opts.tickEvery = envMs("CREW_INSTALL_TICK_MS", 15000)
+		opts.tick = installStatus(res.runnable, markerDir)
 	}
 	// EVERY interactive run is registered + tee'd: output mirrors into per-service log files and
 	// the registry records the pids, so the read-only agent (summoned with the viewer's [a] key)
@@ -359,3 +364,161 @@ func cmdWorkspace(flags *Flags, rest []string) {
 	launch(editor.bin, []string{wsFile}, "")
 }
 
+// installStatus keeps a slice with installs from ever looking frozen: on every tick until the last
+// install has finished, the installing service logs for how long and what it's running right now
+// (or that it's stuck on a terminal prompt), and each other service logs once whose install it's
+// waiting for.
+func installStatus(runnable []*runnableCmd, markerDir string) func(pids map[string]int) []fanLine {
+	markerTime := func(i int) (time.Time, bool) {
+		st, err := os.Stat(filepath.Join(markerDir, strconv.Itoa(i)))
+		if err != nil {
+			return time.Time{}, false
+		}
+		return st.ModTime(), true
+	}
+	told := map[int]string{} // service pid -> the installer it last said it's waiting for
+	return func(pids map[string]int) []fanLine {
+		active := -1        // the installer running now: the first one without its marker
+		var since time.Time // when it started: the previous installer's marker (zero = at spawn)
+		for i, r := range runnable {
+			if r.install == "" {
+				continue
+			}
+			t, done := markerTime(i)
+			if !done {
+				active = i
+				break
+			}
+			since = t
+		}
+		if active < 0 {
+			return nil
+		}
+		procs := psProcs()
+		var lines []fanLine
+		for i, r := range runnable {
+			pid := pids[r.name]
+			if pid == 0 {
+				continue
+			}
+			if i == active {
+				lines = append(lines, fanLine{r.name, installLine(procs, pid, since)})
+			} else if name := runnable[active].name; told[pid] != name {
+				told[pid] = name
+				lines = append(lines, fanLine{r.name, cDim("⏳ waiting for " + name + "'s install")})
+			}
+		}
+		return lines
+	}
+}
+
+// The installing service's line: how long, then its install's command and newest descendant from
+// its process group. Reading the terminal from crew's background group stops the whole group, so a
+// stopped one means a prompt no one can answer here: name its newest command instead.
+func installLine(procs []psProc, pgid int, since time.Time) string {
+	var root psProc // the service's own shell (its pid is the group id)
+	for _, p := range procs {
+		if p.pid == pgid {
+			root = p
+		}
+	}
+	took := time.Since(since)
+	if since.IsZero() {
+		took = time.Duration(root.age) * time.Second
+	}
+	stopped := false
+	var cmds []psProc // what's actually running: not the line's own shells, not crew's sleep
+	for _, p := range procs {
+		if p.pgid != pgid {
+			continue
+		}
+		stopped = stopped || strings.Contains(p.stat, "T")
+		if p.pid != pgid && p.command != root.command && !strings.HasPrefix(p.command, "sleep ") {
+			cmds = append(cmds, p)
+		}
+	}
+	sort.SliceStable(cmds, func(a, b int) bool { return cmds[a].age > cmds[b].age }) // oldest first
+	n := len(cmds)
+	if stopped {
+		line := "⏸ install stuck on a terminal prompt · " + fmtElapsed(took)
+		if n > 0 {
+			line += " · " + clip(cmds[n-1].command)
+		}
+		return cYellow(line + " — crew can't answer it: run the install once in a terminal")
+	}
+	line := "⏳ installing · " + fmtElapsed(took)
+	if n > 0 {
+		line += " · now: " + clip(cmds[0].command)
+		if n > 1 {
+			line += " › " + clip(cmds[n-1].command)
+		}
+	}
+	return cDim(line)
+}
+
+type psProc struct {
+	pid, pgid, age int // age: seconds since it started
+	stat, command  string
+}
+
+var psLineRE = regexp.MustCompile(`^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.*)$`)
+
+// psProcs snapshots every process: one `ps` (POSIX options, macOS and Linux alike) per tick.
+func psProcs() []psProc {
+	out, err := exec.Command("ps", "-A", "-o", "pid=", "-o", "pgid=", "-o", "stat=", "-o", "etime=", "-o", "command=").Output()
+	if err != nil {
+		return nil
+	}
+	var procs []psProc
+	for _, line := range strings.Split(string(out), "\n") {
+		if m := psLineRE.FindStringSubmatch(line); m != nil {
+			pid, _ := strconv.Atoi(m[1])
+			pgid, _ := strconv.Atoi(m[2])
+			procs = append(procs, psProc{pid: pid, pgid: pgid, age: etimeSeconds(m[4]), stat: m[3], command: m[5]})
+		}
+	}
+	return procs
+}
+
+// etimeSeconds parses ps's elapsed time, [[dd-]hh:]mm:ss.
+func etimeSeconds(s string) int {
+	days := 0
+	if d, rest, ok := strings.Cut(s, "-"); ok {
+		days, _ = strconv.Atoi(d)
+		s = rest
+	}
+	secs := 0
+	for _, part := range strings.Split(s, ":") {
+		n, _ := strconv.Atoi(part)
+		secs = secs*60 + n
+	}
+	return days*86400 + secs
+}
+
+// 45s, 1m05s, 2h03m.
+func fmtElapsed(d time.Duration) string {
+	s := int(d.Seconds())
+	switch {
+	case s < 60:
+		return fmt.Sprintf("%ds", s)
+	case s < 3600:
+		return fmt.Sprintf("%dm%02ds", s/60, s%60)
+	}
+	return fmt.Sprintf("%dh%02dm", s/3600, s%3600/60)
+}
+
+// A command line short enough for a status line: the program and its script (the first two words)
+// lose their directories — `python poetry install` — and it's at most 80 chars.
+func clip(cmd string) string {
+	f := strings.Fields(cmd)
+	for i := 0; i < len(f) && i < 2; i++ {
+		if strings.HasPrefix(f[i], "/") {
+			f[i] = filepath.Base(f[i])
+		}
+	}
+	s := strings.Join(f, " ")
+	if r := []rune(s); len(r) > 80 {
+		s = string(r[:79]) + "…"
+	}
+	return s
+}

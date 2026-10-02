@@ -1,0 +1,21 @@
+{
+ "version": 2,
+ "services": {
+  "slow": {
+   "path": "slow",
+   "type": "backend",
+   "tasks": {
+    "install": "sh status-install.sh",
+    "start": "echo SLOW''UP; sleep 30"
+   }
+  },
+  "next": {
+   "path": "next",
+   "type": "backend",
+   "tasks": {
+    "install": "true",
+    "start": "echo NEXT''UP; sleep 30"
+   }
+  }
+ }
+}

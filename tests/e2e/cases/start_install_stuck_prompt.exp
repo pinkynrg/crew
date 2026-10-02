@@ -1,0 +1,12 @@
+# an install that blocks reading the terminal (an ssh/git prompt) gets stopped by the kernel — it
+# runs in its own process group, and crew owns the terminal — so crew names it instead of freezing.
+# fixture: install-prompt
+source tests/e2e/utils/lib.exp
+set env(CREW_INSTALL_TICK_MS) 1000
+set env(CREW_KILL_GRACE_MS) 300
+crun start env=x
+must {enter run}
+send $ENTER
+must {stuck on a terminal prompt[^\r\n]{1,16}sh -c read answer < /dev/tty}
+send $ESC
+want_done
