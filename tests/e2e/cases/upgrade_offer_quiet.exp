@@ -1,0 +1,44 @@
+# Daily update offer stays quiet: never asks with CREW_NO_UPDATE_CHECK set or when not interactive
+# (stdout piped) even though a newer release is out, and checks but doesn't ask when up to date.
+# fixture: upgrade
+source tests/e2e/utils/lib.exp
+spawn -noecho sh -c "$env(CREW) --version"
+expect -re {(\d+\.\d+\.\d+[^\r\n]*)} { set cur $expect_out(1,string) }
+catch wait
+# throwaway releases server: answers with the tag in $TMP/tag and logs HIT per request
+exec echo v99.9.9 > $env(TMP)/tag
+spawn -noecho node -e "
+  const fs = require('fs');
+  const s = require('http').createServer((q, r) => {
+    process.stdout.write('HIT' + String.fromCharCode(10));
+    r.end(JSON.stringify({ tag_name: fs.readFileSync(process.argv\[1\], 'utf8').trim(), assets: \[\] }));
+  });
+  s.listen(0, '127.0.0.1', () => process.stdout.write('PORT ' + s.address().port + String.fromCharCode(10)));
+" $env(TMP)/tag
+expect -re {PORT (\d+)} { set port $expect_out(1,string) }
+set srv $spawn_id
+set env(CREW_RELEASES_API) "http://127.0.0.1:$port"
+proc no_offer {} {
+  global spawn_id
+  expect {
+    -re {upgrade now} { puts "\n!! offered an upgrade"; exit 3 }
+    -re {Services} {}
+    timeout { puts "\n!! TIMEOUT waiting for: Services"; exit 3 }
+  }
+}
+set env(CREW_NO_UPDATE_CHECK) 1
+crun list
+no_offer
+want_exit 0
+unset env(CREW_NO_UPDATE_CHECK)
+spawn -noecho sh -c "$env(CREW) --config $env(CONFIG) list | cat"
+no_offer
+want_exit 0
+exec echo v$cur > $env(TMP)/tag
+crun list
+no_offer
+want_exit 0
+# the up-to-date run did check
+set spawn_id $srv
+must {HIT}
+close -i $srv

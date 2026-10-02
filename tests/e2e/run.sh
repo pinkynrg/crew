@@ -22,6 +22,8 @@
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 export CREW="${CREW:-$(pwd)/.build/crew}"
+# no daily upgrade offer mid-suite, whatever version the binary is (upgrade_offer_* unset it)
+export CREW_NO_UPDATE_CHECK=1
 update=0; filters=""
 for a in "$@"; do
   if [ "$a" = "-u" ]; then update=1; else filters="$filters $a"; fi

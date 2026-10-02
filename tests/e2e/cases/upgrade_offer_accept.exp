@@ -1,0 +1,34 @@
+# Daily update offer, accepted: before an everyday command (`crew list`) crew sees a newer release,
+# asks, and on "y" upgrades its own binary, then re-runs the SAME command on the new one. Works on a
+# COPY of the binary; the "new version" is a script that echoes the args it was re-run with.
+# fixture: upgrade
+source tests/e2e/utils/lib.exp
+exec cp [lindex $CREWBIN 0] $env(TMP)/crew-copy
+exec mkdir -p $env(TMP)/rel
+set f [open $env(TMP)/rel/crew w]; puts $f "#!/bin/sh"; puts $f {echo NEWCREW "$@"}; close $f
+exec chmod +x $env(TMP)/rel/crew
+exec tar -C $env(TMP)/rel -czf $env(TMP)/asset.tgz crew
+set os [exec go env GOOS]
+set arch [exec go env GOARCH]
+# throwaway releases server: /releases/latest -> v99.9.9 with the matching asset; /dl -> the tar.gz
+spawn -noecho node -e "
+  const fs = require('fs');
+  const s = require('http').createServer((q, r) => {
+    if (q.url === '/dl') return r.end(fs.readFileSync(process.argv\[1\]));
+    r.end(JSON.stringify({ tag_name: 'v99.9.9', assets: \[{ name: 'crew_99.9.9_$os\_$arch.tar.gz', browser_download_url: 'http://127.0.0.1:' + s.address().port + '/dl' }\] }));
+  });
+  s.listen(0, '127.0.0.1', () => process.stdout.write('PORT ' + s.address().port + String.fromCharCode(10)));
+" $env(TMP)/asset.tgz
+expect -re {PORT (\d+)} { set port $expect_out(1,string) }
+set srv $spawn_id
+set env(CREW_RELEASES_API) "http://127.0.0.1:$port"
+unset -nocomplain env(CREW_NO_UPDATE_CHECK)
+spawn -noecho $env(TMP)/crew-copy --config $env(CONFIG) list
+must {v99.9.9 is out}
+must {upgrade now\? \[y/N\]}
+send "y$ENTER"
+must {upgraded}
+# re-run on the new binary with the same args
+must {NEWCREW --config \S+config.json list}
+want_exit 0
+close -i $srv

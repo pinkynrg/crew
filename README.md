@@ -81,7 +81,10 @@ crew --version
 Or grab a binary from [GitHub Releases](https://github.com/pinkynrg/crew/releases), or build from
 source with `go install github.com/pinkynrg/crew/cmd/crew@latest`. macOS + Linux (arm64/amd64);
 `code` (the VS Code CLI) and `claude` on your PATH for those two surfaces. Self-update with
-`crew upgrade`.
+`crew upgrade`; crew also offers it by itself — at most once a day, an everyday command run in a
+terminal asks `upgrade now? [y/N]` when a newer release is out (yes upgrades, then re-runs your
+command). The last check is remembered in `update-check.json` beside the config (gitignore it like
+`local.json`); `CREW_NO_UPDATE_CHECK=1` turns the offer off.
 
 ## How it's configured
 

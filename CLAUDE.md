@@ -383,6 +383,15 @@ crew is a Go CLI shipped as a single static binary. `make build` → `.build/cre
   SIGINT). `menu()` pauses stdin + drops raw mode on close, so `openFilter` re-asserts
   `setRawMode(true)`+`resume()` after or keys go dead. `detachKeys` (called in `settle`) resets
   the region + leaves the alternate screen. No-op when piped/CI (`viewer` stays null).
+- **Update offer** (`offerUpgrade`, upgrade.go): before the everyday commands (`list`/`start`/`workspace`/
+  `graph`/`resolve`/`config`/`check`/`pull`) crew checks the latest release at most once a day
+  (`update-check.json` beside the config — its mtime is the last check, written BEFORE the fetch so being
+  offline costs one try a day) with a 2s cap; when it's newer (`newerVersion`, numeric x.y.z) it asks `upgrade
+  now? [y/N]` as a plain cooked-mode line read (no raw-mode view has started the stdin reader yet). Yes =
+  `replaceSelf` (the `crew upgrade` swap) then `syscall.Exec` of the same argv on the new binary. Silent on
+  any failure. Skipped when not interactive, with `CREW_NO_UPDATE_CHECK` set (run.sh exports it so the suite
+  never asks; the `upgrade_offer_*` cases unset it), for Homebrew installs, and for a dev build (unstamped
+  `0.0.0`) unless `CREW_RELEASES_API` is set (the e2e hook).
 
 ## Testing
 
@@ -442,7 +451,7 @@ token from the same output, or bridge the char with a regex (`overrides .{0,4}lo
 Audit notes (for a port): `crew start` requires a full TTY for the picker, so the piped/non-interactive
 branches in cmdStart/runGuards/render are UNREACHABLE from the CLI today (defensive code, not spec);
 resolveEnvs' unreached-node re-seed loop is likewise defensive (ref edges are skipped entirely, so
-source-seeding reaches everything). `crew upgrade` is e2e-tested against a throwaway
+source-seeding reaches everything). `crew upgrade` (and the daily offer) is e2e-tested against a throwaway
 node http server (a fake GitHub releases API via `CREW_RELEASES_API`) serving a tar.gz asset built
 inside the case; `crew pull` via the same in-case http-server technique.
 

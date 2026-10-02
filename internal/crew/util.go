@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 func homeDir() string {
@@ -136,9 +137,10 @@ func launch(bin string, args []string, dir string) {
 	osExit(0)
 }
 
-// GET a URL as text, following redirects.
-func fetchUrl(u string) (string, error) {
+// GET a URL as text, following redirects. timeout 0 = no limit.
+func fetchUrl(u string, timeout time.Duration) (string, error) {
 	client := &http.Client{
+		Timeout: timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) > 5 {
 				return fmt.Errorf("too many redirects")

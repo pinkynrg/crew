@@ -1,0 +1,26 @@
+# Daily update offer, declined: "n" runs the command on the current binary, and crew doesn't ask
+# again within the day — the next run goes straight to the command.
+# fixture: upgrade
+source tests/e2e/utils/lib.exp
+# throwaway releases server: a newer release with no assets (a wrong "yes" fails, replacing nothing)
+spawn -noecho node -e "
+  const s = require('http').createServer((q, r) => r.end(JSON.stringify({ tag_name: 'v99.9.9', assets: \[\] })));
+  s.listen(0, '127.0.0.1', () => process.stdout.write('PORT ' + s.address().port + String.fromCharCode(10)));
+"
+expect -re {PORT (\d+)} { set port $expect_out(1,string) }
+set srv $spawn_id
+set env(CREW_RELEASES_API) "http://127.0.0.1:$port"
+unset -nocomplain env(CREW_NO_UPDATE_CHECK)
+crun list
+must {upgrade now\? \[y/N\]}
+send "n$ENTER"
+must {Services}
+want_exit 0
+crun list
+expect {
+  -re {upgrade now} { puts "\n!! asked again within the day"; exit 3 }
+  -re {Services} {}
+  timeout { puts "\n!! TIMEOUT waiting for: Services"; exit 3 }
+}
+want_exit 0
+close -i $srv

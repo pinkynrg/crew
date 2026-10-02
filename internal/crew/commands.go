@@ -339,7 +339,7 @@ func cmdPull(flags *Flags, url string) {
 		fail("pull: usage: crew pull <url-to-config.json>")
 	}
 	path := userConfigPath(flags)
-	text, err := fetchUrl(url)
+	text, err := fetchUrl(url, 0)
 	if err != nil {
 		fail("pull: could not fetch config: %s", err.Error())
 	}
@@ -478,6 +478,10 @@ func Main(argv []string) {
 		return
 	}
 	cmd, rest := pos[0], pos[1:]
+	switch cmd {
+	case "list", "start", "workspace", "graph", "resolve", "config", "check", "pull":
+		offerUpgrade(flags)
+	}
 	restFirst := ""
 	if len(rest) > 0 {
 		restFirst = rest[0]
