@@ -5,19 +5,52 @@ package crew
 // logs in <crewHome>/runs/<runId>/<name>.log (tee'd from the live viewer).
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func runsDir(userPath string) string     { return filepath.Join(crewHomeFor(userPath), "runs") }
 func regPath(userPath, id string) string { return filepath.Join(runsDir(userPath), id+".json") }
 func runLogPath(userPath, id, name string) string {
 	return filepath.Join(runsDir(userPath), id, sanitize(name)+".log")
+}
+
+// stampWriter starts every line written through it with the time its first byte arrived
+// (logTimeFull), so the run logs the agent reads carry the same time axis as a viewer copy.
+type stampWriter struct {
+	w       io.Writer
+	midLine bool
+}
+
+func (s *stampWriter) Write(p []byte) (int, error) {
+	stamp := time.Now().Format(logTimeFull) + " "
+	var b []byte
+	for rest := p; len(rest) > 0; {
+		if !s.midLine {
+			b = append(b, stamp...)
+			s.midLine = true
+		}
+		i := bytes.IndexByte(rest, '\n')
+		if i < 0 {
+			b = append(b, rest...)
+			break
+		}
+		b = append(b, rest[:i+1]...)
+		rest = rest[i+1:]
+		s.midLine = false
+	}
+	if _, err := s.w.Write(b); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 // guardsLogName is the reserved per-run log for guard pass/fail — read by `logs` so the agent can

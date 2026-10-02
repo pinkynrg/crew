@@ -546,6 +546,15 @@ func loadLogWrap(flags *Flags) bool {
 }
 func saveLogWrap(flags *Flags, wrap bool) { saveMachineKey(flags, "logWrap", wrap) }
 
+// Log-viewer [d] time column. Default: shown.
+func loadLogTime(flags *Flags) bool {
+	if b, ok := loadMachine(flags).Get("logTime").(bool); ok {
+		return b
+	}
+	return true
+}
+func saveLogTime(flags *Flags, show bool) { saveMachineKey(flags, "logTime", show) }
+
 // Graph-view prefs, shared by every graph UI. `graphRefs` = show reference edges (default on).
 // `graphShown` = the node filter (nil = all).
 func loadGraphRefs(flags *Flags) bool {

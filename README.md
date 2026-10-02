@@ -225,7 +225,10 @@ unselected services point at.
 
 `crew start` **always streams**: services run in parallel with per-service-colored output, and
 Ctrl-C - or any one process exiting - tears the whole group down. On a TTY this is a full-screen
-log viewer (`f` to filter which services are shown, `esc`/`Ctrl-C` to stop).
+log viewer (`f` to filter which services are shown, `d` to show/hide each line's time (remembered),
+`c` to copy, `esc`/`Ctrl-C` to stop). A copy always carries each line's full date and time
+(`2026-10-02 14:03:07.123 [service] …`), whether or not the time column is shown, and so do the run's
+log files the agent pane reads — so an agent can follow what happened when, across services.
 
 Teardown is reliable because each command runs via `/bin/sh -c` in **its own process group**
 (`spawn` detached); crew signals the whole group by pgid - SIGTERM, then SIGKILL after a grace

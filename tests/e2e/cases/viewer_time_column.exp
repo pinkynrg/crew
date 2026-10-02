@@ -1,0 +1,29 @@
+# the log viewer's d: every row starts with its time (HH:MM:SS.mmm — goldens normalize the digits),
+# d hides the column and the choice is remembered for the next run.
+# fixture: viewer-stream
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {\d\d:\d\d:\d\d\.\d\d\d.{1,80}gamma line}
+sleep 0.5
+snap "time-shown"
+send $TIME
+sleep 0.5
+snap "time-hidden"
+snapend
+send $ESC
+want_done
+local_has {"logTime": false}
+# remembered: the next run starts with the column hidden (a plain spawn: crun would re-record over
+# the goldens' first segment)
+eval spawn -noecho $CREWBIN --config $env(CONFIG) start env=x
+must {enter run}
+send $ENTER
+expect {
+  -re {\d\d:\d\d:\d\d\.\d\d\d} { puts "\n!! time column back after hiding it"; exit 3 }
+  -re {gamma line} {}
+  timeout { puts "\n!! TIMEOUT waiting for: gamma line"; exit 3 }
+}
+send $ESC
+want_done

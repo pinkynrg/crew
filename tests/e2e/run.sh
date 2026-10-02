@@ -15,7 +15,8 @@
 # diffed against the golden folder BESIDE the case: cases/<case>.snaps/<n>-<label>.txt — one snap =
 # one golden FILE, the file IS the screenshot (pure rendered grid, no headers). Run with -u to
 # (re)write goldens. Geometry: the shared default in utils/lib.exp (100x40); a case that overrides
-# `stty_init` gets its goldens rendered at ITS declared size. Golden diffs are deterministic, so a
+# `stty_init` gets its goldens rendered at ITS declared size. The tmp dir renders as __TMP__ and the
+# log viewer's time column (HH:MM:SS.mmm) as that literal, so goldens stay deterministic and a
 # mismatch fails without a retry.
 #
 # Usage: sh tests/e2e/run.sh [-u] [name…]   — names filter cases by substring.
@@ -72,7 +73,8 @@ for exp in tests/e2e/cases/*.exp; do
       if [ ! -s "$tmp/raw.$n" ] || [ ! -f "$tmp/cap.$n" ]; then n=$((n + 1)); continue; fi
       cap=$(cat "$tmp/cap.$n" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9-')
       shot="$gdir/$n-$cap.txt"
-      node tests/e2e/utils/render.mjs "$size" < "$tmp/raw.$n" | sed "s|$tmp|__TMP__|g" > "$tmp/shot.$n"
+      node tests/e2e/utils/render.mjs "$size" < "$tmp/raw.$n" |
+        sed -e "s|$tmp|__TMP__|g" -e 's/[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9][0-9][0-9]/HH:MM:SS.mmm/g' > "$tmp/shot.$n"
       if [ "$update" = 1 ]; then
         cp "$tmp/shot.$n" "$shot"
       elif [ ! -f "$shot" ]; then

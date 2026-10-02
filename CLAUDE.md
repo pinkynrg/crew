@@ -91,7 +91,7 @@ crew is a Go CLI shipped as a single static binary. `make build` → `.build/cre
   the resolved config (works with `--config`); gitignore it when committing. `local.json`
   also holds `lastSelection` (the remembered picker selection) + `lastDebug` (the remembered debug set,
   below) + UI prefs (`graphRefs`/`graphShown`/
-  `logWrap`/`hiddenLog`). (`overrides` USED to live here; it moved into the committable `config.json` —
+  `logWrap`/`logTime`/`hiddenLog`). (`overrides` USED to live here; it moved into the committable `config.json` —
   a legacy `local.json.overrides` auto-migrates up on load, see below.)
 - **Missing-folder gate** (NON-blocking): the folder-consuming commands (`start`/`workspace`/`claude`/
   `graph`/`resolve`) run `warnMissing(cfg)` then `presentCfg(cfg)` — a service whose `path`
@@ -383,6 +383,12 @@ crew is a Go CLI shipped as a single static binary. `make build` → `.build/cre
   SIGINT). `menu()` pauses stdin + drops raw mode on close, so `openFilter` re-asserts
   `setRawMode(true)`+`resume()` after or keys go dead. `detachKeys` (called in `settle`) resets
   the region + leaves the alternate screen. No-op when piped/CI (`viewer` stays null).
+  **Timestamps**: every `histRow` carries `at` — when its line's first byte arrived (`feed` keeps `pendingAt`
+  for an unterminated line). `d` toggles the dim `HH:MM:SS.mmm` column (`rowLine` builds a row as drawn;
+  persisted as `local.json.logTime`, default shown). `c` copy ALWAYS prefixes the full `logTimeFull` stamp
+  (`2006-01-02 15:04:05.000`) whatever `d` shows — the time axis an agent reading a paste needs — and the
+  run log files (tee + `_guards.log`) are written through `stampWriter`, the same stamp per line, so the
+  MCP `logs` tool carries it too. Screen goldens normalize the column to `HH:MM:SS.mmm` (run.sh's sed).
 - **Update offer** (`offerUpgrade`, upgrade.go): before the everyday commands (`list`/`start`/`workspace`/
   `graph`/`resolve`/`config`/`check`/`pull`) crew checks the latest release at most once a day
   (`update-check.json` beside the config — its mtime is the last check, written BEFORE the fetch so being

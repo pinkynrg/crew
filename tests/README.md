@@ -52,7 +52,7 @@ quitting). One snap = one golden file `cases/<case>.snaps/<n>-<label>.txt`, a pu
 open it in an editor and you see the TUI at that moment. Rules for snapping cases:
 - geometry is the shared lib default (100x40); a case that overrides `stty_init` gets its goldens
   rendered at its declared size — keep overrides rare
-- fixture output must be deterministic — no timers, counters, or real paths (tmp is normalized to `__TMP__`)
+- fixture output must be deterministic — no timers, counters, or real paths (tmp is normalized to `__TMP__`, the log viewer's time column to `HH:MM:SS.mmm`)
 - goldens are grids, not byte streams: a port that paints the same screen passes whatever escapes it used
 - snaps are DELIBERATE capture points at meaningful states, not per-keystroke: each one drains the PTY
   (~1s) and becomes a reviewed golden — snap the states worth guarding

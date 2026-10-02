@@ -1,0 +1,28 @@
+# the log viewer's c always copies each line with its full date and time — even with the column
+# hidden (d) — and the run log the agent reads is stamped the same way. The clipboard is a fake
+# pbcopy/wl-copy on PATH that saves what it receives.
+# fixture: viewer-stream
+source tests/e2e/utils/lib.exp
+exec mkdir -p $env(TMP)/bin
+foreach tool {pbcopy wl-copy} {
+  set f [open $env(TMP)/bin/$tool w]; puts $f "#!/bin/sh"; puts $f "cat > $env(TMP)/clip"; close $f
+  exec chmod +x $env(TMP)/bin/$tool
+}
+set env(PATH) "$env(TMP)/bin:$env(PATH)"
+crun start env=x
+must {enter run}
+send $ENTER
+must {gamma line}
+send $TIME
+sleep 0.5
+send $COPY
+must {copied \d+ lines}
+send $ESC
+want_done
+set stamp {\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}}
+set fh [open $env(TMP)/clip r]; set clip [read $fh]; close $fh
+foreach want {alpha beta gamma} {
+  if {![regexp "(^|\n)$stamp \\\[v\\\] $want line\n" $clip]} { puts "\n!! copy lacks a stamped '$want' line:\n$clip"; exit 8 }
+}
+set runlog [exec sh -c "cat $env(TMP)/runs/*/v.log"]
+if {![regexp "^$stamp alpha line\n$stamp beta line\n$stamp gamma line" $runlog]} { puts "\n!! run log not stamped:\n$runlog"; exit 8 }

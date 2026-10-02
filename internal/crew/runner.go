@@ -69,8 +69,10 @@ type fanOpts struct {
 	saveHidden    func([]string)
 	logWrap       bool
 	saveWrap      func(bool)
+	logTime       bool
+	saveTime      func(bool)
 	// Run hooks (crew start): tee mirrors each service's
-	// raw output into a writer (the run's log file — what the MCP `logs` tool reads), onSpawned
+	// output into a writer (the run's stamped log file — what the MCP `logs` tool reads), onSpawned
 	// reports the spawned pids once (the run registry — what `status`/`logs` read).
 	tee       map[string]io.Writer
 	onSpawned func(pids map[string]int)
@@ -82,7 +84,14 @@ type histRow struct {
 	proc   *fanProc
 	text   string
 	notice bool
+	at     time.Time // when the line's first byte arrived
 }
+
+// Log timestamps: the viewer's [d] column, and the full form copies and run logs always carry.
+const (
+	logTimeShort = "15:04:05.000"
+	logTimeFull  = "2006-01-02 15:04:05.000"
+)
 
 func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 	killGraceMs := envMs("CREW_KILL_GRACE_MS", 5000)
@@ -487,8 +496,10 @@ type viewerState struct {
 	guardProcs     map[string]*fanProc
 	history        []histRow
 	pending        map[*fanProc]string
+	pendingAt      map[*fanProc]time.Time // when each pending (unterminated) line began
 	shown          map[string]bool
 	wrap           bool
+	showTime       bool
 	scroll         int
 	active         bool
 	dirty          bool
@@ -503,6 +514,7 @@ type viewerState struct {
 	maxLine        int
 	saveHidden     func([]string)
 	saveWrap       func(bool)
+	saveTime       func(bool)
 	requestStop    func()
 	requestRestart func()
 	isAllStopped   func() bool
@@ -530,9 +542,9 @@ type viewerMenu struct {
 
 func newViewerState(commands []fanCmd, o fanOpts, logHistory, maxLine int, mu *sync.Mutex) *viewerState {
 	v := &viewerState{
-		mu: mu, pending: map[*fanProc]string{}, shown: map[string]bool{},
-		wrap: o.logWrap, active: true, logHistory: logHistory, maxLine: maxLine,
-		saveHidden: o.saveHidden, saveWrap: o.saveWrap,
+		mu: mu, pending: map[*fanProc]string{}, pendingAt: map[*fanProc]time.Time{}, shown: map[string]bool{},
+		wrap: o.logWrap, showTime: o.logTime, active: true, logHistory: logHistory, maxLine: maxLine,
+		saveHidden: o.saveHidden, saveWrap: o.saveWrap, saveTime: o.saveTime,
 		guardProcs: map[string]*fanProc{},
 		agentCfg:   o.agent,
 		guardLog:   o.guardLog,
@@ -555,7 +567,7 @@ func newViewerState(commands []fanCmd, o fanOpts, logHistory, maxLine int, mu *s
 		}
 	}
 	for _, n := range o.notices { // pre-run skips/warnings, shown inside the viewer
-		v.history = append(v.history, histRow{text: cYellow(n), notice: true})
+		v.history = append(v.history, histRow{text: cYellow(n), notice: true, at: time.Now()})
 	}
 	// Uniform prefix width: pad every [name] to the longest name so log columns line up.
 	maxName := 0
@@ -702,6 +714,18 @@ func (v *viewerState) viewW() int {
 	return viewerCols()
 }
 
+// A row as drawn: the [d] time column, the aligned [name] prefix (notices have none), the text.
+func (v *viewerState) rowLine(h histRow) string {
+	line := h.text
+	if !h.notice {
+		line = v.prefixFor(h.proc) + line
+	}
+	if v.showTime {
+		line = cDim(h.at.Format(logTimeShort)) + " " + line
+	}
+	return line
+}
+
 // Flatten the filtered history into screen rows (each <= terminal width).
 func (v *viewerState) screenRows() []string {
 	w := v.viewW()
@@ -714,10 +738,7 @@ func (v *viewerState) screenRows() []string {
 		} else if !v.matches(h.proc, h.text) {
 			continue
 		}
-		line := h.text
-		if !h.notice {
-			line = v.prefixFor(h.proc) + h.text
-		}
+		line := v.rowLine(h)
 		if v.wrap {
 			out = append(out, splitRows(line, w)...)
 		} else {
@@ -727,7 +748,9 @@ func (v *viewerState) screenRows() []string {
 	return out
 }
 
-func (v *viewerState) footerText() string {
+// The footer cut to w columns: when it doesn't fit, the key hints lose their tail, never the
+// live state (search query, scroll position) at the end.
+func (v *viewerState) footerText(w int) string {
 	if v.copyMsg != "" {
 		return v.copyMsg
 	}
@@ -766,7 +789,9 @@ func (v *viewerState) footerText() string {
 		lead = cRed("■ stopped  ")
 		escWord = "exit"
 	}
-	return lead + cDim("[f] filter (") + count + cDim(fmt.Sprintf(")  [/] search  [w] %s  [c] copy  [r] restart%s  [esc] %s", wrapWord, agentHint, escWord)) + q + pos
+	state := q + pos
+	hints := lead + cDim("[f] filter (") + count + cDim(fmt.Sprintf(")  [/] search  [w] %s  [d] time  [c] copy  [r] restart%s  [esc] %s", wrapWord, agentHint, escWord))
+	return cutRow(hints, w-len([]rune(stripSGR(state)))) + sgrReset + state
 }
 
 // Full repaint: body rows painted by absolute position, footer on the last row. One batched
@@ -808,7 +833,7 @@ func (v *viewerState) paint() {
 		}
 		buf.WriteString(cup(i+1, 1) + "\x1b[2K" + line + sgrReset)
 	}
-	buf.WriteString(cup(r, 1) + "\x1b[2K" + v.footerText())
+	buf.WriteString(cup(r, 1) + "\x1b[2K" + cutRow(v.footerText(viewerCols()), viewerCols()))
 	_, _ = os.Stdout.WriteString(buf.String())
 	v.dirty = false
 }
@@ -917,7 +942,7 @@ func (v *viewerState) paintSplit() {
 		// left cell
 		left := ""
 		if y == paneH-1 {
-			left = cutRow(v.footerText(), leftW) // viewer footer pinned to the pane's last row
+			left = cutRow(v.footerText(leftW), leftW) // viewer footer pinned to the pane's last row
 		} else if y < len(win) {
 			left = cutRow(win[y], leftW)
 		}
@@ -955,7 +980,7 @@ func (v *viewerState) runGuards(guards []guardSpec) bool {
 	v.mu.Lock()
 	idx := make([]int, len(guards))
 	for i, g := range guards {
-		v.history = append(v.history, histRow{proc: v.guardProcs[g.name], text: cDim("⏳ " + orDefault(g.comment, "checking…"))})
+		v.history = append(v.history, histRow{proc: v.guardProcs[g.name], text: cDim("⏳ " + orDefault(g.comment, "checking…")), at: time.Now()})
 		idx[i] = len(v.history) - 1
 	}
 	v.paint()
@@ -1022,6 +1047,10 @@ func (v *viewerState) scrollBy(d int) {
 }
 
 func (v *viewerState) feed(proc *fanProc, text string) {
+	now := time.Now()
+	if v.pending[proc] == "" {
+		v.pendingAt[proc] = now // a new line starts in this chunk
+	}
 	parts := strings.Split(v.pending[proc]+text, "\n")
 	rem := parts[len(parts)-1]
 	parts = parts[:len(parts)-1]
@@ -1031,24 +1060,28 @@ func (v *viewerState) feed(proc *fanProc, text string) {
 		rem = ""
 	}
 	v.pending[proc] = rem
+	at := v.pendingAt[proc]
 	added := 0
 	for _, raw := range parts {
 		line := raw
 		if len(raw) > v.maxLine { // clip overlong lines so wrapping stays cheap
 			line = raw[:v.maxLine] + cDim(fmt.Sprintf(" …[+%d chars]", len(raw)-v.maxLine))
 		}
-		v.history = append(v.history, histRow{proc: proc, text: line})
+		row := histRow{proc: proc, text: line, at: at}
+		at = now // every later line began in this chunk
+		v.history = append(v.history, row)
 		if len(v.history) > v.logHistory {
 			v.history = v.history[1:]
 		}
 		if v.matches(proc, line) {
 			if v.wrap {
-				added += len(splitRows(v.prefixFor(proc)+line, viewerCols()))
+				added += len(splitRows(v.rowLine(row), viewerCols()))
 			} else {
 				added++
 			}
 		}
 	}
+	v.pendingAt[proc] = at
 	if !v.active || added == 0 {
 		return
 	}
@@ -1354,13 +1387,21 @@ func (v *viewerState) handleViewerKey(s string) {
 			v.saveWrap(v.wrap) // remember wrap/cut across runs
 		}
 		v.paint()
+	case "d":
+		v.showTime = !v.showTime
+		v.scroll = 0
+		if v.saveTime != nil {
+			v.saveTime(v.showTime) // remember across runs
+		}
+		v.paint()
 	case "c":
-		// Copy the FILTERED view as full lines — ANSI stripped, [name] prefixed, ignoring the
+		// Copy the FILTERED view as full lines — ANSI stripped, full date+time and [name] prefixed
+		// whatever [d] shows (the time axis is what an agent reading a paste needs), ignoring the
 		// wrap/cut display transform.
 		var lines []string
 		for _, h := range v.history {
 			if !h.notice && v.matches(h.proc, h.text) {
-				lines = append(lines, "["+h.proc.name+"] "+stripSGR(h.text))
+				lines = append(lines, h.at.Format(logTimeFull)+" ["+h.proc.name+"] "+stripSGR(h.text))
 			}
 		}
 		if len(lines) == 0 {
@@ -1470,7 +1511,7 @@ func (v *viewerState) detach() {
 }
 
 func (v *viewerState) notice(text string) {
-	v.history = append(v.history, histRow{text: text, notice: true})
+	v.history = append(v.history, histRow{text: text, notice: true, at: time.Now()})
 	if len(v.history) > v.logHistory {
 		v.history = v.history[1:]
 	}

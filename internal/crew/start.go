@@ -158,6 +158,8 @@ func cmdStart(flags *Flags, rest []string) {
 		saveHidden:    func(h []string) { saveHiddenLog(flags, h) },
 		logWrap:       loadLogWrap(flags),
 		saveWrap:      func(w bool) { saveLogWrap(flags, w) },
+		logTime:       loadLogTime(flags),
+		saveTime:      func(t bool) { saveLogTime(flags, t) },
 	}
 	if markerDir != "" {
 		opts.beforeSpawn = func() { // an [r] restart re-runs every install: start from no markers
@@ -185,13 +187,13 @@ func cmdStart(flags *Flags, rest []string) {
 		var files []*os.File
 		for _, r := range res.runnable {
 			if f, err := os.OpenFile(runLogPath(m.userPath, runID, r.name), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-				tee[r.name] = f
+				tee[r.name] = &stampWriter{w: f}
 				files = append(files, f)
 			}
 		}
 		// A dedicated guards.log so `logs` can explain a guard-blocked run (services never started).
 		if gf, err := os.OpenFile(runLogPath(m.userPath, runID, guardsLogName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-			opts.guardLog = gf
+			opts.guardLog = &stampWriter{w: gf}
 			files = append(files, gf)
 		}
 		opts.tee = tee

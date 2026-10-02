@@ -53,7 +53,7 @@ func mcpTools() []any {
 			om("title", "Run status", "readOnlyHint", true),
 			toolSchema(om("runId", prop("string", "the run to inspect; defaults to the current session run")))),
 		tool("logs",
-			"Tail a run's captured output. Be token-frugal: filter with `grep` (OR terms: 'error|warn|traceback'), add `context` lines around hits when investigating, narrow with `service` only when following evidence, and pass the returned `nextCursor` back as `cursor` to read only NEW lines since your previous call. Reads are byte-capped, so huge logs are cheap. This is a pure READ — it never changes what the human sees in their live log viewer.",
+			"Tail a run's captured output. Be token-frugal: filter with `grep` (OR terms: 'error|warn|traceback'), add `context` lines around hits when investigating, narrow with `service` only when following evidence, and pass the returned `nextCursor` back as `cursor` to read only NEW lines since your previous call. Reads are byte-capped, so huge logs are cheap. Every line starts with the local time crew captured it (YYYY-MM-DD HH:MM:SS.mmm), so events line up across services. This is a pure READ — it never changes what the human sees in their live log viewer.",
 			om("title", "Run logs", "readOnlyHint", true),
 			toolSchema(om(
 				"runId", prop("string", "the run to read; defaults to the current session run"),

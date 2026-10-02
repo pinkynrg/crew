@@ -1,0 +1,40 @@
+v: no 'x' env file — running x anyway
+[v ·] ▶ cd __TMP__/projects/v && sh say.sh
+[v ·] alpha line
+[v ·] beta line
+[v ·] gamma line
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+crew: [f] filter (1/1)  [/] search  [w] cut  [d] time  [c] copy  [r] restart  [a] agent  [esc] stop

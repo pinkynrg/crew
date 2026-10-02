@@ -46,6 +46,7 @@ set ALL       "a"  ;# multiselects (filter panel, viewer menu): toggle all/none
 set DEBUG     "d"  ;# start selector: toggle the focused local node's debug task
 set OVERRIDES "e"  ;# start selector: per-run env-overrides checklist
 set WRAP      "w"  ;# log viewer: toggle wrap/cut (persisted)
+set TIME      "d"  ;# log viewer: show/hide the time column (persisted)
 set COPY      "c"  ;# log viewer: copy the filtered view to the clipboard
 set SEARCH    "/"  ;# log viewer: keyword search (type the query, enter applies, esc clears)
 set TYPEPATH  "t"  ;# folder picker / dir browser: drop to typed-path input
