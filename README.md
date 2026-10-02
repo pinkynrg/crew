@@ -62,6 +62,13 @@ spawns terminals for you.
 whole slice, only the service you're stepping through under a debugger. `d` only appears for a node
 that's on (local) *and* has a `tasks.debug`; each service owns its own debugger + port.
 
+**Fresh clones just work.** Give a service an **install** command — the optional `install` field in
+`crew config` (stored as `tasks.install`) — and `crew start` runs it before that service's start (or
+debug) command, every time. crew doesn't know whether an install is needed: the command decides, so make
+it a no-op when nothing changed, e.g. `[ node_modules/.package-lock.json -nt package-lock.json ] || npm ci`.
+Without an `install`, nothing changes: you install by hand as before. Machine-level prerequisites (a
+tool like poetry or nvm, a native lib) belong in **guards** — a guard checks and tells you what to install.
+
 ### Install
 
 crew is a **single static binary** (Go) — nothing else to install, no runtime.
@@ -195,8 +202,16 @@ last pick) and the selection is remembered globally; services are never named on
 2. else `service.runner` with `{task}` substituted (e.g. `make {task}` → `make start`);
 3. else the service is **run-less** and skipped (it still shows up in `workspace` / `claude`).
 
-A service's `tasks` map can hold **other** tasks too (e.g. `debug`, `install`), but they're just data
-for now — only `start` (and its per-node `debug` variant, below) has a command. `debug` runs under
+`service.tasks.install`, when present, runs first, as written (no placeholders), in the service's
+directory and in a subshell, so a `cd` inside it doesn't affect start. Installs run **one at a time**, in
+config order, and **no service starts until every install has finished**, so a service can rely on
+setup another one does (e.g. a monorepo's shared root `node_modules`) and installs never race on shared
+package caches. A failed install stops the run right away with its exit code; fix it and press `r`.
+Because installs run one after another, a start pays the sum of their up-to-date checks, so keep those
+checks fast. Installs apply to `debug` too, and their output streams under the service's label.
+
+A service's `tasks` map can hold **other** tasks too, but they're just data for now: only `start`, its
+per-node `debug` variant (below) and `install` (before either) are run. `debug` runs under
 `crew start` via the selector's `d` toggle.
 
 Resolved commands may contain `{name}` placeholders. `{task}` is filled from the task name,

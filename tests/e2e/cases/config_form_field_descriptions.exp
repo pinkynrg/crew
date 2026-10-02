@@ -15,7 +15,11 @@ must {command that starts this service}
 send $DOWN
 sleep 1
 must {debug mode}
-# env (5) -> its own description
+# install (5) -> its own description
+send $DOWN
+sleep 1
+must {Runs before}
+# env (6) -> its own description
 send $DOWN
 sleep 1
 must {this service's env files live}

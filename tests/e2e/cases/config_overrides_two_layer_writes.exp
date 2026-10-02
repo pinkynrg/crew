@@ -8,9 +8,9 @@ must {config editor}
 sleep 1
 send $ENTER
 sleep 1
-# fields: name path type start debug env tasks guards local match overrides(shared) localOverrides
-# --- SHARED block (field #10): 10 j's from name ---
-send [string repeat $DOWN 10]
+# fields: name path type start debug install env tasks guards local match overrides(shared) localOverrides
+# --- SHARED block (field #11): 11 downs from name ---
+send [string repeat $DOWN 11]
 sleep 1
 must {shared}
 send $ENTER
@@ -29,7 +29,7 @@ send $ENTER
 sleep 1
 send $ESC
 sleep 1
-# --- LOCAL block (field #11): one more j ---
+# --- LOCAL block (field #12): one more down ---
 send $DOWN
 sleep 1
 must {overrides .{0,4}local}

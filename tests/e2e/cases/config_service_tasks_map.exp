@@ -6,8 +6,8 @@ must {api}
 sleep 1
 send $ENTER
 sleep 1
-# tasks is field #7 (index 6): name path type start debug env tasks
-send [string repeat $DOWN 6]
+# tasks is field #8 (index 7): name path type start debug install env tasks
+send [string repeat $DOWN 7]
 sleep 1
 send $ENTER
 must {add task}

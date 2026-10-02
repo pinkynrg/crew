@@ -6,29 +6,29 @@
  ▸ webx                         │    type             frontend
    api                          │    start            vite --port 3000
    + New service                │    debug            vite --port 3000 --debug
-                                │    env              .envs/{env}.env
- GUARDS  1                      │    tasks (other)    lint=eslint .
-   vpn                          │    guards           (none)
-   + New guard                  │    local            http://localhost:3000
-                                │
-                  ┌─────────────────────── Unsaved changes ───────────────────────┐───────────────┐
-                  │                                                               │               │
-                  │                                                               │               │
-                  │                                                               │               │
-                  │                                                               │───────────────┘
-                  │          1 unsaved change — save all before leaving?          │
+                                │    install          (optional)
+ GUARDS  1                      │    env              .envs/{env}.env
+   vpn                          │    tasks (other)    lint=eslint .
+   + New guard                  │    guards           (none)
+                                │    local            http://localhost:3000
+                  ┌─────────────────────── Unsaved changes ───────────────────────┐
                   │                                                               │───────────────┐
-                  │   s save all & exit     d discard all & exit     esc cancel   │               │
+                  │                                                               │               │
+                  │                                                               │               │
+                  │                                                               │               │
+                  │          1 unsaved change — save all before leaving?          │───────────────┘
+                  │                                                               │
+                  │   s save all & exit     d discard all & exit     esc cancel   │───────────────┐
+                  │                                                               │               │
                   │                                                               │               │
                   │                                                               │               │
                   │                                                               │───────────────┘
-                  │                                                               │
-                  └───────────────────────────────────────────────────────────────┘───────────────┐
+                  └───────────────────────────────────────────────────────────────┘
+                                │ ┌─ Environment overrides · local ───────────────────────────────┐
                                 │ │ (none)                                                        │
                                 │ │                                                               │
                                 │ │                                                               │
                                 │ └───────────────────────────────────────────────────────────────┘
-                                │
                                 │
                                 │
                                 │

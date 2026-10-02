@@ -43,6 +43,7 @@ func envInt(name string, def int) int {
 
 type fanCmd struct {
 	command string
+	display string // shown on the ▶ line instead of command when set (hides crew's own plumbing)
 	name    string
 	color   func(string) string
 }
@@ -58,6 +59,7 @@ type fanProc struct {
 }
 
 type fanOpts struct {
+	beforeSpawn   func() // runs before every spawn of the slice (initial + each [r] restart)
 	killOthers    bool
 	announceExits bool
 	interactive   bool
@@ -300,6 +302,9 @@ func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 		if settled || stopRequested {
 			return
 		}
+		if o.beforeSpawn != nil {
+			o.beforeSpawn()
+		}
 		for i, cmd := range commands {
 			child := exec.Command("/bin/sh", "-c", cmd.command)
 			child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // own process group
@@ -313,7 +318,7 @@ func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 			proc := &fanProc{name: cmd.name, index: i, color: cmd.color, prefix: cmd.color("[" + cmd.name + "] "), cmd: child}
 			live[proc] = true
 			spawned = append(spawned, proc)
-			note(proc, cDim("▶ "+cmd.command)) // show the executed command up front
+			note(proc, cDim("▶ "+orDefault(cmd.display, cmd.command))) // show the executed command up front
 			if err := child.Start(); err != nil {
 				note(proc, cRed("failed to start: "+err.Error()))
 				finish(proc, exitEvent{name: proc.name, index: i, code: 1})

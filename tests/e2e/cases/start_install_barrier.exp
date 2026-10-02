@@ -1,0 +1,16 @@
+# no service starts until every install has finished: `fast` (no install) waits for `slow`'s install.
+# Output tokens are quote-split in the fixture so they never match the echoed command line.
+# fixture: install-barrier
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+# the command line shows the plain command, not crew's wait plumbing
+must {projects/fast && if}
+must {FAST(AFTERINSTALLS|TOOEARLY)}
+sleep 1
+set log [exec sh -c "cat $env(TMP)/runs/*/fast.log 2>/dev/null"]
+if {[string first "FASTTOOEARLY" $log] >= 0} { puts "\n!! fast started before slow's install finished"; exit 8 }
+if {[string first "FASTAFTERINSTALLS" $log] < 0} { puts "\n!! fast never started"; exit 8 }
+send $ESC
+want_done

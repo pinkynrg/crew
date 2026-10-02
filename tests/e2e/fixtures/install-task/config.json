@@ -1,0 +1,6 @@
+{ "version": 2,
+  "services": {
+    "svc": { "path": "svc", "type": "backend",
+             "tasks": { "install": "cd .. && echo INSTALLRAN-$(basename \"$PWD\")",
+                        "start": "echo STARTRAN-$(basename \"$PWD\"); sleep 2",
+                        "debug": "echo DEBUGRAN-$(basename \"$PWD\"); sleep 2" } } } }

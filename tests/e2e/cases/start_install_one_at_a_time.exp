@@ -1,0 +1,15 @@
+# installs run one at a time: `one` and `three` each hold a lock for a second, an overlap prints OVERLAP.
+# fixture: install-serial
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {ONEINSTALLED}
+must {THREEINSTALLED}
+must {(ONE|THREE)STARTED}
+sleep 1
+set logs [exec sh -c "cat $env(TMP)/runs/*/one.log $env(TMP)/runs/*/three.log 2>/dev/null"]
+if {[string first "OVERLAP" $logs] >= 0} { puts "\n!! two installs ran at the same time"; exit 8 }
+if {![file exists $env(TMP)/projects/LOCK.one] || ![file exists $env(TMP)/projects/LOCK.three]} { puts "\n!! an install didn't complete"; exit 8 }
+send $ESC
+want_done

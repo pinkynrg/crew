@@ -1,0 +1,15 @@
+# a failed install stops the run at once: the queued install after it never runs, nothing starts,
+# and the service shows the failed install's exit code.
+# fixture: install-fail-queue
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {BADINSTALL}
+must {exited .3.}
+sleep 1
+if {[file exists $env(TMP)/projects/LATERRAN]} { puts "\n!! a queued install ran after a failure"; exit 8 }
+set logs [exec sh -c "cat $env(TMP)/runs/*/bad.log $env(TMP)/runs/*/later.log 2>/dev/null"]
+if {[string first "BADSTARTED" $logs] >= 0 || [string first "LATERSTARTED" $logs] >= 0} { puts "\n!! a start ran despite a failed install"; exit 8 }
+send $ESC
+want_done

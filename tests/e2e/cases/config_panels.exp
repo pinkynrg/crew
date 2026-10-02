@@ -24,7 +24,7 @@ sleep 0.3
 snap "type-choice-panel"
 send $ESC
 sleep 0.3
-send [string repeat $DOWN 4]
+send [string repeat $DOWN 5]
 sleep 0.3
 send $ENTER
 must {add}

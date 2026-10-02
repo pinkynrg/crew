@@ -1,0 +1,13 @@
+# an [r] restart re-runs every install and waits for them again: after the restart `fast` must see
+# the SECOND install's count (without the reset it would start at once and still see 1).
+# fixture: install-restart
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {FASTSAW1}
+send "r"
+must {restarting stack}
+must {FASTSAW2}
+send $ESC
+want_done

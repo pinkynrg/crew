@@ -6,7 +6,7 @@ must {api}
 sleep 1
 send $ENTER
 sleep 1
-send [string repeat $DOWN 7]
+send [string repeat $DOWN 8]
 sleep 1
 send $ENTER
 must {space toggle}

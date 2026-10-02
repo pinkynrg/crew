@@ -1,0 +1,18 @@
+# tasks.install also runs before tasks.debug when a node is debug-toggled with `d`.
+# fixture: install-task
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+sleep 1
+send $DEBUG
+sleep 1
+send $ENTER
+must {DEBUGRAN-svc}
+sleep 1
+set log [exec sh -c "cat $env(TMP)/runs/*/svc.log 2>/dev/null"]
+set i [string first "INSTALLRAN-projects" $log]
+set d [string first "DEBUGRAN-svc" $log]
+if {$i < 0} { puts "\n!! install did not run before debug"; exit 8 }
+if {$d < $i} { puts "\n!! debug ran before install"; exit 8 }
+send $ESC
+want_done

@@ -1,0 +1,7 @@
+{ "version": 2,
+  "services": {
+    "slow": { "path": "slow", "type": "backend",
+              "tasks": { "install": "sleep 1; : > ../READY; echo SLOW''INSTALLED",
+                         "start": "echo SLOW''STARTED; sleep 3" } },
+    "fast": { "path": "fast", "type": "backend",
+              "tasks": { "start": "if [ -f ../READY ]; then echo FAST''AFTER''INSTALLS; else echo FAST''TOO''EARLY; fi; sleep 3" } } } }

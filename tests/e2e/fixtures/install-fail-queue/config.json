@@ -1,0 +1,8 @@
+{ "version": 2,
+  "services": {
+    "bad":   { "path": "bad", "type": "backend",
+               "tasks": { "install": "echo BAD''INSTALL; exit 3",
+                          "start": "echo BAD''STARTED; sleep 3" } },
+    "later": { "path": "later", "type": "backend",
+               "tasks": { "install": ": > ../LATERRAN",
+                          "start": "echo LATER''STARTED; sleep 3" } } } }

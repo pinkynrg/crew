@@ -1,0 +1,7 @@
+{ "version": 2,
+  "services": {
+    "slow": { "path": "slow", "type": "backend",
+              "tasks": { "install": "n=$(cat ../COUNT 2>/dev/null || echo 0); sleep 1; echo $((n+1)) > ../COUNT",
+                         "start": "sleep 30" } },
+    "fast": { "path": "fast", "type": "backend",
+              "tasks": { "start": "echo FAST''SAW$(cat ../COUNT); sleep 30" } } } }

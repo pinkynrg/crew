@@ -96,17 +96,56 @@ func cmdStart(flags *Flags, rest []string) {
 	}
 
 	paint := serviceColors(cfg) // same per-service colors as `crew list`
+	// tasks.install: installs run one at a time in config order and no service starts until the last
+	// one has finished. Each installer waits for the previous installer's marker file in a per-run
+	// temp dir, then drops its own; every command waits for the last installer's marker before its
+	// start. A failed install exits with its own code and kill-others stops the rest.
+	last := -1
+	for i, r := range res.runnable {
+		if r.install != "" {
+			last = i
+		}
+	}
+	markerDir := ""
+	if last >= 0 {
+		d, err := os.MkdirTemp("", "crew-install-")
+		if err != nil {
+			wire.cleanup()
+			fail("cannot create the install marker dir: %s", err.Error())
+		}
+		markerDir = d
+	}
+	marker := func(i int) string { return shellQuote(filepath.Join(markerDir, strconv.Itoa(i))) }
+	waitFor := func(i int) string { return "until [ -e " + marker(i) + " ]; do sleep 0.2; done; " }
 	commands := make([]fanCmd, len(res.runnable))
+	prev := -1
 	for i, r := range res.runnable {
 		color := paint[r.name]
 		if color == nil {
 			color = func(s string) string { return s }
 		}
-		commands[i] = fanCmd{
-			command: "cd " + shellQuote(serviceDir(r.service)) + " && " + r.resolved,
-			name:    r.name,
-			color:   color,
+		dir := shellQuote(serviceDir(r.service))
+		// `|| exit $?`, not `&&`: a failed install must stop the whole line with its own code (`&&`
+		// would bind only to start's first command when start has `;` or `||`). The subshell keeps a
+		// `cd` inside install out of start.
+		install := ""
+		if r.install != "" {
+			install = "(" + r.install + ") || exit $?; "
 		}
+		display := "cd " + dir + " && " + install + r.resolved
+		command := display
+		if markerDir != "" {
+			command = "cd " + dir + " || exit $?; "
+			if r.install != "" {
+				if prev >= 0 {
+					command += waitFor(prev)
+				}
+				command += install + ": > " + marker(i) + "; "
+				prev = i
+			}
+			command += waitFor(last) + r.resolved
+		}
+		commands[i] = fanCmd{command: command, display: display, name: r.name, color: color}
 	}
 
 	opts := fanOpts{
@@ -119,6 +158,12 @@ func cmdStart(flags *Flags, rest []string) {
 		saveHidden:    func(h []string) { saveHiddenLog(flags, h) },
 		logWrap:       loadLogWrap(flags),
 		saveWrap:      func(w bool) { saveLogWrap(flags, w) },
+	}
+	if markerDir != "" {
+		opts.beforeSpawn = func() { // an [r] restart re-runs every install: start from no markers
+			_ = os.RemoveAll(markerDir)
+			_ = os.Mkdir(markerDir, 0o700)
+		}
 	}
 	// EVERY interactive run is registered + tee'd: output mirrors into per-service log files and
 	// the registry records the pids, so the read-only agent (summoned with the viewer's [a] key)
@@ -176,6 +221,9 @@ func cmdStart(flags *Flags, rest []string) {
 		runDone()
 	}
 	wire.cleanup() // remove the wired temp env files
+	if markerDir != "" {
+		_ = os.RemoveAll(markerDir)
+	}
 	osExit(exitCodeFromEvents(results))
 }
 

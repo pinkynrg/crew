@@ -6,7 +6,7 @@ must {config editor}
 sleep 1
 send $ENTER
 sleep 1
-send [string repeat $DOWN 10]
+send [string repeat $DOWN 11]
 sleep 1
 send $ENTER
 must {AWS_PROFILE}

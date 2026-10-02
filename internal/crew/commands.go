@@ -491,7 +491,7 @@ func Main(argv []string) {
 	case "start":
 		cmdStart(flags, rest)
 	case "install":
-		fail("crew install was removed — `crew start` is the only run command; a service's other tasks aren't wired to a command yet")
+		fail("crew install was removed — `crew start` runs each service's tasks.install before its start command")
 	case "workspace":
 		cmdWorkspace(flags, rest)
 	case "add":

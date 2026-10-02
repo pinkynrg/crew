@@ -1,0 +1,21 @@
+{
+ "version": 2,
+ "services": {
+  "one": {
+   "path": "one",
+   "type": "backend",
+   "tasks": {
+    "install": "if [ -e ../LOCK ]; then echo OVER''LAP; fi; : > ../LOCK; sleep 1; mv ../LOCK ../LOCK.one; echo ONE''INSTALLED",
+    "start": "echo ONE''STARTED; sleep 3"
+   }
+  },
+  "three": {
+   "path": "three",
+   "type": "backend",
+   "tasks": {
+    "install": "if [ -e ../LOCK ]; then echo OVER''LAP; fi; : > ../LOCK; sleep 1; mv ../LOCK ../LOCK.three; echo THREE''INSTALLED",
+    "start": "echo THREE''STARTED; sleep 3"
+   }
+  }
+ }
+}

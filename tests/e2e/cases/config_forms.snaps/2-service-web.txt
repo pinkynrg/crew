@@ -6,10 +6,11 @@
  ▸ web                          │    type             frontend
    api                          │    start            vite --port 3000
    + New service                │    debug            vite --port 3000 --debug
-                                │    env              .envs/{env}.env
- GUARDS  1                      │    tasks (other)    lint=eslint .
-   vpn                          │    guards           (none)
-   + New guard                  │    local            http://localhost:3000
+                                │    install          (optional)
+ GUARDS  1                      │    env              .envs/{env}.env
+   vpn                          │    tasks (other)    lint=eslint .
+   + New guard                  │    guards           (none)
+                                │    local            http://localhost:3000
                                 │
                                 │ ┌─ Environment hosts ───────────────────────────────────────────┐
                                 │ │   x   = web.demo.dev                                          │
@@ -28,7 +29,6 @@
                                 │ │                                                               │
                                 │ │                                                               │
                                 │ └───────────────────────────────────────────────────────────────┘
-                                │
                                 │
                                 │
                                 │

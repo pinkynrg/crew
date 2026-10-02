@@ -1060,6 +1060,7 @@ type runnableCmd struct {
 	task     string
 	values   map[string]string
 	resolved string
+	install  string // tasks.install, run as written before start/debug ("" = none)
 	envFile  string
 }
 
@@ -1086,7 +1087,11 @@ func resolveRun(cfg *OM, task string, members []member, args []string) *runResol
 			skipped = append(skipped, m.name)
 			continue
 		}
-		runnable = append(runnable, &runnableCmd{name: m.name, service: m.service, template: template, task: t})
+		var install string
+		if tasks.Get("install") != nil {
+			install = strings.TrimSpace(anyToStr(tasks.Get("install")))
+		}
+		runnable = append(runnable, &runnableCmd{name: m.name, service: m.service, template: template, task: t, install: install})
 	}
 	if len(runnable) == 0 {
 		fail("no service in target can run task '%s' (all run-less for this task)", task)

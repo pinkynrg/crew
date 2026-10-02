@@ -301,8 +301,9 @@ func configForm(flags *Flags, startSection string) {
 			{key: "type", label: "type", kind: "choice", options: func() []string { return serviceTypes }, desc: "What this service is: a frontend app, a backend service, or other."},
 			{key: "start", label: "start", kind: "text", desc: "The command that starts this service (e.g. \"npm run dev\"). Write {envfile} where it should load the env file."},
 			{key: "debug", label: "debug", kind: "text", desc: "Optional. A command to start this service in debug mode (attachable). If set, the picker offers a \"d\" toggle to launch it instead of start."},
+			{key: "install", label: "install", kind: "text", desc: "Optional. Runs before start/debug on every crew start; installs run one at a time and nothing starts until all have finished. Make it a no-op when nothing changed, e.g. \"[ node_modules/.package-lock.json -nt package-lock.json ] || npm ci\"."},
 			{key: "env", label: "env", kind: "text", desc: "Where this service's env files live, with {env} for the environment name (e.g. \".envs/{env}\")."},
-			{key: "tasks", label: "tasks (other)", kind: "map", kLabel: "task", desc: "Optional extra commands besides start (e.g. a \"debug\" command). Not required."},
+			{key: "tasks", label: "tasks (other)", kind: "map", kLabel: "task", desc: "Optional extra commands besides start/debug/install. Kept as data: crew doesn't run them."},
 			{key: "guards", label: "guards", kind: "multiselect", options: func() []string { return cfgGuards().Keys() }, desc: "Checks that must pass before this service starts. Tick the ones to require."},
 			{key: "local", label: "local", kind: "text", desc: "This service's local URL, e.g. http://localhost:3000."},
 			{key: "match", label: "match", kind: "match", desc: "This service's deployed host per environment (e.g. pre = api.pre.example.com). Fill in the host for each env."},
@@ -316,8 +317,8 @@ func configForm(flags *Flags, startSection string) {
 			p = NewOM()
 		}
 		tasks := p.GetOM("tasks")
-		start, debug := "", ""
-		otherTasks := NewOM() // start + debug are edited in their own fields; the map shows the rest
+		start, debug, install := "", "", ""
+		otherTasks := NewOM() // start + debug + install are edited in their own fields; the map shows the rest
 		if tasks != nil {
 			for _, k := range tasks.Keys() {
 				switch k {
@@ -325,6 +326,8 @@ func configForm(flags *Flags, startSection string) {
 					start = anyToStr(tasks.Get(k))
 				case "debug":
 					debug = anyToStr(tasks.Get(k))
+				case "install":
+					install = anyToStr(tasks.Get(k))
 				default:
 					otherTasks.Set(k, tasks.Get(k))
 				}
@@ -337,7 +340,7 @@ func configForm(flags *Flags, startSection string) {
 		guardsList, _ := StrArr(p.Get("guards"))
 		return edForm{
 			"name": n, "path": p.GetStr("path"), "type": orDefault(p.GetStr("type"), "other"),
-			"start": start, "debug": debug, "env": p.GetStr("env"), "local": p.GetStr("local"),
+			"start": start, "debug": debug, "install": install, "env": p.GetStr("env"), "local": p.GetStr("local"),
 			"match": match, "guards": append([]string{}, guardsList...), "tasks": otherTasks,
 			"overrides": overridesToRows(overrides.GetOM(n)), "localOverrides": overridesToRows(localOverrides.GetOM(n)),
 			"isNew": false, "orig": n,
@@ -345,7 +348,7 @@ func configForm(flags *Flags, startSection string) {
 	}
 	servicesSection.blank = func() edForm {
 		return edForm{
-			"name": "", "path": "", "type": "other", "start": "", "debug": "", "env": "", "local": "",
+			"name": "", "path": "", "type": "other", "start": "", "debug": "", "install": "", "env": "", "local": "",
 			"match": NewOM(), "guards": []string{}, "tasks": NewOM(),
 			"overrides": []ovRow{}, "localOverrides": []ovRow{},
 			"isNew": true, "orig": "",
@@ -379,11 +382,13 @@ func configForm(flags *Flags, startSection string) {
 		setOrDel(proj, "local", strings.TrimSpace(f.str("local")), strings.TrimSpace(f.str("local")) != "")
 		match, _ := f["match"].(*OM)
 		setOrDel(proj, "match", match, match != nil && match.Len() > 0)
-		// the dedicated start + debug fields fold back into tasks.start/tasks.debug; the map holds the rest
+		// the dedicated start/debug/install fields fold back into tasks.start/.debug/.install; the map holds the rest
 		tasks := NewOM()
 		if t, ok := f["tasks"].(*OM); ok {
 			tasks = cloneOM(t)
 		}
+		installCmd := strings.TrimSpace(f.str("install"))
+		setOrDel(tasks, "install", installCmd, installCmd != "") // before start/debug: the key order older crews write
 		if startCmd := strings.TrimSpace(f.str("start")); startCmd != "" {
 			tasks.Set("start", startCmd)
 		} else {

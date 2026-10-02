@@ -1,0 +1,15 @@
+# tasks.install runs before tasks.start, in a subshell: its `cd ..` must not leak into start.
+# fixture: install-task
+source tests/e2e/utils/lib.exp
+crun start env=x
+must {enter run}
+send $ENTER
+must {STARTRAN-svc}
+sleep 1
+set log [exec sh -c "cat $env(TMP)/runs/*/svc.log 2>/dev/null"]
+set i [string first "INSTALLRAN-projects" $log]
+set s [string first "STARTRAN-svc" $log]
+if {$i < 0} { puts "\n!! install did not run (or ran in the wrong dir)"; exit 8 }
+if {$s < $i} { puts "\n!! start ran before install"; exit 8 }
+send $ESC
+want_done

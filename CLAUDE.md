@@ -70,7 +70,8 @@ crew is a Go CLI shipped as a single static binary. `make build` → `.build/cre
 - Placeholders: every `{name}` must resolve (else red error, nothing runs); an unknown
   `key=value` is skipped with a yellow warning;
   shell-quote every substituted value. Hardcode no task names/values beyond the one core task
-  `start` (always streamed) and its per-node `debug` variant (`STREAMED_TASKS`).
+  `start` (always streamed), its per-node `debug` variant (`STREAMED_TASKS`), and `install` (run
+  before either).
 
 ## Config
 
@@ -139,7 +140,7 @@ crew is a Go CLI shipped as a single static binary. `make build` → `.build/cre
 - No groups, no `run` command. `start`/`workspace`/`claude` act on a **multiselect selection**
   (`selectMembers`, preselected with `lastSelection`); services are never named on the CLI there
   (bare tokens ignored with a warning; only `key=value` args consumed). The picked set is saved to
-  `lastSelection` (global, machine-local) and reused across the three. There is NO `install` (or any
+  `lastSelection` (global, machine-local) and reused across the three. There is NO `crew install` (or any
   other) run command — `start` is the sole core task (see Task resolution below); `crew install` now
   errors as a retired command. A legacy `groups` key is dropped on load.
 - Env derivation (replaces the old `envMap`): `{env}` is NOT a static per-service map — it's
@@ -210,8 +211,17 @@ crew is a Go CLI shipped as a single static binary. `make build` → `.build/cre
 - Task resolution per service: `tasks[task]` -> skip (the `runner` fallback + the `defaultBranch` metadata
   key were both retired — legacy values auto-strip on load; see `migrate`). `crew start` (`cmdStart`)
   is the ONLY core run command — task `start`, plus its per-node `debug` variant; a service's OTHER `tasks`
-  are just data with no core command yet (a future generic runner will funnel them). In `crew config`,
-  `start` AND `debug` are **dedicated text fields** (stored as `tasks.start` / `tasks.debug`); the `tasks`
+  are just data with no core command yet (a future generic runner will funnel them) — EXCEPT `install`
+  (`runnableCmd.install`, run as written, no placeholders): `cmdStart` runs it before start/debug as
+  `(install) || exit $?; start` (NOT `&&`, which would bind only to start's first command when start has
+  `;`/`||`). Installs run ONE AT A TIME in config order and NO start runs until the last one finished:
+  marker files in a per-run temp dir chain them (each installer waits for the previous installer's
+  marker; every command waits for the last one's). A failed install exits with its code and kill-others
+  stops the rest. `fanCmd.display` keeps the plumbing off the ▶ line; `fanOpts.beforeSpawn` empties the
+  marker dir so `[r]` re-runs installs. Runs with no install are byte-for-byte unchanged. crew never
+  decides whether an install is needed — the command must be a cheap no-op when current. In `crew config`,
+  `start`, `debug` AND `install` are **dedicated text fields** (stored as `tasks.start` / `tasks.debug` /
+  `tasks.install`); the `tasks`
   map holds only the OTHER tasks. `debug` is optional — filling it is what enables the per-node `d` toggle.
 - **Per-node debug toggle** (`crew start` only): in the graph selector, `d` flips the focused node into
   debug mode — it launches `tasks.debug` instead of `tasks.start`. Only offered when the node is running
@@ -344,7 +354,7 @@ crew is a Go CLI shipped as a single static binary. `make build` → `.build/cre
 - `crew start` always STREAMS: each service spawns and the first exit (any) or Ctrl-C tears the whole
   group down (`runFanout` `killOthers`). There is NO run-to-completion mode and no `longRunning` config —
   `start` is the one core command and is always a service (see `cmdStart`). (`runFanout` still supports a
-  non-kill-others / wait-all mode, but nothing calls it now that `install` is gone.)
+  non-kill-others / wait-all mode, but nothing calls it now that `crew install` is gone.)
 - Runner (`runFanout`): each command spawns `detached` in its own process group; teardown
   signals the group by pgid (`kill(-pgid)`) with SIGTERM -> grace -> SIGKILL escalation, so
   reparented grandchildren (autoreload children, supervisord) die too — unlike a ppid
