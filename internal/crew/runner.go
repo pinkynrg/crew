@@ -909,7 +909,10 @@ func (v *viewerState) summonAgent() {
 	_, rightW, paneH, _ := v.splitDims()
 	cmd := exec.Command("claude", v.agentCfg.cliArgs...)
 	cmd.Dir = v.agentCfg.cwd
-	cmd.Env = os.Environ()
+	// No window title: the pane has none, and claude's "✳ <session name>" title trips the emulator
+	// (it takes the 0x9C inside ✳'s UTF-8 for an 8-bit string terminator and prints the rest as
+	// phantom text in the input line).
+	cmd.Env = append(os.Environ(), "CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1")
 	pane, err := startPane(cmd, rightW, paneH, &v.dirty, v.mu)
 	if err != nil {
 		v.notice(cRed("could not launch claude: " + err.Error()))

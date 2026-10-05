@@ -397,6 +397,9 @@ crew is a Go CLI shipped as a single static binary. `make build` → `.build/cre
   (`2006-01-02 15:04:05.000`) whatever `d` shows — the time axis an agent reading a paste needs — and the
   run log files (tee + `_guards.log`) are written through `stampWriter`, the same stamp per line, so the
   MCP `logs` tool carries it too. Screen goldens normalize the column to `HH:MM:SS.mmm` (run.sh's sed).
+  **Agent pane**: `summonAgent` starts claude with `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` — charmbracelet/x/vt
+  reads the 0x9C inside the UTF-8 of claude's `✳ <session name>` title as an 8-bit ST and prints the rest of
+  the title as phantom text at the cursor (the input line).
 - **Update offer** (`offerUpgrade`, upgrade.go): before the everyday commands (`list`/`start`/`workspace`/
   `graph`/`resolve`/`config`/`check`/`pull`) crew checks the latest release at most once a day
   (`update-check.json` beside the config — its mtime is the last check, written BEFORE the fetch so being
