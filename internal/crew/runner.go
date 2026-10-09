@@ -959,7 +959,7 @@ func (v *viewerState) paintSplit() {
 	}
 	leftW, rightW, paneH, rightX0 := v.splitDims()
 	if v.agent.w != rightW || v.agent.h != paneH {
-		v.agent.resize(rightW, paneH, v.mu)
+		v.agent.resizeLocked(rightW, paneH) // paint runs under v.mu
 	}
 	// left: viewer body (leftW wide) with its footer on the last row
 	all := v.screenRows()

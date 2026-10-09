@@ -72,6 +72,14 @@ func (p *splitPane) resize(w, h int, mu *sync.Mutex) {
 	_ = pty.Setsize(p.pty, &pty.Winsize{Cols: uint16(w), Rows: uint16(h)})
 }
 
+// resizeLocked is resize for a caller that already holds mu (the paint path) — mu isn't reentrant,
+// so locking it again there deadlocks the whole viewer.
+func (p *splitPane) resizeLocked(w, h int) {
+	p.w, p.h = w, h
+	p.emu.Resize(w, h)
+	_ = pty.Setsize(p.pty, &pty.Winsize{Cols: uint16(w), Rows: uint16(h)})
+}
+
 func (p *splitPane) close() {
 	if p.cmd != nil && p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()

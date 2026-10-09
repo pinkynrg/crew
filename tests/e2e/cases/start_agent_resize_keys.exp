@@ -1,0 +1,25 @@
+# resizing the terminal while the claude pane is open must never freeze crew start: the paint path
+# re-sizes the pane while already holding the viewer lock, which used to lock it again and deadlock
+# (keys dead, screen frozen — e.g. after waking from sleep resized the window). Many resizes race
+# the repaint ticker against the resize handler, then a key must still be answered.
+# fixture: startagent
+source tests/e2e/utils/lib.exp
+set env(PATH) "$env(TMP)/bin:$env(PATH)"
+crun start env=x
+must {enter run}
+send "\r"
+must {A-up}
+send "a"
+must {STUB-CLAUDE-READY}
+send "\x11"
+for {set i 0} {$i < 60} {incr i} {
+  if {$i % 2} { set sz "rows 40 cols 100" } else { set sz "rows 34 cols 88" }
+  exec stty {*}$sz < $spawn_out(slave,name)
+  after 70
+  drain
+}
+exec stty rows 40 cols 100 < $spawn_out(slave,name)
+send "a"
+must {\[a\] agent}
+send "\x03"
+want_done

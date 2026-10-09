@@ -31,7 +31,7 @@ set snapN 0
 # spawn `crew --config <fixture> <args...>` in the PTY (global spawn_id so must/want_exit see it).
 # Output is recorded into $TMP/raw.1 from the start so a later `snap` has the full first screen.
 proc crun {args} {
-  global CREWBIN env spawn_id snapN
+  global CREWBIN env spawn_id spawn_out snapN
   set snapN 1
   log_file -noappend "$env(TMP)/raw.1"
   eval spawn -noecho $CREWBIN --config $env(CONFIG) $args
