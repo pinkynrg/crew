@@ -164,6 +164,7 @@ func cmdStart(flags *Flags, rest []string) {
 		logTime:       loadLogTime(flags),
 		saveTime:      func(t bool) { saveLogTime(flags, t) },
 	}
+	opts.beforeRestart = wire.rewire // an [r] restart re-reads every {envfile} base: env edits take effect
 	if markerDir != "" {
 		opts.beforeSpawn = func() { // an [r] restart re-runs every install: start from no markers
 			_ = os.RemoveAll(markerDir)

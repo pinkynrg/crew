@@ -1320,12 +1320,37 @@ func runGuards(cfg *OM, names []string, services func(string) *OM) {
 
 type wireResult struct {
 	cleanup  func()
+	rewire   func() []string // re-materializes every wired env file in place — an [r] restart picks up env edits
 	warnings []string
+}
+
+// One materialized {envfile}: its base file, the temp copy the command reads, and what is wired into it.
+type wireJob struct {
+	name, base, out string
+	peers           []wirePeer
+	vars            *OM
+}
+
+// The wired text of one env file: base (CRLF/CR normalized), co-running peers' URLs swapped, overrides applied.
+func (j wireJob) render() (string, []string, error) {
+	data, err := os.ReadFile(j.base)
+	if err != nil {
+		return "", nil, err
+	}
+	// Normalize CRLF/CR -> LF so `. {envfile}` doesn't choke on ^M.
+	baseText := regexp.MustCompile("\r\n?").ReplaceAllString(string(data), "\n")
+	wired, _, ovWarnings := applyEnvOverridesText(wireText(baseText, j.peers), j.vars)
+	var warnings []string
+	for _, w := range ovWarnings {
+		warnings = append(warnings, j.name+": "+w)
+	}
+	return wired, warnings, nil
 }
 
 // For each runnable whose command uses {envfile}, load its base env, rewrite any URL pointing at
 // a CO-RUNNING peer to that peer's `local`, apply env overrides, and materialize a FRESH temp
-// file per run. {envfile} in the command is replaced with the temp path.
+// file per run. {envfile} in the command is replaced with the temp path. The temp path stays the
+// same for the whole run, so rewire just rewrites its contents from the (possibly edited) base.
 func wireRun(userPath string, runnable []*runnableCmd, members []member, overrides *OM, overridesOff *OM) wireResult {
 	var peers []wirePeer
 	for _, m := range members {
@@ -1340,7 +1365,7 @@ func wireRun(userPath string, runnable []*runnableCmd, members []member, overrid
 		peers = append(peers, wirePeer{name: m.name, tokens: serviceIdentity(m.service).tokens, origin: origin, local: local})
 	}
 	tmpDir := filepath.Join(crewHomeFor(userPath), "tmp")
-	var tempPaths []string
+	var jobs []wireJob
 	var warnings []string
 	var running []string
 	for _, r := range runnable {
@@ -1367,28 +1392,38 @@ func wireRun(userPath string, runnable []*runnableCmd, members []member, overrid
 		if arr, ok := StrArr(overridesOff.Get(r.name)); ok {
 			off = arr
 		}
-		overrideVars := overrideVarsFor(overrides, r.name, running, off)
-		data, err := os.ReadFile(basePath)
+		j := wireJob{name: r.name, base: basePath, out: filepath.Join(tmpDir, sanitize(r.name)+".env"),
+			peers: myPeers, vars: overrideVarsFor(overrides, r.name, running, off)}
+		wired, ws, err := j.render()
 		if err != nil {
 			fail("service '%s': cannot read env file %s: %s", r.name, basePath, err.Error())
 		}
-		// Normalize CRLF/CR -> LF so `. {envfile}` doesn't choke on ^M.
-		baseText := regexp.MustCompile("\r\n?").ReplaceAllString(string(data), "\n")
+		warnings = append(warnings, ws...)
 		_ = os.MkdirAll(tmpDir, 0o755)
-		out := filepath.Join(tmpDir, sanitize(r.name)+".env")
-		wired, _, ovWarnings := applyEnvOverridesText(wireText(baseText, myPeers), overrideVars)
-		for _, w := range ovWarnings {
-			warnings = append(warnings, r.name+": "+w)
-		}
-		_ = os.WriteFile(out, []byte(wired), 0o644)
-		tempPaths = append(tempPaths, out)
-		r.resolved = strings.ReplaceAll(r.resolved, "{envfile}", shellQuote(out))
+		_ = os.WriteFile(j.out, []byte(wired), 0o644)
+		jobs = append(jobs, j)
+		r.resolved = strings.ReplaceAll(r.resolved, "{envfile}", shellQuote(j.out))
 	}
 	return wireResult{
 		cleanup: func() {
-			for _, p := range tempPaths {
-				_ = os.Remove(p)
+			for _, j := range jobs {
+				_ = os.Remove(j.out)
 			}
+		},
+		// A base file that vanished or can't be read mid-run must not kill the viewer: keep the
+		// previous wired copy and say so.
+		rewire: func() []string {
+			var warnings []string
+			for _, j := range jobs {
+				wired, ws, err := j.render()
+				if err != nil {
+					warnings = append(warnings, fmt.Sprintf("%s: cannot reload env file %s (%s) — keeping the previous one", j.name, j.base, err.Error()))
+					continue
+				}
+				warnings = append(warnings, ws...)
+				_ = os.WriteFile(j.out, []byte(wired), 0o644)
+			}
+			return warnings
 		},
 		warnings: warnings,
 	}

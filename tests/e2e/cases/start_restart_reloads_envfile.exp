@@ -1,0 +1,19 @@
+# an [r] restart re-reads the {envfile} base: an env file edited while the stack runs takes effect on
+# the restart, no exit + re-pick. Deleting it mid-run keeps the previous wired copy with a warning.
+# fixture: envfile-reload
+source tests/e2e/utils/lib.exp
+set env(CREW_KILL_GRACE_MS) 700
+crun start env=x
+must {enter run}
+send $ENTER
+must {GREETING=before}
+exec sh -c "echo GREETING=after > $env(TMP)/projects/svc/.envs/x.env"
+send "r"
+must {restarting stack}
+must {GREETING=after}
+exec rm $env(TMP)/projects/svc/.envs/x.env
+send "r"
+must {cannot reload env file}
+must {GREETING=after}
+send $ESC
+want_done

@@ -203,6 +203,11 @@ crew is a Go CLI shipped as a single static binary. `make build` → `.build/cre
   from connectivity AND env derivation — so a backend that merely links to the frontend can't make an
   unrelated selection look "connected" nor seed the frontend's env. Only `frontend→frontend` edges
   (one app embedding another) stay real. Uses the declared `type` only; no per-edge config/marker.
+- **`[r]` restart re-wires**: `wireRun` returns a `rewire` hook (`fanOpts.beforeRestart`, run by `doRelaunch`
+  before the restart's guards + spawn) that re-reads each `{envfile}` base and rewrites its temp copy IN PLACE
+  (same path, so the already-resolved commands need no change) — an env file edited mid-run takes effect on
+  `r`. A base that vanished/can't be read keeps the previous copy + a yellow viewer notice (never `fail()` —
+  it would kill the viewer). Config (overrides, tasks) is NOT reloaded: loaded once per `crew start`.
 - `env` (per service): the env-file path template — the SINGLE source of truth for env-file location
   (drives `{envfile}` wiring AND graph/derivation discovery). `serviceEnvFiles` resolves it by globbing
   `{env}` (captured consistently across every occurrence, so `.envs/{env}`, `.envs/{env}-slug.env`,

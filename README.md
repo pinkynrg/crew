@@ -357,6 +357,11 @@ No. It *reads* your env file and writes a wired **copy** to `~/.config/crew/tmp/
 swapped to `localhost` for the peers you're running), passes that path to your start command via
 `{envfile}`, and deletes it on teardown. Your checkout and its committed env files are never touched.
 
+**I edited an env file while the stack runs — do I have to quit and `crew start` again?**
+No. Press `r` in the log viewer: the restart re-reads every env file and rewrites the wired copies
+before re-spawning, so the edit takes effect. (Config changes — overrides, tasks — still need a fresh
+`crew start`.)
+
 **Where do my secrets live?**
 In your own env files, same as today - crew only reads them. The committable `config.json` holds no
 secrets; machine-local bits (services dir, remembered selection) live in a gitignored `local.json`.

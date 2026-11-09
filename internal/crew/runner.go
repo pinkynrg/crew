@@ -59,7 +59,10 @@ type fanProc struct {
 }
 
 type fanOpts struct {
-	beforeSpawn   func() // runs before every spawn of the slice (initial + each [r] restart)
+	beforeSpawn func() // runs before every spawn of the slice (initial + each [r] restart)
+	// beforeRestart runs on each [r] restart only, before its guards + spawn; the warnings it returns
+	// are shown in the viewer like the pre-run notices.
+	beforeRestart func() []string
 	killOthers    bool
 	announceExits bool
 	interactive   bool
@@ -440,7 +443,16 @@ func runFanout(commands []fanCmd, o fanOpts) []exitEvent {
 	}
 	// doRelaunch resets the per-run state and launches the same slice again (fresh guards + spawn).
 	doRelaunch = func() {
+		var notes []string
+		if o.beforeRestart != nil {
+			notes = o.beforeRestart()
+		}
 		mu.Lock()
+		if view != nil {
+			for _, n := range notes {
+				view.notice(cYellow(n))
+			}
+		}
 		// Cancel the teardown's pending grace-SIGKILL timers — they close over `live`, and would
 		// otherwise fire a few seconds into the restart and kill the freshly re-spawned services.
 		for _, t := range timers {

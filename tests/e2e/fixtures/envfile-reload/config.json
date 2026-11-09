@@ -1,0 +1,4 @@
+{ "version": 2,
+  "services": {
+    "svc": { "path": "svc", "type": "backend", "env": ".envs/{env}.env",
+             "tasks": { "start": "set -a && . {envfile} && set +a && echo GREETING=$GREETING; sleep 30" } } } }
